@@ -892,10 +892,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "dsz-linux"
+name = "dualwave"
 version = "0.4.0"
 dependencies = [
+ "cc",
  "ds-proto",
+ "libc",
+ "log",
+ "pkg-config",
 ]
 
 [[package]]

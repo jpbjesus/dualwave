@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/ds-proto", "crates/dsz", "crates/dsz-linux"]
-default-members = ["crates/ds-proto", "crates/dsz-linux"]
+members = ["crates/ds-proto", "crates/dsz", "crates/dualwave"]
+default-members = ["crates/ds-proto", "crates/dualwave"]
 
 [workspace.package]
 edition = "2021"

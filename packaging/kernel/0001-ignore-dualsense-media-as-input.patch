@@ -1,0 +1,33 @@
+Subject: [PATCH] HID: playstation: leave non-state DualSense Bluetooth reports to hidraw
+
+DualSense Bluetooth microphone packets use report ID 0x31 and the same
+78-byte size and CRC as controller state. Their type nibble is 2 instead
+of state type 1 (or the compatibility type 0). Parsing these as state
+causes false buttons/touches, battery updates and microphone mute writes.
+
+After CRC validation, skip controller-state parsing for non-state types.
+Return success so HID core still delivers the report to hidraw clients.
+This does not enable or alter Bluetooth audio on its own.
+
+Experimental: not installed or hardware-validated. Prepared against the
+Linux master source retrieved on 2026-10-23 from:
+https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/refs/heads/master/drivers/hid/hid-playstation.c
+Kernel-file changes retain SPDX-License-Identifier: GPL-2.0-or-later.
+
+--- a/drivers/hid/hid-playstation.c
++++ b/drivers/hid/hid-playstation.c
+@@ -1463,6 +1463,14 @@
+ 			return -EILSEQ;
+ 		}
+ 
++		/* Media packets share report ID 0x31 with controller state.
++		 * Leave them available to hidraw without interpreting audio as
++		 * buttons, touch contacts, battery status or microphone mute.
++		 * Some firmware uses type 0 for state; type 1 is the normal form.
++		 */
++		if ((data[1] & 0x0f) != 0 && (data[1] & 0x0f) != 1)
++			return 0;
++
+ 		ds_report = (struct dualsense_input_report *)&data[2];
+ 	} else {
+ 		hid_err(hdev, "Unhandled reportID=%d\n", report->id);

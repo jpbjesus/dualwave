@@ -1,26 +1,152 @@
-# Linux fork of DSZ — branding pending
+# DualWave
 
-This fork targets CachyOS / Arch Linux and the standard DualSense, initially
-focusing on Bluetooth headset playback and microphone capture through PipeWire.
-The new project name has not been selected yet.
+Native Linux audio for the standard PlayStation DualSense over Bluetooth.
+Forked from [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz), with the
+upstream history, protocol implementation, copyright notices and third-party
+licenses preserved. The original Windows application remains in `crates/dsz`.
 
-**Status: port foundation only. Linux audio and microphone support do not work yet.**
-The native diagnostic lists connected standard DualSense controllers without
-opening devices or sending reports:
+## Status
+
+Experimental CLI prototype for CachyOS / Arch Linux with PipeWire. There is no
+production GUI yet.
+
+| Feature | Current status |
+| --- | --- |
+| Bluetooth discovery and status | Tested with standard DualSense, firmware 6.30 |
+| Stereo headphone playback over Bluetooth | Confirmed audible in both channels on the controller jack |
+| Bluetooth microphone decoding | Hardware probe decoded 1,198 CRC-checked headset packets in 12 seconds, with no rejected packets or concealed gaps |
+| Native PipeWire endpoints | Sink/source registration and simultaneous playback/capture tested; a 10-second capture received nonzero samples without saving audio |
+| Physical Mute button | Implemented with queue clearing; hardware interaction still needs validation |
+| Controller input while audio runs | **Unavailable in this prototype**: evdev devices are isolated to keep microphone packets away from other input readers |
+| Steam coexistence, reconnection and GUI | Not implemented; close Steam before starting audio |
+
+Nonzero microphone samples confirm transport, not intelligible voice. Voice
+quality and reliable hardware mute are not yet confirmed. In addition, the
+current Linux `hid-playstation` parser can interpret media packets as state and
+toggle hardware mute or update battery status. Grabbing evdev protects apps,
+but cannot prevent those kernel-side effects.
+
+The input limitation matters: this version is an audio proof of concept, not
+ready for playing games with the same controller while the audio bridge runs.
+A validated input path and kernel/Steam coexistence are required before that use.
+Headphones must be plugged in before starting playback. Audio stops being sent
+when the jack is unplugged; automatic selection of a newly plugged headset mic
+and controller reconnection still need work. USB audio uses the controller's
+existing USB audio device and is outside this Bluetooth bridge.
+
+## Build on CachyOS / Arch
+
+Install the development dependencies, then build as your normal user:
 
 ```sh
-cargo run -p dsz-linux -- list
+sudo pacman -S --needed base-devel rust pipewire libpipewire opus
+cargo build --release -p dualwave --locked
 ```
 
-The intended next steps are a Linux hidraw transport, reuse of the upstream
-Opus and streaming logic, and PipeWire playback/capture nodes. Duplex audio,
-reconnection, mute and coexistence with the Linux controller driver need hardware
-validation. No udev rules or system configuration changes are installed yet.
+The application links to the system PipeWire and Opus libraries. It does not
+install system configuration or start a background service automatically.
 
-The fork preserves the history, MIT copyright notice and third-party licenses
-of [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz). The Windows application
-below is the upstream baseline; its features are not Linux support claims.
-Use `cargo run -p dsz` explicitly when developing that application on Windows.
+```sh
+cargo run -p dualwave -- list
+cargo run -p dualwave -- probe
+cargo run -p dualwave -- tone --seconds 10 --volume 60
+cargo run -p dualwave -- mic-probe --source headset --seconds 10
+cargo run -p dualwave -- run --source auto --volume 60
+```
+
+For `run`, select **DualWave Headphones** for playback and **DualWave Microphone**
+for recording in your desktop or application's sound settings. Recording is
+admitted only while an application uses the PipeWire microphone and it is not
+muted. The source choices are `auto`, `builtin`, and `headset`; `auto` lets the
+controller choose. `--volume` accepts 0–100 and controls the headphone hardware
+volume. Ctrl+C/SIGTERM stops the stream and disables microphone admission.
+`--seconds N` bounds any test or session. Neither normal operation nor probes
+save microphone audio.
+
+`list` reads sysfs only. `probe` reads status and a CRC-checked firmware feature
+report. `pipewire-probe --seconds 10` exposes the two endpoints without opening
+or writing to any controller. No audio is sent unless you explicitly start
+`tone`, `mic-probe`, or `run`.
+
+### Input permissions for experimental audio mode
+
+Upstream's `AGENTS.md` requires Steam to be closed before speaker/microphone
+probes, because microphone packets can be mistaken for controller input. The
+prototype also grabs this controller's evdev devices temporarily and releases
+them on exit. This prevents false touch/button events reaching desktop apps.
+It deliberately does not forward gameplay input yet.
+
+Access is limited to Sony's Bluetooth standard DualSense (`054c:0ce6`). To give
+the active desktop user access to its hidraw and input nodes, install the
+provided rule, reload udev and reconnect the controller:
+
+```sh
+sudo install -m 644 packaging/70-dualwave.rules /etc/udev/rules.d/70-dualwave.rules
+sudo udevadm control --reload-rules
+```
+
+Reconnect the controller after these commands. Do not run DualWave as root or
+add your user to the global `input` group. The rule grants access only on the
+active local seat. Removing the rule and reconnecting restores the prior
+permissions. A second DualWave process cannot claim the same controller.
+
+### Kernel media-packet filter (experimental)
+
+[`packaging/kernel/0001-ignore-dualsense-media-as-input.patch`](packaging/kernel/0001-ignore-dualsense-media-as-input.patch)
+adds a type check after the existing Bluetooth CRC check in `hid-playstation`.
+State types 0/1 keep their existing path; other types bypass state parsing while
+remaining available to hidraw. This targets false input, battery and hardware
+mute updates. It does not turn audio on by itself and it does not fix Steam's
+own raw-HID parsing.
+
+The patch was prepared against the Linux master source retrieved on 2026-10-23
+and a patched module compiled successfully against CachyOS `7.2.9-2-cachyos`
+headers using LLVM. **It has not been loaded or hardware-tested.** The driver
+currently loaded in this session is unchanged. The patch's kernel changes are
+GPL-2.0-or-later, matching the original kernel file; the userspace bridge remains
+MIT. Inspect and adapt it to the exact kernel source before installing a custom
+module/kernel. Reference: [Linux driver source](https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/refs/heads/master/drivers/hid/hid-playstation.c).
+
+## Validation
+
+```sh
+cargo test -p ds-proto -p dualwave --locked
+cargo clippy -p dualwave --all-targets --locked -- -D warnings
+```
+
+The C SPSC ring can also be exercised with address/undefined-behavior sanitizers
+(the flags below use the Arch header paths):
+
+```sh
+cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I/usr/include/pipewire-0.3 -I/usr/include/spa-0.2 \
+  crates/dualwave/tests/pipewire_ring.c -lpipewire-0.3 -lpthread -lm \
+  -o /tmp/dualwave-ring-test
+/tmp/dualwave-ring-test
+```
+
+The ring test transfers 500,000 stereo frames concurrently and crosses index
+wraparound. Strict Clippy on `ds-proto --all-targets` additionally reports two
+pre-existing upstream test lints (`identity_op`, `useless_vec`); the port's own
+strict Clippy check passes without changing those upstream tests.
+
+The upstream Windows app still needs its own Windows/MSVC workspace checks.
+A Linux build does not validate its Windows integrations. The Linux port reuses
+upstream CRC/report builders, Opus settings and the measured 16:15 audio
+resampler; audio-only control reports leave triggers, rumble and lighting flags
+invalid. Playback buffering and microphone loss concealment are bounded, but
+long-running clock drift, adapter compatibility and crash cleanup are not yet
+production-validated. SIGKILL cannot run microphone cleanup; reconnect the
+controller after a forced termination.
+
+## Attribution
+
+DualWave is an independent Linux fork, not an official Sony product. DSZ's
+original MIT notice remains in [LICENSE](LICENSE); libopus, eframe and the
+OpenController drawings retain their original licenses. Protocol references
+are listed in the upstream documentation below. The native PipeWire bridge
+uses the official [stream API](https://docs.pipewire.org/group__pw__stream.html)
+and [audio stream tutorial](https://docs.pipewire.org/page_tutorial4.html).
 
 ## Upstream documentation: DSZ - DualSense Zen
 

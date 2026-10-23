@@ -1,0 +1,15 @@
+[package]
+name = "dualwave"
+description = "Native Linux DualSense Bluetooth headset audio and microphone bridge"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+ds-proto = { path = "../ds-proto" }
+libc = "0.2"
+log = "0.4"
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"

@@ -1,9 +1,0 @@
-[package]
-name = "dsz-linux"
-description = "Native Linux DualSense Bluetooth diagnostics and audio port foundation"
-edition.workspace = true
-version.workspace = true
-license.workspace = true
-
-[dependencies]
-ds-proto = { path = "../ds-proto" }
