@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/ds-proto", "crates/dsz"]
+members = ["crates/ds-proto", "crates/dsz", "crates/dsz-linux"]
+default-members = ["crates/ds-proto", "crates/dsz-linux"]
 
 [workspace.package]
 edition = "2021"

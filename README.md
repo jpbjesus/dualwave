@@ -1,4 +1,28 @@
-# DSZ - DualSense Zen
+# Linux fork of DSZ — branding pending
+
+This fork targets CachyOS / Arch Linux and the standard DualSense, initially
+focusing on Bluetooth headset playback and microphone capture through PipeWire.
+The new project name has not been selected yet.
+
+**Status: port foundation only. Linux audio and microphone support do not work yet.**
+The native diagnostic lists connected standard DualSense controllers without
+opening devices or sending reports:
+
+```sh
+cargo run -p dsz-linux -- list
+```
+
+The intended next steps are a Linux hidraw transport, reuse of the upstream
+Opus and streaming logic, and PipeWire playback/capture nodes. Duplex audio,
+reconnection, mute and coexistence with the Linux controller driver need hardware
+validation. No udev rules or system configuration changes are installed yet.
+
+The fork preserves the history, MIT copyright notice and third-party licenses
+of [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz). The Windows application
+below is the upstream baseline; its features are not Linux support claims.
+Use `cargo run -p dsz` explicitly when developing that application on Windows.
+
+## Upstream documentation: DSZ - DualSense Zen
 
 **DSZ - DualSense Zen** is a fast, native Windows companion for the PlayStation DualSense, DualSense Edge, and DualShock 4 controllers, written in Rust: lighting, adaptive triggers, Bluetooth haptics and speaker audio, gyro and touchpad mouse, button mapping, virtual Xbox 360 / DualSense / DualShock 4 controllers, and per-game profiles.
 
