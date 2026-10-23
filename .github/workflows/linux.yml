@@ -8,10 +8,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libopus-dev pkg-config
-      - run: cargo test -p ds-proto -p dualwave --locked
+      - run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libopus-dev libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev pkg-config
+      - run: cargo test --workspace --locked
       - run: cargo clippy -p dualwave --all-targets --locked -- -D warnings
-      - run: cargo build --release -p dualwave --locked
+      - run: cargo build --release -p dualwave -p dsz --locked
       - name: Check kernel packet routing
         run: |
           cc -std=c11 -Wall -Wextra -Werror packaging/kernel/test-routing.c -o /tmp/dualwave-routing-test
@@ -22,3 +22,11 @@ jobs:
             $(pkg-config --cflags libpipewire-0.3) crates/dualwave/tests/pipewire_ring.c \
             $(pkg-config --libs libpipewire-0.3) -lpthread -lm -o /tmp/dualwave-ring-test
           /tmp/dualwave-ring-test
+      - name: Check installer and USB/IP broker
+        run: python3 -m unittest discover -s packaging/tests -v
+      - name: Check GUI audio buffer safety
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O2 -fsanitize=address,undefined \
+            $(pkg-config --cflags libpipewire-0.3) crates/dsz/tests/pipewire_ring.c \
+            $(pkg-config --libs libpipewire-0.3) -lpthread -lm -o /tmp/dualwave-gui-ring-test
+          /tmp/dualwave-gui-ring-test

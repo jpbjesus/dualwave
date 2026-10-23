@@ -45,7 +45,7 @@ pub fn install(ctx: &egui::Context, scale: f32) {
         .cloned()
         .unwrap_or_default();
 
-    if let Some(bytes) = load_font(&[r"C:\Windows\Fonts\segoeui.ttf"]) {
+    if let Some(bytes) = load_font(&[r"C:\Windows\Fonts\segoeui.ttf", "/usr/share/fonts/noto/NotoSans-Regular.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf"]) {
         fonts
             .font_data
             .insert("segoe".into(), Arc::new(FontData::from_owned(bytes)));
@@ -58,6 +58,8 @@ pub fn install(ctx: &egui::Context, scale: f32) {
     let mut sb = Vec::new();
     if let Some(bytes) = load_font(&[
         r"C:\Windows\Fonts\seguisb.ttf",
+        "/usr/share/fonts/noto/NotoSans-SemiBold.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
         r"C:\Windows\Fonts\segoeuib.ttf",
     ]) {
         fonts
@@ -66,18 +68,20 @@ pub fn install(ctx: &egui::Context, scale: f32) {
         sb.push("segoe_sb".to_string());
     }
     // Symbols (arrows, shapes) for icons and glyphs.
-    if let Some(bytes) = load_font(&[r"C:\Windows\Fonts\seguisym.ttf"]) {
-        fonts
-            .font_data
-            .insert("segoe_sym".into(), Arc::new(FontData::from_owned(bytes)));
-        fonts
-            .families
-            .get_mut(&FontFamily::Proportional)
-            .unwrap()
-            .push("segoe_sym".into());
-        sb.push("segoe_sym".into());
+    for (name, paths) in [("segoe_sym", &[r"C:\Windows\Fonts\seguisym.ttf", "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf"][..]), ("noto_sym", &["/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf"][..])] {
+        if let Some(bytes) = load_font(paths) {
+            fonts
+                .font_data
+                .insert(name.into(), Arc::new(FontData::from_owned(bytes)));
+            fonts
+                .families
+                .get_mut(&FontFamily::Proportional)
+                .unwrap()
+                .push(name.into());
+            sb.push(name.into());
+        }
     }
-    if let Some(bytes) = load_font(&[r"C:\Windows\Fonts\consola.ttf"]) {
+    if let Some(bytes) = load_font(&[r"C:\Windows\Fonts\consola.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf"]) {
         fonts
             .font_data
             .insert("consolas".into(), Arc::new(FontData::from_owned(bytes)));

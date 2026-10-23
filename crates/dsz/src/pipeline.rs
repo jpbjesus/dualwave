@@ -872,7 +872,7 @@ impl Pipeline {
                 || (device.microphone.enabled() && profile.microphone.mute_button))
         {
             let mut t = device.toggles.lock();
-            t.mute_engaged = !t.mute_engaged;
+            t.mute_engaged = device.next_mute_state(t.mute_engaged);
             drop(t);
             // Gate capture immediately: the idle media clock can otherwise
             // sleep for 100 ms after the Mute LED has already changed.

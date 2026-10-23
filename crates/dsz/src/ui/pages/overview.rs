@@ -252,7 +252,7 @@ impl App {
                 crate::i18n::tr("Choose what games see under Virtual controller: this controller as-is, an Xbox 360 pad, or a DualSense with game haptics. Mappings that hide a button or press a controller button need one of the virtual pads."),
                 crate::i18n::tr("Haptics & audio streams to the actuators over Bluetooth only while there is something to play. The rest of the time the controller's own rumble emulation plays rumble."),
                 crate::i18n::tr("Profiles & games switches profiles per game. Games with native DualSense support switch to your DualSense profile without a rule."),
-                crate::i18n::tr("Close other controller apps (DS4Windows and the like) while DSZ runs; only one app can drive the controller."),
+                crate::i18n::tr(if cfg!(target_os = "linux") { "Close other controller tools while DualWave runs; competing writes can change lights, triggers, and audio." } else { "Close other controller apps (DS4Windows and the like) while DualWave runs; only one app can drive the controller." }),
                 crate::i18n::tr("Steam Input also reads and writes the controller. If buttons double up, or lights and triggers flicker in a Steam game, turn Steam Input off for that game."),
                 crate::i18n::tr("Game mods that drive triggers and lights over UDP connect on port 6969 (Settings)."),
             ] {
@@ -308,7 +308,7 @@ impl App {
             );
             ui.add_space(8.0);
             ui.label(RichText::new(crate::i18n::tr("Pair over Bluetooth")).font(heading(15.0)));
-            muted(ui, crate::i18n::tr("Hold Create and PS until the lightbar flashes, then add it from Windows Settings → Bluetooth & devices. A USB cable works too."));
+            muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Hold Create and PS until the lightbar flashes, then pair it in your desktop Bluetooth settings. A USB cable works too." } else { "Hold Create and PS until the lightbar flashes, then add it from Windows Settings → Bluetooth & devices. A USB cable works too." }));
         });
         ui.add_space(12.0);
         self.tips(ui);

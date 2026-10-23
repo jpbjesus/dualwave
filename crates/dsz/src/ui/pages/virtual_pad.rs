@@ -130,12 +130,12 @@ fn driver_row(
             }
             Some(install::Status::Installing) => {
                 ui.spinner();
-                muted(ui, crate::i18n::tr("Finish the installer that opened (Windows asks for admin first)."));
+                muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Complete the system setup window. Your desktop asks for administrator authorization." } else { "Finish the installer that opened (Windows asks for admin first)." }));
             }
             Some(install::Status::Finished { ok: true }) => muted(
                 ui,
                 if pkg == install::Package::HidHide {
-                    crate::i18n::tr("Installed. Restart Windows if the installer asked to; this page updates on its own.")
+                    crate::i18n::tr(if cfg!(target_os = "linux") { "Setup finished. Reconnect the controller if requested; this page updates automatically." } else { "Installed. Restart Windows if the installer asked to; this page updates on its own." })
                 } else {
                     crate::i18n::tr("Installed. This page updates on its own in a few seconds.")
                 },
@@ -216,7 +216,7 @@ impl App {
         page_header(
             ui,
             crate::i18n::tr("Virtual controller"),
-            crate::i18n::tr("Give games an Xbox 360 or DualSense controller driven by this one, with your mappings applied, while the real controller is hidden from them."),
+            crate::i18n::tr(if cfg!(target_os = "linux") { "Give games an Xbox 360, DualSense, or DualShock 4 controller with your mappings applied. Exclusive input suppresses physical input streams; device nodes remain visible." } else { "Give games an Xbox 360 or DualSense controller driven by this one, with your mappings applied, while the real controller is hidden from them." }),
         );
         let drivers = self.driver_info();
 
@@ -267,12 +267,12 @@ impl App {
                                 pill(ui, crate::i18n::tr("Xbox 360 kept"), FAINT);
                                 let player = slot
                                     .map(|s| crate::localized_format!("XInput player {}", "Jogador XInput {}", s + 1))
-                                    .unwrap_or_else(|| crate::i18n::tr("its XInput slot").into());
+                                    .unwrap_or_else(|| crate::i18n::tr(if cfg!(target_os = "linux") { "its virtual controller" } else { "its XInput slot" }).into());
                                 muted(
                                     ui,
                                     &crate::localized_format!(
                                         "idle, holding {player}{}; presses Xbox buttons", "ocioso, mantendo {player}{}; envia botões Xbox",
-                                        if hidden { crate::i18n::tr(", hidden from games") } else { "" }
+                                        if hidden { crate::i18n::tr(if cfg!(target_os = "linux") { ", input suppressed" } else { ", hidden from games" }) } else { "" }
                                     ),
                                 );
                             });
@@ -280,10 +280,10 @@ impl App {
                         if st.active.is_some() {
                             if st.hidden {
                                 ui.horizontal(|ui| {
-                                    pill(ui, crate::i18n::tr("Real controller hidden"), ACCENT);
-                                    muted(ui, "HidHide");
+                                    pill(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Physical input exclusive" } else { "Real controller hidden" }), ACCENT);
+                                    muted(ui, if cfg!(target_os = "linux") { "DualWave" } else { "HidHide" });
                                 });
-                                muted(ui, crate::i18n::tr("Apps that already had the controller open keep it until they restart (Steam, an open game)."));
+                                muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Physical device nodes remain visible. Input is redirected to DualWave while exclusive input is active, and restored when it stops." } else { "Apps that already had the controller open keep it until they restart (Steam, an open game)." }));
                             } else if let Some(n) = &st.hide_note {
                                 note(ui, n, WARN);
                             }
@@ -318,35 +318,35 @@ impl App {
                     ui.add_space(6.0);
                     toggle_row(
                         ui,
-                        crate::i18n::tr("Hide the real controller"),
-                        crate::i18n::tr("So games and Steam only see the virtual one"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Use exclusive physical input" } else { "Hide the real controller" }),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Suppress physical controller input to avoid duplicate input; device nodes stay visible" } else { "So games and Steam only see the virtual one" }),
                         &mut vo.hide_physical,
                     );
                     let mut keep = self.engine.settings.read().persistent_virtual;
                     if toggle_row(
                         ui,
                         crate::i18n::tr("Stay connected while the controller is off"),
-                        crate::i18n::tr("Plugged in when the app starts and kept while the controller sleeps or drops out, so games keep the same pad and XInput slot"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Connected when the app starts and kept while the controller sleeps or drops out, so games keep the same virtual controller" } else { "Plugged in when the app starts and kept while the controller sleeps or drops out, so games keep the same pad and XInput slot" }),
                         &mut keep,
                     ) {
                         self.engine.settings.write().persistent_virtual = keep;
                         self.engine.settings_changed();
                     }
                     let mut keep_xbox = self.engine.settings.read().keep_xbox_pad;
-                    if toggle_row(
+                    if ui.add_enabled_ui(cfg!(windows), |ui| toggle_row(
                         ui,
                         crate::i18n::tr("Keep the Xbox 360 controller as player 1"),
-                        crate::i18n::tr("While a DualSense or native profile is active it stays plugged in, idle and hidden from games, presses Xbox buttons, and drives Game Bar while it is open. Off: unplugged, with a helper pad for Xbox buttons"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "The Windows desktop helper is unavailable on Linux. Select Xbox 360 above to send Xbox buttons through a virtual controller." } else { "While a DualSense or native profile is active it stays plugged in, idle and hidden from games, presses Xbox buttons, and drives Game Bar while it is open. Off: unplugged, with a helper pad for Xbox buttons" }),
                         &mut keep_xbox,
-                    ) {
+                    )).inner {
                         self.engine.settings.write().keep_xbox_pad = keep_xbox;
                         self.engine.settings_changed();
                     }
                     let mut ctl = self.engine.settings.read().hidhide_control;
                     if toggle_row(
                         ui,
-                        crate::i18n::tr("Use HidHide"),
-                        crate::i18n::tr("Off: profiles never hide a controller. Every hide is undone on exit"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Enable exclusive input support" } else { "Use HidHide" }),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Off: profiles never acquire exclusive physical input. Ownership is released on exit." } else { "Off: profiles never hide a controller. Every hide is undone on exit" }),
                         &mut ctl,
                     ) {
                         self.engine.settings.write().hidhide_control = ctl;
@@ -357,14 +357,20 @@ impl App {
                 card(
                     ui,
                     crate::i18n::tr("Drivers on this PC"),
-                    crate::i18n::tr("Two free, open-source drivers. Install either with one click: the official release is downloaded, verified, and its installer opened."),
+                    crate::i18n::tr(if cfg!(target_os = "linux") { "Configure the Linux kernel support and device permissions bundled with DualWave. System changes require administrator authorization." } else { "Two free, open-source drivers. Install either with one click: the official release is downloaded, verified, and its installer opened." }),
                     |ui| {
+                        #[cfg(target_os = "linux")]
+                        let usbip_name = match drivers.usbip_version {
+                            Some(v) => format!("Linux USB/IP {}.{}.{}.{}", v[0], v[1], v[2], v[3]),
+                            None => "Linux USB/IP".to_string(),
+                        };
+                        #[cfg(windows)]
                         let usbip_name = match drivers.usbip_version {
                             Some(v) => format!("usbip-win2 {}.{}.{}.{}", v[0], v[1], v[2], v[3]),
                             None => "usbip-win2".to_string(),
                         };
                         let usbip_state = if drivers.usbip_blocked.is_some() {
-                            ("unsafe", WARN)
+                            (crate::i18n::tr("blocked"), WARN)
                         } else if drivers.usbip {
                             (crate::i18n::tr("ready"), GOOD)
                         } else {
@@ -381,8 +387,8 @@ impl App {
                         driver_row(
                             ui,
                             if drivers.hidhide { (crate::i18n::tr("ready"), GOOD) } else { (crate::i18n::tr("missing"), FAINT) },
-                            "HidHide",
-                            crate::i18n::tr("Hides the real controller, so games see only the virtual one"),
+                            if cfg!(target_os = "linux") { crate::i18n::tr("Exclusive physical input") } else { "HidHide" },
+                            crate::i18n::tr(if cfg!(target_os = "linux") { "Redirects physical input to DualWave; device nodes remain visible" } else { "Hides the real controller, so games see only the virtual one" }),
                             (!drivers.hidhide).then_some(install::Package::HidHide),
                         );
                         if let Some(why) = &drivers.usbip_blocked {

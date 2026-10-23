@@ -100,6 +100,7 @@ pub struct App {
     /// Keeps system-audio capture alive while the profile on screen follows loudness.
     audio_meter: Option<Arc<crate::haptics::audio::Sub>>,
     frames: u64,
+    #[cfg(windows)]
     hwnd_found: bool,
     // Page state
     capture_key: Option<usize>,
@@ -137,6 +138,14 @@ pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
         height: 64,
     };
     let (size, min) = crate::platform::initial_window_size([1240.0, 800.0], [760.0, 520.0]);
+    crate::tray::start(engine.clone(), || {
+        if let Some(c) = CTX.get() {
+            c.request_repaint();
+        }
+    });
+    let start_hidden = start_hidden && tray_available();
+    #[cfg(target_os = "linux")]
+    crate::tray::set_start_hidden(start_hidden);
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(crate::APP_TITLE)
@@ -153,11 +162,6 @@ pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
         ..Default::default()
     };
     let e = engine.clone();
-    crate::tray::start(engine.clone(), || {
-        if let Some(c) = CTX.get() {
-            c.request_repaint();
-        }
-    });
     eframe::run_native(
         crate::APP_TITLE,
         opts,
@@ -165,6 +169,8 @@ pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
             let scale = e.settings.read().ui_scale;
             theme::install(&cc.egui_ctx, scale);
             let _ = CTX.set(cc.egui_ctx.clone());
+            #[cfg(target_os = "linux")]
+            crate::tray::set_context(&cc.egui_ctx);
             Ok(Box::new(App::new(e)))
         }),
     )
@@ -198,6 +204,7 @@ impl App {
             preview: Composer::new(),
             audio_meter: None,
             frames: 0,
+            #[cfg(windows)]
             hwnd_found: false,
             capture_key: None,
             rename: None,
@@ -249,9 +256,9 @@ impl App {
             controller_view::logo(ui.painter(), r);
             ui.vertical(|ui| {
                 ui.add_space(-2.0);
-                // Wordmark: "DSZ" with the Z in the lightbar's accent blue.
+                // Keep the original wordmark layout with the fork branding.
                 let mut mark = egui::text::LayoutJob::default();
-                for (s, c) in [("DS", TEXT), ("Z", ACCENT)] {
+                for (s, c) in [("Dual", TEXT), ("Wave", ACCENT)] {
                     mark.append(
                         s,
                         0.0,
@@ -265,7 +272,7 @@ impl App {
                 }
                 ui.label(mark);
                 ui.add_space(-7.0);
-                ui.label(RichText::new("DualSense Zen").size(12.0).color(MUTED));
+                ui.label(RichText::new("DualWave").size(12.0).color(MUTED));
             });
         });
         ui.add_space(22.0);
@@ -576,6 +583,7 @@ impl eframe::App for App {
         let t_frame = Instant::now();
         #[cfg(debug_assertions)]
         snapshot::tick(ctx, self.frames);
+        #[cfg(windows)]
         if !self.hwnd_found {
             let t = crate::platform::wide(crate::APP_TITLE);
             let h = unsafe {
@@ -610,6 +618,7 @@ impl eframe::App for App {
 
         if ctx.input(|i| i.viewport().close_requested())
             && self.engine.settings.read().close_to_tray
+            && tray_available()
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             crate::tray::hide_main_window();
@@ -620,10 +629,15 @@ impl eframe::App for App {
         // restores it.
         if ctx.input(|i| i.viewport().minimized) == Some(true)
             && self.engine.settings.read().minimize_to_tray
+            && tray_available()
         {
+            #[cfg(windows)]
             let h = crate::tray::main_window();
+            #[cfg(windows)]
             let visible = !h.is_null()
                 && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) != 0 };
+            #[cfg(target_os = "linux")]
+            let visible = !crate::tray::is_hidden();
             if visible {
                 crate::tray::hide_main_window();
                 self.engine.flush();
@@ -633,10 +647,15 @@ impl eframe::App for App {
         // Minimizing reports a 0×0 client size, and that size can get saved as
         // the restored window. Repair it before laying out, or egui keeps a
         // zero screen rect and the window stays an empty frame.
+        #[cfg(windows)]
         let care = crate::platform::maintain_window(
             crate::tray::main_window() as isize,
             &mut self.window_frame,
             &mut self.window_repair_logged,
+        );
+        #[cfg(target_os = "linux")]
+        let care = crate::platform::maintain_egui_window(
+            ctx, &mut self.window_frame, &mut self.window_repair_logged,
         );
         if !care.draw {
             match care.wake_ms {
@@ -718,12 +737,16 @@ impl eframe::App for App {
 
         // Hidden or minimized: schedule nothing. The engine runs on its own
         // threads; the tray wakes the UI when the window comes back.
+        #[cfg(windows)]
         let h = crate::tray::main_window();
+        #[cfg(windows)]
         let visible = h.is_null()
             || unsafe {
                 use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible};
                 IsWindowVisible(h) != 0 && IsIconic(h) == 0
             };
+        #[cfg(target_os = "linux")]
+        let visible = !crate::tray::is_hidden() && ctx.input(|i| i.viewport().minimized) != Some(true);
         if self.perf_log {
             self.perf.1 += 1;
             self.perf.2 += t_frame.elapsed().as_secs_f64() * 1000.0;
@@ -767,4 +790,11 @@ impl App {
             self.audio_meter = Some(self.engine.audio.subscribe_meter(device));
         }
     }
+}
+
+fn tray_available() -> bool {
+    #[cfg(windows)]
+    { true }
+    #[cfg(target_os = "linux")]
+    { crate::tray::available() }
 }

@@ -16,6 +16,8 @@
 #include <linux/leds.h>
 #include <linux/led-class-multicolor.h>
 #include <linux/module.h>
+#include <linux/pid.h>
+#include <linux/sched/signal.h>
 
 #include <linux/unaligned.h>
 
@@ -184,6 +186,7 @@ struct dualsense {
 	struct input_dev *touchpad;
 	struct input_dev *jack;
 	struct hid_device __rcu *audio_hdev;
+	struct pid *dualwave_owner; /* Referenced TGID, protected by base.lock. */
 
 	/* True if this is a DualSense Edge (product 0x0df2). */
 	bool is_edge;
@@ -1660,6 +1663,12 @@ static int dualsense_parse_report(struct ps_device *ps_dev, struct hid_report *r
 		ps_dev->battery_status = battery_status;
 	}
 
+	/* Preserve kernel state, then redirect raw state only while the owner lives. */
+	if (dualwave_audio && dualwave_exclusive(ds)) {
+		dualwave_audio_receive(ds, data, size);
+		return -ENODATA;
+	}
+
 	return 0;
 }
 
@@ -1916,7 +1925,7 @@ static struct ps_device *dualsense_create(struct hid_device *hdev)
 	 * Reporting hardware and firmware is important as there are frequent updates, which
 	 * can change behavior.
 	 */
-	if (hdev->bus == BUS_BLUETOOTH && dualwave_audio) {
+	if (dualwave_audio) {
 		ret = dualwave_audio_create(ds);
 		if (ret) {
 			hid_err(hdev, "Failed to create DualWave microphone transport: %d\n", ret);

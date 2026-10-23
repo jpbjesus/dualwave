@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DualWave
+Comment=DualSense controller settings and Bluetooth audio
+Exec=dualwave
+Icon=dualwave
+Categories=Settings;HardwareSettings;
+Terminal=false
+StartupWMClass=DualWave

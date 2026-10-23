@@ -15,15 +15,39 @@
 //! virt thread (per controller): create/destroy, HidHide ◄────┘ into Feedback, game_audio
 //! ```
 
+#[cfg(windows)]
 pub mod audio_default;
+#[cfg(target_os = "linux")]
+#[path = "audio_default_linux.rs"]
+pub mod audio_default;
+#[cfg(windows)]
 pub mod companion;
+#[cfg(target_os = "linux")]
+#[path = "companion_linux.rs"]
+pub mod companion;
+#[cfg(windows)]
+pub mod gamebar;
+#[cfg(target_os = "linux")]
+#[path = "gamebar_linux.rs"]
 pub mod gamebar;
 pub mod mirror;
+#[cfg(windows)]
+pub mod hidhide;
+#[cfg(target_os = "linux")]
+#[path = "hidhide_linux.rs"]
 pub mod hidhide;
 pub mod pool;
+#[cfg(windows)]
+pub mod probe;
+#[cfg(target_os = "linux")]
+#[path = "probe_linux.rs"]
 pub mod probe;
 pub mod shape;
 pub mod usbip;
+#[cfg(windows)]
+pub mod win;
+#[cfg(target_os = "linux")]
+#[path = "win_linux.rs"]
 pub mod win;
 
 use std::collections::BTreeMap;
@@ -66,7 +90,7 @@ impl usbip::UsbPad {
     }
 
     pub fn backend(&self) -> &'static str {
-        "usbip-win2"
+        if cfg!(target_os = "linux") { "vhci_hcd" } else { "usbip-win2" }
     }
 
     /// The game's audio stream, when this pad carries one.
@@ -418,6 +442,7 @@ fn stale_pad_entries(list: &[String], pad_nodes: &[String], pending: &[String]) 
 
 /// HidHide block-list ids for a controller: its HID node and the parent
 /// (the Bluetooth HID service, or the USB composite).
+#[cfg(windows)]
 fn hide_ids(device: &Device) -> Vec<String> {
     let mut v = Vec::new();
     if let Some(id) = win::instance_id_for_interface(&device.info.path) {
@@ -429,14 +454,23 @@ fn hide_ids(device: &Device) -> Vec<String> {
     v
 }
 
+#[cfg(target_os = "linux")]
+fn hide_ids(device: &Device) -> Vec<String> {
+    win::instance_id_for_interface(&device.info.path).into_iter().collect()
+}
+
 // ------------------------------------------------------------------ manager
 
 const RETRY_AFTER: Duration = Duration::from_secs(30);
 /// Hider key (plus the controller's id) that keeps a controller hidden
 /// while one virtual pad replaces another. Pad ids start at 1 << 40.
 const SWAP_HIDE: u64 = 1 << 39;
+#[cfg(windows)]
 const NO_HIDHIDE: &str =
     "Install HidHide to hide the physical controller; until then games may see both.";
+#[cfg(target_os = "linux")]
+const NO_HIDHIDE: &str =
+    "Exclusive input requires the DualWave kernel driver and access to this controller; device nodes remain visible.";
 
 /// Point `device` at `pad`: input goes to it, its game audio comes back.
 fn attach(device: &Device, pad: &Pad) {
@@ -445,13 +479,19 @@ fn attach(device: &Device, pad: &Pad) {
     }
     let mic = (pad.kind() == VirtualKind::DualSense)
         .then(|| pad.target.microphone() as Arc<dyn crate::haptics::capture::PcmSink>);
+    #[cfg(windows)]
     device.microphone.set_sink(mic);
+    #[cfg(target_os = "linux")]
+    device.set_virtual_microphone_sink(mic);
     device.virt.set(Some(pad.target.clone()));
     device.kick();
 }
 
 fn detach(device: &Device) {
+    #[cfg(windows)]
     device.microphone.set_sink(None);
+    #[cfg(target_os = "linux")]
+    device.set_virtual_microphone_sink(None);
     device.microphone.clear();
     device.virt.set(None);
     *device.game_audio.lock() = None;
@@ -494,7 +534,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
         let vo = &profile.virtual_out;
         let (fallback_pad, keep_xbox, hide_ok) = {
             let s = engine.settings.read();
-            (s.fallback_pad, s.keep_xbox_pad, s.hidhide_control && hidhide::available())
+            (s.fallback_pad, cfg!(windows) && s.keep_xbox_pad, s.hidhide_control && hidhide::available())
         };
         let want = crate::settings::effective_virtual_kind(
             vo.kind,

@@ -51,10 +51,12 @@ fn list(root: &Path) -> io::Result<usize> {
 
 #[cfg(target_os = "linux")]
 fn execute() -> io::Result<()> {
-    let args: Vec<_> = env::args().skip(1).collect();
+    let mut args: Vec<_> = env::args().skip(1).collect();
+    let required = args.iter().any(|arg| arg == "--require-isolated");
+    args.retain(|arg| arg != "--require-isolated");
     let command = args.first().map(String::as_str).unwrap_or("list");
     if matches!(command, "--help" | "-h") {
-        println!("DualWave — native Linux DualSense Bluetooth audio\n\nUsage: dualwave [list|probe|tone|mic-probe|run|pipewire-probe] [options]\n\n  list             List controllers (default; no device writes)\n  probe            Read CRC-checked jack, battery and firmware status\n  tone             Quiet stereo headphone test (3 seconds by default)\n  mic-probe        Decode microphone and print levels (5 seconds by default)\n  run              Expose DualWave Headphones and Microphone in PipeWire\n  pipewire-probe   Expose endpoints without opening a controller (5 seconds)\n\nOptions: --device /dev/hidrawN  --seconds N  --volume 0..100  --source auto|builtin|headset\n\nWith the dedicated kernel microphone transport, physical gamepad input stays\navailable. Legacy mode requires Steam closed and temporarily isolates input.\nSee README for the driver package and permissions.\nCtrl+C stops audio and disables the microphone stream.");
+        println!("DualWave — native Linux DualSense Bluetooth audio\n\nUsage: dualwave [list|probe|tone|mic-probe|run|pipewire-probe] [options]\n\n  list             List controllers (default; no device writes)\n  probe            Read CRC-checked jack, battery and firmware status\n  tone             Quiet stereo headphone test (3 seconds by default)\n  mic-probe        Decode microphone and print levels (5 seconds by default)\n  run              Expose DualWave Headphones and Microphone in PipeWire\n  pipewire-probe   Expose endpoints without opening a controller (5 seconds)\n\nOptions: --device /dev/hidrawN  --seconds N  --volume 0..100  --source auto|builtin|headset\n         --require-isolated (refuse legacy input grabbing)\n\nWith the dedicated kernel microphone transport, physical gamepad input stays\navailable. Legacy mode requires Steam closed and temporarily isolates input.\nSee README for the driver package and permissions.\nCtrl+C stops audio and disables the microphone stream.");
         return Ok(());
     }
     if !matches!(command, "list" | "probe" | "tone" | "mic-probe" | "run" | "pipewire-probe") {
@@ -123,9 +125,9 @@ fn execute() -> io::Result<()> {
     };
     match command {
         "probe" => audio::probe(&path),
-        "tone" => audio::run(&path, audio::Mode::Tone, Some(seconds.unwrap_or(3)), source, (volume as u32 * 127 / 100) as u8),
-        "mic-probe" => audio::run(&path, audio::Mode::Microphone, Some(seconds.unwrap_or(5)), source, (volume as u32 * 127 / 100) as u8),
-        "run" => audio::run(&path, audio::Mode::Run, seconds, source, (volume as u32 * 127 / 100) as u8),
+        "tone" => audio::run(&path, audio::Mode::Tone, Some(seconds.unwrap_or(3)), source, (volume as u32 * 127 / 100) as u8, required),
+        "mic-probe" => audio::run(&path, audio::Mode::Microphone, Some(seconds.unwrap_or(5)), source, (volume as u32 * 127 / 100) as u8, required),
+        "run" => audio::run(&path, audio::Mode::Run, seconds, source, (volume as u32 * 127 / 100) as u8, required),
         _ => unreachable!(),
     }
 }

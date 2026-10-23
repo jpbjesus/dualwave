@@ -4,14 +4,17 @@
 
 static bool dualwave_audio;
 module_param(dualwave_audio, bool, 0444);
-MODULE_PARM_DESC(dualwave_audio, "Isolate Bluetooth microphone packets on a vendor HID child (opt-in)");
+MODULE_PARM_DESC(dualwave_audio, "Isolate microphone and optional exclusive input on a vendor HID child (opt-in)");
 
 static const u8 dualwave_audio_descriptor[] = {
 	0x06, 0x00, 0xff, /* Vendor-defined usage page, not Generic Desktop/Gamepad */
 	0x09, 0x01, 0xa1, 0x01,
 	0x85, 0x31,       /* Preserve the original packet and CRC, including report ID */
 	0x15, 0x00, 0x26, 0xff, 0x00,
-	0x75, 0x08, 0x95, 0x4d, 0x09, 0x01, 0x81, 0x02, 0xc0,
+	0x75, 0x08, 0x95, 0x4d, 0x09, 0x01, 0x81, 0x02,
+	0x85, 0x01, 0x95, 0x3f, 0x09, 0x01, 0x81, 0x02, /* USB state */
+	0x85, DUALWAVE_CONTROL_REPORT, 0x95, 0x07, 0x09, 0x02, 0xb1, 0x02,
+	0xc0,
 };
 
 static int dualwave_audio_parse(struct hid_device *hdev)
@@ -29,11 +32,82 @@ static void dualwave_audio_stop(struct hid_device *hdev)
 {
 }
 
+/* A pid reference prevents PID reuse. The live count also detects an exited
+ * but unreaped owner, including when another observer keeps the child open.
+ * Called with base.lock held; RCU protects the task/signal lookup. */
+static bool dualwave_owner_alive(struct dualsense *ds)
+{
+	struct task_struct *task;
+	bool alive = false;
+
+	rcu_read_lock();
+	task = pid_task(ds->dualwave_owner, PIDTYPE_TGID);
+	if (task)
+		alive = atomic_read(&task->signal->live) > 0;
+	rcu_read_unlock();
+	if (!alive) {
+		put_pid(ds->dualwave_owner);
+		ds->dualwave_owner = NULL;
+	}
+	return alive;
+}
+
+static bool dualwave_exclusive(struct dualsense *ds)
+{
+	bool owned;
+
+	scoped_guard(spinlock_irqsave, &ds->base.lock)
+		owned = dualwave_owner_alive(ds);
+	return owned;
+}
+
+static void dualwave_audio_close(struct hid_device *hdev)
+{
+	struct dualsense *ds = hid_get_drvdata(to_hid_device(hdev->dev.parent));
+
+	scoped_guard(spinlock_irqsave, &ds->base.lock) {
+		put_pid(ds->dualwave_owner);
+		ds->dualwave_owner = NULL;
+	}
+}
+
 static int dualwave_audio_raw_request(struct hid_device *hdev, unsigned char reportnum,
 		u8 *buf, size_t len, unsigned char rtype, int reqtype)
 {
-	/* The child is receive-only. Control reports belong to the physical HID. */
-	return -EOPNOTSUPP;
+	struct dualsense *ds = hid_get_drvdata(to_hid_device(hdev->dev.parent));
+	struct pid *caller = task_tgid(current);
+	int ret = DUALWAVE_CONTROL_SIZE;
+
+	/* No transport request is forwarded to USB or Bluetooth. */
+	if (reportnum != DUALWAVE_CONTROL_REPORT || rtype != HID_FEATURE_REPORT)
+		return -EOPNOTSUPP;
+	if (len != DUALWAVE_CONTROL_SIZE)
+		return -EINVAL;
+	if (reqtype != HID_REQ_GET_REPORT && reqtype != HID_REQ_SET_REPORT)
+		return -EOPNOTSUPP;
+	if (reqtype == HID_REQ_SET_REPORT && !dualwave_control_valid(buf, len))
+		return -EINVAL;
+
+	scoped_guard(spinlock_irqsave, &ds->base.lock) {
+		dualwave_owner_alive(ds);
+		if (reqtype == HID_REQ_GET_REPORT) {
+			memset(buf, 0, len);
+			buf[0] = DUALWAVE_CONTROL_REPORT;
+			buf[1] = DUALWAVE_CONTROL_VERSION;
+			buf[2] = ds->dualwave_owner ? DUALWAVE_CONTROL_ACTIVE : 0;
+			if (ds->dualwave_owner == caller)
+				buf[2] |= DUALWAVE_CONTROL_OWNED;
+		} else if (ds->dualwave_owner && ds->dualwave_owner != caller) {
+			ret = -EBUSY;
+		} else if (buf[2]) {
+			if (!ds->dualwave_owner)
+				ds->dualwave_owner = get_pid(caller);
+		} else {
+			put_pid(ds->dualwave_owner);
+			ds->dualwave_owner = NULL;
+		}
+	}
+	return ret;
 }
 
 static const struct hid_ll_driver dualwave_audio_ll = {
@@ -41,7 +115,7 @@ static const struct hid_ll_driver dualwave_audio_ll = {
 	.start = dualwave_audio_start,
 	.stop = dualwave_audio_stop,
 	.open = dualwave_audio_start,
-	.close = dualwave_audio_stop,
+	.close = dualwave_audio_close,
 	.raw_request = dualwave_audio_raw_request,
 	.max_buffer_size = 128,
 };
@@ -74,6 +148,10 @@ static void dualwave_audio_destroy(void *data)
 	synchronize_rcu();
 	if (audio)
 		hid_destroy_device(audio);
+	scoped_guard(spinlock_irqsave, &ds->base.lock) {
+		put_pid(ds->dualwave_owner);
+		ds->dualwave_owner = NULL;
+	}
 }
 
 static int dualwave_audio_create(struct dualsense *ds)

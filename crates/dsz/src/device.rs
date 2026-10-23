@@ -217,6 +217,14 @@ pub struct Device {
     pub microphone: Arc<crate::haptics::capture::Capture>,
     microphone_source: AtomicU8,
     microphone_managed: AtomicBool,
+    #[cfg(target_os = "linux")]
+    pub native_audio_error: Mutex<Option<String>>,
+    #[cfg(target_os = "linux")]
+    microphone_sinks: Arc<crate::haptics::pipewire_linux::MicrophoneSinks>,
+    #[cfg(target_os = "linux")]
+    isolated_media_ready: AtomicBool,
+    #[cfg(target_os = "linux")]
+    kernel_mute_state: AtomicU8,
     /// Silent reports queued when a speaker stream starts.
     pub speaker_lead: AtomicU8,
     /// What the last speaker test heard, for the Haptics page.
@@ -244,6 +252,63 @@ pub struct Device {
 }
 
 impl Device {
+    #[cfg(target_os = "linux")]
+    pub fn native_audio(&self) -> Option<Arc<crate::haptics::pipewire_linux::ControllerAudio>> {
+        self.microphone_sinks.native()
+    }
+
+    pub fn media_transport_ready(&self) -> bool {
+        #[cfg(windows)]
+        { true }
+        #[cfg(target_os = "linux")]
+        { self.isolated_media_ready.load(Ordering::Acquire) }
+    }
+
+    /// Mirror the kernel's physical-button latch instead of toggling twice.
+    pub fn next_mute_state(&self, current: bool) -> bool {
+        #[cfg(target_os = "linux")]
+        match self.kernel_mute_state.load(Ordering::Acquire) {
+            1 => return false,
+            2 | 3 => return true,
+            _ => {}
+        }
+        !current
+    }
+
+    /// Runs outside the Bluetooth clock: daemon connection/retry can block.
+    #[cfg(target_os = "linux")]
+    pub fn maintain_native_audio(&self) {
+        if !self.media_transport_ready() {
+            self.microphone_sinks.set_native(None);
+            let error = "The isolated microphone driver is not active. Complete initial setup and reboot.";
+            let mut previous = self.native_audio_error.lock();
+            if previous.as_deref() != Some(error) { log::warn!("native controller audio: {error}"); }
+            *previous = Some(error.into());
+            return;
+        }
+        if self.native_audio().as_ref().is_some_and(|audio| audio.healthy()) { return; }
+        self.microphone_sinks.set_native(None);
+        let mac = self.mac.lock().clone();
+        let identity = if mac.is_empty() { &self.info.serial } else { &mac };
+        match crate::haptics::pipewire_linux::ControllerAudio::new(identity) {
+            Ok(audio) => {
+                self.microphone_sinks.set_native(Some(audio));
+                self.native_audio_error.lock().take();
+            }
+            Err(error) => {
+                let mut previous = self.native_audio_error.lock();
+                if previous.as_ref() != Some(&error) { log::warn!("native controller audio: {error}"); }
+                *previous = Some(error);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn set_virtual_microphone_sink(&self, sink: Option<Arc<dyn crate::haptics::capture::PcmSink>>) {
+        self.microphone_sinks.set_virtual(sink);
+        self.microphone.clear();
+    }
+
     pub fn display_name(&self, engine: &Engine) -> String {
         let mac = self.mac.lock().clone();
         if let Some(n) = engine.settings.read().device_names.get(&mac) {
@@ -261,14 +326,24 @@ impl Device {
     }
 
     /// Apply a profile's microphone settings. Capture runs only while an app
-    /// records from the virtual DualSense (Discord in a call, a recorder),
+    /// records from a native microphone or virtual DualSense (a call, a recorder),
     /// so the rest of the time the controller's microphone, its radio
     /// traffic and the idle-off timer are as if it were off.
     pub fn apply_microphone(&self, mic: &crate::profile::Microphone) {
-        let enabled =
-            mic.enabled && self.virt.active() == Some(crate::profile::VirtualKind::DualSense);
+        let virtual_microphone = self.virt.active() == Some(crate::profile::VirtualKind::DualSense);
         let muted = mic.muted || (mic.mute_button && self.toggles.lock().mute_engaged);
-        let listening = self.virt.microphone_open();
+        #[cfg(windows)]
+        let (enabled, listening) = (mic.enabled && virtual_microphone, self.virt.microphone_open());
+        #[cfg(target_os = "linux")]
+        let (enabled, listening) = {
+            let native = self.native_audio();
+            let available = native.as_ref().is_some_and(|audio| audio.healthy());
+            let recording = available && native.as_ref().is_some_and(|audio| audio.recording());
+            if let Some(audio) = native {
+                audio.set_recording(mic.enabled && !muted && recording);
+            }
+            (mic.enabled && (available || virtual_microphone), recording || self.virt.microphone_open())
+        };
         self.set_microphone(enabled, muted || !listening, mic.gain_percent, mic.source);
     }
 
@@ -281,7 +356,13 @@ impl Device {
         gain_percent: u16,
         source: crate::profile::MicrophoneSource,
     ) {
-        let enabled = enabled && self.is_bluetooth() && !self.model.is_dualshock4();
+        let enabled = enabled && self.is_bluetooth() && !self.model.is_dualshock4() && self.media_transport_ready();
+        #[cfg(target_os = "linux")]
+        let enabled = enabled && self.kernel_mute_state.load(Ordering::Acquire) != 3;
+        #[cfg(target_os = "linux")]
+        if !enabled || muted {
+            if let Some(audio) = self.native_audio() { audio.set_recording(false); }
+        }
         // Off, the other settings don't matter: keep them fixed, so a Mute
         // press or a source change on a profile without the microphone
         // changes nothing here.
@@ -356,6 +437,7 @@ impl Device {
     /// `dsz-speaker-test.wav` in the temp folder. False if a game or another
     /// test is using the path.
     pub fn start_speaker_test(self: &Arc<Self>) -> bool {
+        if !self.media_transport_ready() { return false; }
         use crate::haptics::game::{TestSignal, TestSource};
         let len = Duration::from_millis(4000);
         let src = Arc::new(TestSource::new(len, TestSignal::Speaker));
@@ -668,6 +750,14 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
         microphone: Arc::new(crate::haptics::capture::Capture::default()),
         microphone_source: AtomicU8::new(0),
         microphone_managed: AtomicBool::new(false),
+        #[cfg(target_os = "linux")]
+        native_audio_error: Mutex::new(None),
+        #[cfg(target_os = "linux")]
+        microphone_sinks: Arc::new(crate::haptics::pipewire_linux::MicrophoneSinks::default()),
+        #[cfg(target_os = "linux")]
+        isolated_media_ready: AtomicBool::new(false),
+        #[cfg(target_os = "linux")]
+        kernel_mute_state: AtomicU8::new(0),
         speaker_lead: AtomicU8::new(crate::haptics::streamer::SPEAKER_LEAD as u8),
         speaker_test_result: Mutex::new(None),
         calibrate_request: AtomicBool::new(false),
@@ -686,6 +776,8 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
         if mac.is_empty() { "?" } else { &mac },
         if firmware.is_empty() { "?" } else { &firmware }
     );
+    #[cfg(target_os = "linux")]
+    device.microphone.set_sink(Some(device.microphone_sinks.clone()));
     engine.add_device(device.clone());
 
     // A panic in one worker stops the others, and the device is still
@@ -717,6 +809,21 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
                 })
                 .expect("spawn virtual");
             if conn == Connection::Bluetooth && !model.is_dualshock4() {
+                #[cfg(target_os = "linux")]
+                std::thread::Builder::new()
+                    .name(format!("ds-pipewire-{id}"))
+                    .spawn_scoped(s, move || {
+                        let _g = StopOnPanic(d);
+                        while !d.stop.load(Ordering::Acquire) {
+                            d.maintain_native_audio();
+                            for _ in 0..40 {
+                                if d.stop.load(Ordering::Acquire) { break; }
+                                std::thread::sleep(Duration::from_millis(50));
+                            }
+                        }
+                        d.microphone_sinks.set_native(None);
+                    })
+                    .expect("spawn PipeWire audio");
                 std::thread::Builder::new()
                     .name(format!("ds-microphone-{id}"))
                     .spawn_scoped(s, move || {
@@ -776,8 +883,12 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
     let mut sensor_ts: Option<u32> = None;
     let mut last_packet = Instant::now();
     let mut last_kind = 0u8;
+    #[cfg(target_os = "linux")]
+    let mut kernel_mute_checked = false;
 
     while !device.stop.load(Ordering::Acquire) {
+        #[cfg(target_os = "linux")]
+        device.isolated_media_ready.store(reader.has_isolated_media(), Ordering::Release);
         match reader.read(100) {
             Ok(Some(buf)) => {
                 errors = 0;
@@ -862,6 +973,28 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                         } else {
                             ds_proto::virtual_pad::usb_layout(buf)
                         };
+                        #[cfg(target_os = "linux")]
+                        if !kernel_mute_checked || (state.buttons.has(ds_proto::input::Button::Mute)
+                            && !prev.buttons.has(ds_proto::input::Button::Mute)) {
+                            kernel_mute_checked = true;
+                            match dev.microphone_muted() {
+                                Ok(value) => {
+                                    device.kernel_mute_state.store(match value { None => 0, Some(false) => 1, Some(true) => 2 }, Ordering::Release);
+                                    if let Some(muted) = value {
+                                        device.toggles.lock().mute_engaged = muted;
+                                    }
+                                }
+                                Err(error) => {
+                                    device.kernel_mute_state.store(3, Ordering::Release);
+                                    device.toggles.lock().mute_engaged = true;
+                                    device.set_microphone(false, true, 100, crate::profile::MicrophoneSource::Auto);
+                                    let message = format!("Cannot read the kernel microphone mute state: {error}");
+                                    let mut previous = device.native_audio_error.lock();
+                                    if previous.as_ref() != Some(&message) { log::warn!("{message}"); }
+                                    *previous = Some(message);
+                                }
+                            }
+                        }
                         pipeline.process(engine, device, &state, &prev, raw.as_ref(), now);
                         prev = state;
                     }
@@ -1024,6 +1157,8 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
 
     let do_write =
         |w: &mut hid::Writer, data: &[u8], stream: bool, fails: &mut u32, backoff_until: &mut Instant| -> bool {
+            #[cfg(target_os = "linux")]
+            if data.first() == Some(&0x39) && !device.media_transport_ready() { return false; }
             let t0 = Instant::now();
             let res = w.write(data, 250);
             device.flight.write(data, stream, res.is_ok(), t0.elapsed());
@@ -1271,6 +1406,14 @@ impl Device {
             microphone: Arc::new(crate::haptics::capture::Capture::default()),
             microphone_source: AtomicU8::new(0),
             microphone_managed: AtomicBool::new(false),
+            #[cfg(target_os = "linux")]
+            native_audio_error: Mutex::new(None),
+            #[cfg(target_os = "linux")]
+            microphone_sinks: Arc::new(crate::haptics::pipewire_linux::MicrophoneSinks::default()),
+            #[cfg(target_os = "linux")]
+            isolated_media_ready: AtomicBool::new(true),
+            #[cfg(target_os = "linux")]
+            kernel_mute_state: AtomicU8::new(0),
             speaker_lead: AtomicU8::new(0),
             speaker_test_result: Mutex::new(None),
             calibrate_request: AtomicBool::new(false),
@@ -1289,6 +1432,41 @@ impl Device {
 mod microphone_tests {
     use super::*;
     use ds_proto::output::{Microphone, MicrophoneSource};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn missing_isolated_transport_refuses_media_without_changing_haptics() {
+        let d = Device::for_test(Connection::Bluetooth, "00:11:22:33:44:55");
+        d.isolated_media_ready.store(false, Ordering::Release);
+        d.set_microphone(true, false, 100, crate::profile::MicrophoneSource::Auto);
+        assert!(!d.microphone.enabled() && !d.microphone.recording());
+        assert_eq!(d.microphone_output(), None);
+        assert_eq!(d.speaker_route.load(Ordering::Acquire), SPEAKER_UNTOUCHED);
+        assert!(!d.start_speaker_test());
+        d.maintain_native_audio();
+        assert!(d.native_audio().is_none());
+        assert!(d.native_audio_error.lock().as_ref().unwrap().contains("isolated microphone driver"));
+        assert!(d.stream_rx.is_empty());
+        assert!(!d.pcm_mode.load(Ordering::Acquire));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kernel_mute_latch_survives_userspace_toggle_and_fails_closed() {
+        let d = Device::for_test(Connection::Bluetooth, "");
+        assert!(d.next_mute_state(false));
+        assert!(!d.next_mute_state(true));
+        d.kernel_mute_state.store(1, Ordering::Release);
+        assert!(!d.next_mute_state(false));
+        assert!(!d.next_mute_state(true));
+        d.kernel_mute_state.store(2, Ordering::Release);
+        assert!(d.next_mute_state(false));
+        assert!(d.next_mute_state(true));
+        d.kernel_mute_state.store(3, Ordering::Release);
+        d.set_microphone(true, false, 100, crate::profile::MicrophoneSource::Auto);
+        assert!(!d.microphone.recording());
+        assert!(d.next_mute_state(false));
+    }
 
     #[test]
     fn a_profile_without_a_usable_microphone_changes_nothing() {

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+appdir=${APPDIR:-$(cd -- "$(dirname -- "$0")" && pwd)}
+payload=$appdir/usr/lib/dualwave
+report_error() {
+    printf '%s\n' "$1" >&2
+    if command -v kdialog >/dev/null; then
+        kdialog --title DualWave --error "$1" || true
+    elif command -v notify-send >/dev/null; then
+        notify-send --app-name DualWave 'DualWave' "$1" || true
+    fi
+}
+setup_tools() {
+    local missing= tool
+    for tool in kdialog pkexec pacman; do
+        if ! command -v "$tool" >/dev/null; then
+            missing+=" $tool"
+        fi
+    done
+    if [[ -n $missing ]]; then
+        report_error "Faltam ferramentas para configurar o DualWave:$missing. No CachyOS, instala os pacotes kdialog e polkit antes de voltar a abrir a configuração."
+        return 1
+    fi
+}
+setup() {
+    local stage result=0
+    setup_tools || return
+    stage=$(mktemp -d "${TMPDIR:-/tmp}/dualwave-setup.XXXXXXXX")
+    if ! /usr/bin/bash "$payload/setup-driver.sh" --plan "$payload" > "$stage/setup.log" 2>&1; then
+        report_error "$(cat "$stage/setup.log")"
+        rm -rf -- "$stage"
+        return 1
+    fi
+    local package
+    read -r package < "$payload/driver-package"
+    if ! cp -- "$payload/"{setup-driver.sh,driver-package,driver.sha256,driver-version} "$payload/$package" "$stage/"; then
+        report_error 'Não foi possível preparar a configuração do DualWave.'
+        rm -rf -- "$stage"
+        return 1
+    fi
+    pkexec /usr/bin/bash "$stage/setup-driver.sh" --install "$stage" > "$stage/setup.log" 2>&1 || result=$?
+    if (( result == 0 )); then
+        kdialog --title DualWave --msgbox 'Configuração concluída. Reinicia o PC para ativar o suporte do comando e as permissões.' || true
+    elif (( result != 126 )); then
+        report_error "A configuração do DualWave falhou.
+$(tail -n 30 "$stage/setup.log")"
+    fi
+    rm -rf -- "$stage"
+    return "$result"
+}
+case ${1:-} in
+    --setup) setup; exit ;;
+    --check|--plan) exec /usr/bin/bash "$payload/setup-driver.sh" "$1" "$payload" ;;
+esac
+host_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+if [[ $# == 0 && $host_id == cachyos ]]; then
+    read -r package < "$payload/driver-package"
+    required=${package#dualwave-hid-dkms-}
+    required=${required%-any.pkg.tar.zst}
+    installed=$(pacman -Q dualwave-hid-dkms 2>/dev/null || true)
+    if [[ $installed != "dualwave-hid-dkms $required" ]]; then
+        setup_tools || exit
+        if kdialog --title DualWave --yesno 'O DualWave precisa de configurar o suporte de áudio Bluetooth e controladores virtuais neste PC. É necessária uma autorização de administrador. Configurar agora?'; then
+            setup
+            exit
+        fi
+    fi
+fi
+export LD_LIBRARY_PATH="$appdir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PIPEWIRE_MODULE_DIR="$appdir/usr/lib/pipewire-0.3"
+export SPA_PLUGIN_DIR="$appdir/usr/lib/spa-0.2"
+export PIPEWIRE_CONFIG_DIR="$appdir/usr/share/pipewire"
+if [[ ${1:-} == --cli ]]; then
+    shift
+    exec "$appdir/usr/bin/dualwave-cli" "$@"
+fi
+exec "$appdir/usr/bin/dualwave" "$@"

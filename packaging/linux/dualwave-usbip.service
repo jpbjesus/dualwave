@@ -1,0 +1,42 @@
+[Unit]
+Description=DualWave virtual-controller USB/IP host broker
+Requires=dualwave-usbip.socket
+After=dualwave-usbip.socket systemd-modules-load.service
+ConditionPathExists=/sys/devices/platform/vhci_hcd.0/attach
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/lib/dualwave/usbip-host.py
+User=root
+Group=root
+RuntimeDirectory=dualwave
+RuntimeDirectoryMode=0755
+# The socket unit owns the listening node across service restarts.
+RuntimeDirectoryPreserve=yes
+UMask=0077
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ReadWritePaths=/sys/devices/platform/vhci_hcd.0/attach /sys/devices/platform/vhci_hcd.0/detach
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @reboot @swap @module @raw-io @privileged
+TasksMax=16
+MemoryMax=64M
+LimitNOFILE=256

@@ -26,10 +26,19 @@ use parking_lot::Mutex;
 
 use crate::engine::Engine;
 
+#[cfg(windows)]
 const LATEST: &str = "https://api.github.com/repos/MaximumFreak/dsz/releases/latest";
+#[cfg(windows)]
 pub const RELEASES: &str = "https://github.com/MaximumFreak/dsz/releases";
 /// The release asset that is the app.
+#[cfg(windows)]
 const ASSET: &str = "dsz.exe";
+#[cfg(target_os = "linux")]
+const LATEST: &str = "https://api.github.com/repos/jpbjesus/dualwave/releases/latest";
+#[cfg(target_os = "linux")]
+pub const RELEASES: &str = "https://github.com/jpbjesus/dualwave/releases";
+#[cfg(target_os = "linux")]
+const ASSET: &str = "DualWave-x86_64.AppImage";
 /// First check a little after startup, out of the way of controllers
 /// connecting; then once a day.
 const FIRST_CHECK: Duration = Duration::from_secs(20);
@@ -217,6 +226,7 @@ fn newer(a: &str, b: &str) -> bool {
 }
 
 /// Where browsers save downloads: the user's Downloads folder.
+#[cfg(windows)]
 fn downloads() -> Option<PathBuf> {
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::{FOLDERID_Downloads, SHGetKnownFolderPath};
@@ -233,13 +243,25 @@ fn downloads() -> Option<PathBuf> {
     dir
 }
 
+#[cfg(target_os = "linux")]
+fn downloads() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    Some(home.join("Downloads"))
+}
+
+fn app_file() -> Result<PathBuf, String> {
+    #[cfg(target_os = "linux")]
+    if let Some(path) = std::env::var_os("APPIMAGE") { return Ok(path.into()); }
+    std::env::current_exe().map_err(|error| error.to_string())
+}
+
 /// Whether `file` is `r`'s exe: an exe with GitHub's SHA-256 for it.
 fn verify(r: &Release, file: &Path) -> Result<(), String> {
     let Some(want) = r.sha256 else {
         return Err(NO_CHECKSUM.into());
     };
     let data = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
-    if !data.starts_with(b"MZ") || crate::install::sha256(&data)? != want {
+    if !data.starts_with(if cfg!(windows) { b"MZ".as_slice() } else { b"\x7fELF".as_slice() }) || crate::install::sha256(&data)? != want {
         return Err(format!(
             "{} isn't DSZ {} (it doesn't match GitHub's checksum).",
             file.display(),
@@ -258,8 +280,7 @@ fn find_download(r: &Release) -> Option<PathBuf> {
             .file_name()
             .map(|n| n.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
-        name.starts_with("dsz")
-            && name.ends_with(".exe")
+        (if cfg!(windows) { name.starts_with("dsz") && name.ends_with(".exe") } else { name.starts_with("dualwave") && name.ends_with(".appimage") })
             && std::fs::metadata(p).is_ok_and(|m| r.size.map_or(true, |s| m.len() == s))
             && verify(r, p).is_ok()
     })
@@ -350,7 +371,7 @@ pub fn install(r: Release, file: PathBuf, wake: impl Fn() + Send + 'static) {
 fn swap_in(r: &Release, file: &Path) -> Result<(), String> {
     // Checked again: the file may have changed since it was found.
     verify(r, file)?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = app_file()?;
     let old = old_path(&exe);
     let _ = std::fs::remove_file(&old);
     let cant = |e: std::io::Error| {
@@ -387,7 +408,7 @@ fn old_path(exe: &Path) -> PathBuf {
 /// After an update: delete the exe it replaced. The old process may still
 /// be exiting, so this tries for a few seconds on its own thread.
 pub fn clean_up() {
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = app_file() else { return };
     let old = old_path(&exe);
     if !old.exists() {
         return;
@@ -417,6 +438,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn reads_the_release_and_its_checksum() {
         let json = r#"{"tag_name":"v0.3.8","html_url":"https://github.com/MaximumFreak/dsz/releases/tag/v0.3.8",
             "assets":[{"name":"other.zip","browser_download_url":"https://example.invalid/x"},
@@ -440,6 +462,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn checks_the_file_against_the_release() {
         let dir = std::env::temp_dir().join("dsz-update-test");
         std::fs::create_dir_all(&dir).unwrap();

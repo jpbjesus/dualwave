@@ -24,6 +24,8 @@
 pub mod descriptors;
 mod microphone;
 pub mod wire;
+#[cfg(target_os = "linux")]
+mod linux;
 
 pub use microphone::MicrophoneRing;
 
@@ -36,10 +38,12 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
+#[cfg(windows)]
 use windows_sys::core::GUID;
 
 use self::descriptors as d;
 use self::wire::{Command, Submit};
+#[cfg(windows)]
 use super::win;
 use crate::haptics::game::PcmSource;
 
@@ -146,14 +150,18 @@ impl DsSink {
     }
 }
 
+#[cfg(windows)]
 const GUID_VHCI: GUID = GUID::from_u128(0xB4030C06_DC5F_4FCC_87EB_E5515A0935C0);
+#[cfg(windows)]
 const IOCTL_PLUGOUT_HARDWARE: u32 = win::ctl_code(0x22, 0x801, 0, 3);
+#[cfg(windows)]
 const IOCTL_PLUGIN_HARDWARE_ONCE: u32 = win::ctl_code(0x22, 0x806, 0, 3);
 /// One `vhci::ioctl::plugin_hardware` layout. `size` is what that release's
 /// driver compares against `sizeof` before it does anything. `busid` is
 /// where `busid[32]` starts; `service[32]` and `host[1025]` follow it.
 /// The serial and `wsk_events` fields, when the layout has them, stay
 /// zero: an empty serial leaves the device descriptor's own serial.
+#[cfg(any(windows, test))]
 #[derive(Clone, Copy)]
 struct PluginLayout {
     size: usize,
@@ -165,6 +173,7 @@ struct PluginLayout {
 /// appends `wsk_events` (1120) at the same string offsets. 0.9.8.1
 /// inserts `location_hash` after `port`, so the strings move four bytes
 /// later (1124). Plugout stays 8 bytes in all of these.
+#[cfg(any(windows, test))]
 const PLUGIN_LAYOUTS: [PluginLayout; 4] = [
     PluginLayout { size: 1124, busid: 12 },
     PluginLayout { size: 1120, busid: 8 },
@@ -175,6 +184,7 @@ const PLUGIN_LAYOUTS: [PluginLayout; 4] = [
 /// Try the layout that matches `usbip.exe`'s version first. Anything else,
 /// including a version we do not know, starts at the newest: a mismatch is
 /// rejected before the driver connects.
+#[cfg(any(windows, test))]
 fn plugin_layouts(version: Option<[u16; 4]>) -> [PluginLayout; 4] {
     let preferred = match version {
         Some([0, 9, 8, 1]) => 1124,
@@ -190,6 +200,7 @@ fn plugin_layouts(version: Option<[u16; 4]>) -> [PluginLayout; 4] {
     layouts
 }
 
+#[cfg(any(windows, test))]
 fn plugin_request(layout: PluginLayout, busid: &str, service: &str, host: &str) -> Vec<u8> {
     let mut req = vec![0u8; layout.size];
     req[..4].copy_from_slice(&(layout.size as u32).to_le_bytes());
@@ -249,11 +260,13 @@ pub fn ds4_mac(tag: u16) -> [u8; 6] {
 }
 
 /// Whether a usbip-win2 host controller we may use is present.
+#[cfg(windows)]
 pub fn available() -> bool {
     blocked().is_none() && !win::interface_paths(&GUID_VHCI).is_empty()
 }
 
 /// Path of the active `usbip2_ude.sys`, from its service entry.
+#[cfg(windows)]
 fn driver_path() -> Option<std::path::PathBuf> {
     use windows_sys::Win32::System::Registry::*;
     let key = win::wide(r"SYSTEM\CurrentControlSet\Services\usbip2_ude");
@@ -291,12 +304,14 @@ fn driver_path() -> Option<std::path::PathBuf> {
 /// Installed usbip-win2 release. The driver files carry no version
 /// resource, so this is `usbip.exe`'s, which the installer puts down with
 /// them.
+#[cfg(windows)]
 pub fn driver_version() -> Option<[u16; 4]> {
     let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
     win::file_version(&format!(r"{pf}\USBip\usbip.exe"))
 }
 
 /// `DriverVer` date (`MM/DD/YYYY`) from the active driver's INF.
+#[cfg(windows)]
 fn driver_date() -> Option<String> {
     let inf = driver_path()?.with_file_name("usbip2_ude.inf");
     let text = std::fs::read_to_string(inf).ok()?;
@@ -315,6 +330,7 @@ fn driver_date() -> Option<String> {
 /// can disagree (an old exe left next to a newer driver). 0.9.7.8's driver
 /// was built in early July 2026, and that date refuses it whatever the exe
 /// says, except for a 0.9.8.x exe: those releases came out in September.
+#[cfg(any(windows, test))]
 fn refuse_release(version: Option<[u16; 4]>, date: Option<&str>) -> bool {
     if version == Some([0, 9, 7, 8]) {
         return true;
@@ -325,6 +341,7 @@ fn refuse_release(version: Option<[u16; 4]>, date: Option<&str>) -> bool {
     bad_date && !matches!(version, Some([0, 9, 8, _]))
 }
 
+#[cfg(windows)]
 pub fn blocked() -> Option<String> {
     refuse_release(driver_version(), driver_date().as_deref()).then(|| {
         "usbip-win2 0.9.7.8 is installed. That release can corrupt memory and crash Windows (its author's warning), \
@@ -334,6 +351,7 @@ so DualSense mode stays off. Uninstall it, restart, and install 0.9.8.1."
 }
 
 /// Whether a HID device path belongs to one of our virtual controllers.
+#[cfg(windows)]
 pub fn is_virtual_path(path: &str) -> bool {
     win::instance_id_for_interface(path)
         .map(|id| is_ours_instance(&id))
@@ -343,6 +361,7 @@ pub fn is_virtual_path(path: &str) -> bool {
 /// Whether a device instance, or one of its parents, is our virtual
 /// controller (its USB serial starts with [`SERIAL_PREFIX`], or
 /// [`DS4_SERIAL_PREFIX`] for a virtual DualShock 4).
+#[cfg(windows)]
 pub fn is_ours_instance(id: &str) -> bool {
     let mut id = id.to_string();
     for _ in 0..4 {
@@ -361,6 +380,38 @@ pub fn is_ours_instance(id: &str) -> bool {
 pub(crate) fn has_our_serial(id: &str) -> bool {
     let id = id.to_ascii_uppercase();
     id.contains(&format!("\\{SERIAL_PREFIX}")) || id.contains(&format!("\\{DS4_SERIAL_PREFIX}"))
+}
+
+#[cfg(target_os = "linux")]
+pub fn available() -> bool { linux::blocked().is_none() }
+
+#[cfg(target_os = "linux")]
+pub fn blocked() -> Option<String> { linux::blocked() }
+
+// The Linux kernel module has no usbip-win2 release number.
+#[cfg(target_os = "linux")]
+pub fn driver_version() -> Option<[u16; 4]> { None }
+
+#[cfg(windows)]
+fn host_path() -> io::Result<String> {
+    win::interface_paths(&GUID_VHCI).into_iter().next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "usbip-win2 is not installed"))
+}
+
+#[cfg(target_os = "linux")]
+fn host_path() -> io::Result<String> {
+    if let Some(why) = blocked() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, why));
+    }
+    Ok(String::new())
+}
+
+#[cfg(target_os = "linux")]
+fn plug_in(_vhci_path: &str, busid: &str, addr: SocketAddr) -> io::Result<i32> {
+    // Zero is the shared detached sentinel; Linux's physical port zero is valid.
+    linux::attach(busid, addr).and_then(|port| {
+        i32::try_from(port + 1).map_err(|_| io::Error::other("vhci port overflow"))
+    })
 }
 
 // ------------------------------------------------------------------ audio
@@ -598,6 +649,7 @@ static DS4_TAGS: Mutex<BTreeSet<u16>> = Mutex::new(BTreeSet::new());
 
 /// Probes: start numbering pads at `first`, so a probe's pads don't share
 /// a serial (`DSZV<n>`) with the running app's.
+#[cfg(windows)]
 pub fn reserve_slots_below(first: u32) {
     SLOTS.lock().extend(1..first);
 }
@@ -632,13 +684,7 @@ impl UsbPad {
         mac: &str,
         before_attach: &dyn Fn(&str),
     ) -> io::Result<UsbPad> {
-        let paths = win::interface_paths(&GUID_VHCI);
-        let Some(vhci_path) = paths.first() else {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "usbip-win2 is not installed",
-            ));
-        };
+        let vhci_path = host_path()?;
         let slot = {
             let mut s = SLOTS.lock();
             let n = (1..100).find(|n| !s.contains(n)).unwrap_or(99);
@@ -716,12 +762,13 @@ impl UsbPad {
             _ => format!("{SERIAL_PREFIX}{slot}"),
         };
         before_attach(&serial);
-        let port = plug_in(vhci_path, &shared.busid, addr)?;
+        let port = plug_in(&vhci_path, &shared.busid, addr)?;
         *shared.attached.lock() = Instant::now();
         dev.port.store(port, Ordering::Release);
         log::info!(
-            "virtual {} attached on usbip-win2 port {port} ({})",
+            "virtual {} attached on {} port {port} ({})",
             model.name(),
+            if cfg!(target_os = "linux") { "vhci_hcd" } else { "usbip-win2" },
             shared.busid
         );
         Ok(dev)
@@ -746,6 +793,7 @@ impl UsbPad {
     }
 
     /// The ring LED pattern the Xbox 360 driver last set (0 before any).
+    #[cfg(windows)]
     pub fn led(&self) -> u8 {
         self.shared.led.load(Ordering::Relaxed)
     }
@@ -810,6 +858,7 @@ impl UsbPad {
 
 /// Ask the driver to connect to the server at `addr` for `busid`; the
 /// usbip-win2 port it got.
+#[cfg(windows)]
 fn plug_in(vhci_path: &str, busid: &str, addr: SocketAddr) -> io::Result<i32> {
     let h = win::open_overlapped(vhci_path)?;
     let mut ov = win::Overlapped::new()?;
@@ -850,9 +899,7 @@ impl UsbPad {
     /// Unplug the device and plug it in again, keeping this pad (and its
     /// serial): Windows sees it arrive afresh.
     pub fn replug(&self) -> io::Result<()> {
-        let Some(vhci_path) = win::interface_paths(&GUID_VHCI).into_iter().next() else {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "usbip-win2 is not installed"));
-        };
+        let vhci_path = host_path()?;
         self.shared.replug.store(true, Ordering::Release);
         self.detach_now();
         // The server takes the closed connection as a replug and listens.
@@ -881,11 +928,16 @@ impl UsbPad {
 
     /// The HID node Windows made below the pad, if there is one yet.
     pub fn hid_instance(&self) -> Option<String> {
-        let (vid, pid) = self.shared.model.ids();
-        let root = format!(r"USB\VID_{vid:04X}&PID_{pid:04X}\{}", self.serial());
-        win::descendant_ids(&root)
-            .into_iter()
-            .find(|d| d.to_ascii_uppercase().starts_with(r"HID\"))
+        #[cfg(target_os = "linux")]
+        { return linux::hid_for_serial(&self.serial()); }
+        #[cfg(windows)]
+        {
+            let (vid, pid) = self.shared.model.ids();
+            let root = format!(r"USB\VID_{vid:04X}&PID_{pid:04X}\{}", self.serial());
+            win::descendant_ids(&root)
+                .into_iter()
+                .find(|d| d.to_ascii_uppercase().starts_with(r"HID\"))
+        }
     }
 
     /// Unplug the device from Windows now, even while other handles to
@@ -895,6 +947,17 @@ impl UsbPad {
         self.shared.microphone.clear();
         let port = self.port.swap(0, Ordering::AcqRel);
         if port > 0 {
+            #[cfg(target_os = "linux")]
+            {
+                if let Err(e) = linux::detach((port - 1) as u32) {
+                    log::warn!("vhci_hcd detach: {e}");
+                    // Closing the imported transport also makes vhci tear down the device.
+                    if let Some(c) = self.shared.conn.lock().as_ref() {
+                        let _ = c.w.shutdown(Shutdown::Both);
+                    }
+                }
+            }
+            #[cfg(windows)]
             if let Some(path) = win::interface_paths(&GUID_VHCI).first() {
                 if let (Ok(h), Ok(mut ov)) = (win::open_overlapped(path), win::Overlapped::new()) {
                     let mut req = [0u8; 8];
@@ -1513,6 +1576,33 @@ mod tests {
             replug: AtomicBool::new(false),
             attached: Mutex::new(Instant::now()),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_import_runs_the_original_server_and_ep0_descriptor_reply() {
+        let shared = Arc::new(microphone_test_pad());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = shared.clone();
+        let worker = std::thread::spawn(move || session(&server, &listener));
+        let (mut socket, _) = linux::import_socket("1-1", address).unwrap();
+        socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut request = Vec::new();
+        for value in [wire::CMD_SUBMIT, 7, 0x10001, wire::DIR_IN, 0, 0, 18, 0, 0, 0] {
+            request.extend_from_slice(&value.to_be_bytes());
+        }
+        request.extend_from_slice(&[0x80, 6, 0, 1, 0, 0, 18, 0]);
+        socket.write_all(&request).unwrap();
+        let mut reply = [0; wire::HEADER + 18];
+        socket.read_exact(&mut reply).unwrap();
+        assert_eq!(&reply[..8], &[0, 0, 0, 3, 0, 0, 0, 7]);
+        assert_eq!(&reply[20..28], &[0, 0, 0, 0, 0, 0, 0, 18]);
+        // The controller descriptor is pinned, including Sony identity,
+        // revision and string indexes; Linux import must not replace it.
+        assert_eq!(&reply[wire::HEADER..], &[18, 1, 0, 2, 0, 0, 0, 64, 0x4C, 0x05, 0xE6, 0x0C, 0, 1, 1, 2, 3, 1]);
+        socket.shutdown(Shutdown::Both).unwrap();
+        assert!(!worker.join().unwrap());
     }
 
     #[test]

@@ -12,12 +12,21 @@
 //!        2 haptic blocks + 1024 speaker frames ─► 16:15 squeeze ─► 2 Opus frames ─► 0x39 report
 //! ```
 
+#[cfg(windows)]
 pub mod audio;
+#[cfg(target_os = "linux")]
+#[path = "audio_linux.rs"]
+pub mod audio;
+#[cfg(target_os = "linux")]
+pub mod pipewire_linux;
 pub mod capture;
 pub mod dsp;
 pub mod game;
 pub mod mic;
 pub mod opus;
+// Windows hardware probes use the upstream raw-HID transport. Linux diagnostics
+// live in the isolated dualwave CLI to avoid exposing media to game clients.
+#[cfg(windows)]
 pub mod probe;
 pub mod streamer;
 pub mod synth;

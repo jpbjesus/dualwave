@@ -23,9 +23,10 @@ rfd = "0.15"
 
 [build-dependencies]
 cc = "1"
+pkg-config = "0.3"
 winresource = "0.1"
 
-[dependencies.windows-sys]
+[target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.59"
 features = [
     "Win32_Foundation",
@@ -54,3 +55,14 @@ features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Input_XboxController",
 ]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+ksni = { version = "0.3", features = ["blocking"] }
+sha2 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[target.'cfg(target_os = "linux")'.dependencies.eframe]
+version = "0.32"
+default-features = false
+features = ["x11", "wayland"]

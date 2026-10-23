@@ -15,23 +15,43 @@ mod engine;
 mod flight;
 mod games;
 mod haptics;
+#[cfg(windows)]
+mod hid;
+#[cfg(target_os = "linux")]
+#[path = "hid_linux.rs"]
 mod hid;
 mod i18n;
 mod icon_art;
+#[cfg(windows)]
 mod install;
+#[cfg(target_os = "linux")]
+#[path = "install_linux.rs"]
+mod install;
+#[cfg(windows)]
+mod inputsim;
+#[cfg(target_os = "linux")]
+#[path = "inputsim_linux.rs"]
 mod inputsim;
 mod pipeline;
+#[cfg(windows)]
+mod platform;
+#[cfg(target_os = "linux")]
+#[path = "platform_linux.rs"]
 mod platform;
 mod portable;
 mod profile;
 mod settings;
+#[cfg(windows)]
+mod tray;
+#[cfg(target_os = "linux")]
+#[path = "tray_linux.rs"]
 mod tray;
 mod udp;
 mod ui;
 mod update;
 mod virt;
 
-pub const APP_TITLE: &str = "DSZ - DualSense Zen";
+pub const APP_TITLE: &str = "DualWave";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -70,6 +90,10 @@ fn main() {
     platform::timer_resolution_1ms();
     let engine = engine::Engine::new(data);
     if !snapshot {
+        #[cfg(target_os = "linux")]
+        if let Err(error) = inputsim::initialize() {
+            log::warn!("Keyboard/mouse mappings unavailable: {error}");
+        }
         engine.start();
     }
     if updated {

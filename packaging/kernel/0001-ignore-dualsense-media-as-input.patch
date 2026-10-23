@@ -1,10 +1,17 @@
-Subject: [PATCH] HID: playstation: separate DualSense Bluetooth media from input
+Subject: [PATCH] HID: playstation: isolate DualSense media and exclusive input
 
 CRC-checked media packets must never be parsed as controller state. In opt-in
 mode (dualwave_audio=1), route microphone packets unchanged to a vendor HID
 child and prevent their delivery to physical hidraw readers such as Steam.
-The child is receive-only and is not identified as a Sony gamepad. The
-physical controller retains its original input devices and output path.
+The child is not identified as a Sony gamepad and accepts only a local feature
+report for exclusive input ownership. That request never goes to the controller.
+
+While the referenced owner TGID has live threads, parse real USB/Bluetooth
+state normally for the kernel, then forward its unchanged packet to the child
+and suppress physical hidraw delivery. Userspace separately owns the physical
+evdev devices with EVIOCGRAB. Ownership expires after process death even when
+another observer retains a child fd; release and last-close also clear it.
+Device nodes remain enumerated. Output packets and their path are unchanged.
 
 With the parameter disabled, retain the previously tested state-parser filter
 and physical hidraw delivery. No extra Bluetooth packets are sent by this
@@ -15,15 +22,25 @@ Kernel changes: GPL-2.0-or-later. See source/upstream.json for source provenance
 
 --- a/drivers/hid/hid-playstation.c
 +++ b/drivers/hid/hid-playstation.c
-@@ -183,6 +183,7 @@
+@@ -16,6 +16,8 @@
+ #include <linux/leds.h>
+ #include <linux/led-class-multicolor.h>
+ #include <linux/module.h>
++#include <linux/pid.h>
++#include <linux/sched/signal.h>
+ 
+ #include <linux/unaligned.h>
+ 
+@@ -183,6 +185,8 @@
  	struct input_dev *sensors;
  	struct input_dev *touchpad;
  	struct input_dev *jack;
 +	struct hid_device __rcu *audio_hdev;
++	struct pid *dualwave_owner; /* Referenced TGID, protected by base.lock. */
  
  	/* True if this is a DualSense Edge (product 0x0df2). */
  	bool is_edge;
-@@ -232,6 +233,8 @@
+@@ -232,6 +236,8 @@
  	void *output_report_dmabuf;
  	u8 output_seq; /* Sequence number for output report. */
  };
@@ -32,7 +49,7 @@ Kernel changes: GPL-2.0-or-later. See source/upstream.json for source provenance
  
  struct dualsense_touch_point {
  	u8 contact;
-@@ -1463,6 +1466,20 @@
+@@ -1463,6 +1469,20 @@
  			return -EILSEQ;
  		}
  
@@ -53,11 +70,24 @@ Kernel changes: GPL-2.0-or-later. See source/upstream.json for source provenance
  		ds_report = (struct dualsense_input_report *)&data[2];
  	} else {
  		hid_err(hdev, "Unhandled reportID=%d\n", report->id);
-@@ -1899,6 +1916,14 @@
+@@ -1643,6 +1663,12 @@
+ 		ps_dev->battery_status = battery_status;
+ 	}
+ 
++	/* Preserve kernel state, then redirect raw state only while the owner lives. */
++	if (dualwave_audio && dualwave_exclusive(ds)) {
++		dualwave_audio_receive(ds, data, size);
++		return -ENODATA;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -1899,6 +1925,14 @@
  	 * Reporting hardware and firmware is important as there are frequent updates, which
  	 * can change behavior.
  	 */
-+	if (hdev->bus == BUS_BLUETOOTH && dualwave_audio) {
++	if (dualwave_audio) {
 +		ret = dualwave_audio_create(ds);
 +		if (ret) {
 +			hid_err(hdev, "Failed to create DualWave microphone transport: %d\n", ret);

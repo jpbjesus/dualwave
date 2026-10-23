@@ -17,16 +17,26 @@ pub const FOLDER: &str = "dsz-data";
 
 /// `dsz-data` beside the exe, used when it exists.
 pub fn folder() -> Option<PathBuf> {
-    Some(std::env::current_exe().ok()?.parent()?.join(FOLDER))
+    Some(app_file()?.parent()?.join(FOLDER))
+}
+
+fn app_file() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    if let Some(image) = std::env::var_os("APPIMAGE") { return Some(image.into()); }
+    std::env::current_exe().ok()
 }
 
 /// The folder used when not portable.
+#[cfg(windows)]
 pub fn roaming() -> PathBuf {
     std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
         .join("DSZ")
 }
+
+#[cfg(target_os = "linux")]
+pub fn roaming() -> PathBuf { crate::platform::config_dir() }
 
 /// Whether `data_dir` is the portable folder.
 pub fn is_portable(data_dir: &Path) -> bool {
@@ -116,7 +126,7 @@ pub fn switch(engine: Arc<Engine>, on: bool) -> Result<(), String> {
         engine.shutdown();
         crate::applog::close();
         let _ = relocate(&from, &to, on);
-        if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe) = app_file() {
             let _ = std::process::Command::new(exe).arg("--moved").spawn();
         }
         std::process::exit(0);

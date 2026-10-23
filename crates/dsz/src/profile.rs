@@ -1179,7 +1179,9 @@ impl ProfileStore {
     pub fn flush(&self) {
         let removed: Vec<String> = std::mem::take(&mut *self.removed.lock());
         for name in removed {
-            if !self.exists(&name) {
+            // Case-only renames are distinct paths on Linux. Remove the old
+            // spelling before writing the replacement, while preserving a live path.
+            if self.find(&name).is_none_or(|p| self.file_for(&p.name) != self.file_for(&name)) {
                 let _ = std::fs::remove_file(self.file_for(&name));
             }
         }

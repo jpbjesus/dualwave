@@ -1,26 +1,27 @@
 # DualWave
 
-Native Linux audio for the standard PlayStation DualSense over Bluetooth.
-Forked from [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz), with the
-upstream history, protocol implementation, copyright notices and third-party
-licenses preserved. The original Windows application remains in `crates/dsz`.
+Native Linux port of [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz),
+rebranded as DualWave. The original interface, profiles and controller protocol
+are retained, with Linux backends for HID, PipeWire, input injection, tray and
+virtual controllers. Upstream history and third-party licenses are preserved.
 
 ## Status
 
-Experimental CLI prototype for CachyOS / Arch Linux with PipeWire. There is no
-production GUI yet.
+Experimental on CachyOS / Arch Linux with PipeWire. The native GUI builds and
+renders on Linux; the full integrated application still needs hardware testing.
 
 | Feature | Current status |
 | --- | --- |
-| Bluetooth discovery and status | Tested with standard DualSense, firmware 6.30 |
-| Stereo headphone playback over Bluetooth | Confirmed audible in both channels on the controller jack |
-| Bluetooth headset microphone | Voice confirmed by the user after loading the state-parser filter on CachyOS 7.2.9 |
-| Native PipeWire endpoints | Sink/source registration and simultaneous playback/capture tested; a 10-second capture received nonzero samples without saving audio |
-| Physical Mute button | Confirmed by the user with the state-parser filter; the new isolated driver exposes its mute state for synchronization across app restarts |
-| Controller input while audio runs | Preserved when the dedicated microphone child is present; otherwise the legacy mode grabs evdev input |
-| Steam coexistence | New media-isolation path implemented, pending hardware validation; legacy mode still requires Steam closed |
-| Persistent kernel integration | Source-only Arch DKMS package prepared and compiled for installed current/LTS headers; installation and reboot validation pending |
-| Reconnection and GUI | Not implemented |
+| Original GUI and profiles | Native build and headless rendering tested; original layout retained |
+| Bluetooth headphone playback, headset mic, physical Mute | Confirmed by the user with the earlier CLI and first kernel filter, standard DualSense firmware 6.30 |
+| GUI Bluetooth audio | Native PipeWire endpoints and original audio encoder integrated; hardware validation pending |
+| Lighting, adaptive triggers, haptics, mappings, motion and touch | Original core retained; Linux HID/uinput backends implemented, integrated hardware validation pending |
+| Virtual Xbox 360 / DualSense / DualShock 4 | Original USB/IP devices retained; native Linux host adapter and scoped privileged broker implemented; attachment validation pending |
+| Exclusive physical input | Scoped evdev grabs and kernel raw-state redirection implemented; module builds/tests pass, hardware validation pending |
+| Per-game profiles | Native process discovery, Wine/Proton paths and original profile logic integrated |
+| Tray and autostart | Native StatusNotifier and XDG desktop entry support |
+| Persistent system support | DKMS package and AppImage first-launch setup prepared; installation/reboot validation pending |
+| Windows-only integrations | Game Bar and Windows audio endpoint role management have no Linux counterpart; PipeWire session policy is preserved |
 
 Stereo output, headset voice and the physical Mute button were confirmed by
 the user on the standard DualSense, firmware 6.30, with the first kernel filter.
@@ -32,17 +33,29 @@ when the jack is unplugged; automatic selection of a newly plugged headset mic
 and controller reconnection still need work. USB audio uses the controller's
 existing USB audio device and is outside this Bluetooth bridge.
 
+## Use the AppImage on CachyOS
+
+Open `DualWave-x86_64.AppImage`, accept the initial system configuration and
+enter the administrator password when prompted. Reboot once, reconnect the
+controller and open the AppImage again. The application itself runs as your
+normal user; kernel updates are handled through DKMS.
+
+The build output is `target/appimage/DualWave-x86_64.AppImage`. In **Haptics &
+audio**, enable the microphone explicitly when you want to record. Choose
+**DualWave Headphones** and **DualWave Microphone** in your desktop or app's
+sound settings. Recording remains disabled by default.
+
 ## Build on CachyOS / Arch
 
 Install the development dependencies, then build as your normal user:
 
 ```sh
 sudo pacman -S --needed base-devel rust pipewire libpipewire opus
-cargo build --release -p dualwave --locked
+cargo build --release -p dsz -p dualwave --locked
 ```
 
-The application links to the system PipeWire and Opus libraries. It does not
-install system configuration or start a background service automatically.
+Run `target/release/dsz` for the full GUI. The `dualwave` executable remains
+available for audio diagnostics. Native builds use system libraries.
 
 ```sh
 cargo run -p dualwave -- list
@@ -128,30 +141,36 @@ Build the source-only package without root (the builder requires `makepkg`):
 python3 packaging/build-kernel-package.py
 ```
 
-It stages checksummed sources in `target/packages/dualwave-hid-dkms/` and builds
-`dualwave-hid-dkms-0.2.0-1-any.pkg.tar.zst`. Install DKMS and the package:
+It stages checksummed sources in `target/packages/dualwave-hid-dkms/`.
+The AppImage includes that local package: its first-launch setup requests one
+administrator authorization, installs matching missing kernel headers and system
+support, and enables the virtual-controller socket for the next boot. Reboot
+once afterwards. Normal application use runs without administrator privileges.
+Automatic setup currently targets CachyOS. No system installation has yet been
+performed or hardware-validated by the agent.
+
+The package includes the source-only DKMS module, narrowly scoped udev rules,
+a `dualwave` group for uinput and the USB/IP broker, and systemd socket units.
+The active module is never replaced during a running session. Arch package
+hooks rebuild DKMS and initramfs and reload udev rules. Future kernel API
+compatibility still depends on successful DKMS builds and matching headers.
+The sources compiled against `7.2.9-2-cachyos` and `6.18.55-2-cachyos-lts`.
+
+The broker accepts only a local imported TCP socket from an authorized local
+process, tracks ownership and releases matching virtual ports when clients exit.
+It cannot adopt existing busy ports after a broker restart; restart the app's
+virtual controller after such a restart.
+
+Build the AppImage on CachyOS with an official `appimagetool` executable:
 
 ```sh
-sudo pacman -S --needed dkms
-sudo pacman -U target/packages/dualwave-hid-dkms/dualwave-hid-dkms-0.2.0-1-any.pkg.tar.zst
-sudo udevadm control --reload-rules
-sudo mkinitcpio -P
+python3 packaging/appimage/build.py --appimagetool /path/to/appimagetool
 ```
 
-Then reboot, reconnect the controller and run `./target/release/dualwave probe`.
-It should report **isolated microphone transport**. Installing the package does
-not stop the active audio session or reload the running module automatically.
-The initramfs rebuild ensures an older early-loaded copy cannot take precedence.
-The active user gets access through udev; the application continues to run
-without root. DKMS rebuilds the module on kernel updates when matching headers
-are available. Build failures must be resolved before booting the updated
-kernel; automatic rebuild is not a promise of compatibility with every future
-kernel API.
-
-The packaged sources compiled against `7.2.9-2-cachyos` and
-`6.18.55-2-cachyos-lts` headers. Actual DKMS installation, reboot persistence,
-new-interface hardware operation and Steam coexistence remain validation steps.
-No persistent module has been installed by the agent.
+Output: `target/appimage/DualWave-x86_64.AppImage`. This build uses the host's
+glibc and graphics stack; compatibility with older distributions is not claimed.
+Use `--check` to verify its bundled driver payload, `--plan` to inspect setup
+without installing, or `--cli list` for read-only controller discovery.
 
 To remove the packaged override and return to the stock module:
 
@@ -172,7 +191,7 @@ References: [Linux driver](https://linux.googlesource.com/linux/kernel/git/torva
 ```sh
 cc -std=c11 -Wall -Wextra -Werror packaging/kernel/test-routing.c -o /tmp/dualwave-routing-test
 /tmp/dualwave-routing-test
-cargo test -p ds-proto -p dualwave --locked
+cargo test --workspace --locked
 cargo clippy -p dualwave --all-targets --locked -- -D warnings
 ```
 
@@ -356,6 +375,12 @@ cargo test --workspace
 ```
 
 ## Protocol sources
+
+The Linux port also follows the kernel's public
+[vhci host ABI](https://github.com/torvalds/linux/blob/master/drivers/usb/usbip/vhci_sysfs.c),
+[USB/IP host implementation](https://github.com/torvalds/linux/blob/master/tools/usb/usbip/libsrc/vhci_driver.c)
+and [PipeWire stream API](https://docs.pipewire.org/group__pw__stream.html).
+
 
 DSZ's protocol code was written from public documentation and code with open licenses:
 

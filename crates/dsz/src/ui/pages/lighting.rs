@@ -154,7 +154,7 @@ impl App {
                             }
                             muted(
                                 ui,
-                                crate::i18n::tr("Uses the output chosen on Haptics & audio, or the Windows default. A game's light still wins."),
+                                crate::i18n::tr(if cfg!(target_os = "linux") { "Uses the output chosen on Haptics & audio, or the system default. A game's light still wins." } else { "Uses the output chosen on Haptics & audio, or the Windows default. A game's light still wins." }),
                             );
                         }
                     }

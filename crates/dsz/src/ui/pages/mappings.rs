@@ -86,8 +86,13 @@ impl App {
         page_header(
             ui,
             crate::i18n::tr("Button mapping"),
-            crate::i18n::tr("Send keys, mouse buttons, media keys, or app actions from any button or combo, including turning a Bluetooth controller off. Touchpad Left, Center, and Right are the click in each third of the pad. Touchpad is still the whole click. With a virtual controller on, a mapping can also hide its button from the game or press a different controller button. Xbox buttons work on any profile, so the Xbox button can open Game Bar (tap) or Task View (hold)."),
+            crate::i18n::tr(if cfg!(target_os = "linux") { "Send keys, mouse buttons, media keys, or app actions from any button or combo, including turning a Bluetooth controller off. Touchpad Left, Center, and Right are the click in each third of the pad. With a virtual controller on, a mapping can suppress its original button or press a different controller button. Xbox mappings require an active virtual Xbox 360 controller." } else { "Send keys, mouse buttons, media keys, or app actions from any button or combo, including turning a Bluetooth controller off. Touchpad Left, Center, and Right are the click in each third of the pad. Touchpad is still the whole click. With a virtual controller on, a mapping can also hide its button from the game or press a different controller button. Xbox buttons work on any profile, so the Xbox button can open Game Bar (tap) or Task View (hold)." }),
         );
+        #[cfg(target_os = "linux")]
+        if let Some(error) = crate::inputsim::error() {
+            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}"), WARN);
+            ui.add_space(10.0);
+        }
         let edge = self
             .engine
             .device_list()
@@ -319,16 +324,21 @@ impl App {
                                             ui.selectable_value(button, b, crate::i18n::tr(b.label()));
                                         }
                                     });
+                                #[cfg(target_os = "linux")]
+                                if !xbox_on && !can_hide {
+                                    ui.label(RichText::new(crate::i18n::tr("needs a virtual Xbox 360 controller")).size(12.0).color(WARN));
+                                }
+                                #[cfg(windows)]
                                 if !xbox_on && can_hide {
                                     ui.label(RichText::new(crate::i18n::tr("hidden helper Xbox controller")).size(12.0).color(MUTED))
-                                        .on_hover_text(crate::i18n::tr("This profile has no virtual Xbox controller, so DSZ keeps a helper one plugged in, hidden from games with HidHide. Only Windows (Task View, Game Bar) sees it. Needs usbip-win2."));
+                                        .on_hover_text(crate::i18n::tr("This profile has no virtual Xbox controller, so DualWave keeps a helper one plugged in, hidden from games with HidHide. Only Windows (Task View, Game Bar) sees it. Needs usbip-win2."));
                                 } else if !xbox_on {
                                     ui.label(RichText::new(crate::i18n::tr("games see a helper controller")).size(12.0).color(WARN))
-                                        .on_hover_text(crate::i18n::tr("Without HidHide, DSZ plugs in a helper Xbox controller for the press, which games can see, and unplugs it 30 seconds after the last press. Windows needs about a second to see it, so the first press arrives late. Install HidHide on the Virtual controller page to hide it."));
+                                        .on_hover_text(crate::i18n::tr("Without HidHide, DualWave plugs in a helper Xbox controller for the press, which games can see, and unplugs it 30 seconds after the last press. Windows needs about a second to see it, so the first press arrives late. Install HidHide on the Virtual controller page to hide it."));
                                 }
                             }
                             Action::Run { path } => {
-                                ui.add(egui::TextEdit::singleline(path).hint_text("C:\\path\\to\\app.exe").desired_width(220.0));
+                                ui.add(egui::TextEdit::singleline(path).hint_text(if cfg!(target_os = "linux") { "/path/to/program" } else { "C:\\path\\to\\app.exe" }).desired_width(220.0));
                                 if button(ui, crate::i18n::tr("Browse…")).clicked() {
                                     if let Some(f) = rfd::FileDialog::new().pick_file() {
                                         *path = f.display().to_string();

@@ -121,6 +121,11 @@ impl App {
             crate::i18n::tr("Motion & touch"),
             crate::i18n::tr("Aim with the gyro, drive the cursor with the touchpad, or turn a stick into a mouse, scroll wheel, or keys."),
         );
+        #[cfg(target_os = "linux")]
+        if let Some(error) = crate::inputsim::error() {
+            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}"), WARN);
+            ui.add_space(10.0);
+        }
         let mut live = dev.map(|d| d.snapshot()).unwrap_or_default();
         if dev.is_none() {
             let s = &mut live.input;

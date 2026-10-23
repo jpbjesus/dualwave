@@ -56,6 +56,11 @@ impl App {
             );
             ui.add_space(10.0);
         }
+        #[cfg(target_os = "linux")]
+        if let Some(error) = dev.and_then(|device| device.native_audio_error.lock().clone()) {
+            note(ui, &crate::localized_format!("Controller audio is unavailable: {error}", "O áudio do controle está indisponível: {error}"), WARN);
+            ui.add_space(10.0);
+        }
         let devices = self.audio_device_list();
         let capture = self.engine.audio.status.lock().clone();
 
@@ -128,7 +133,7 @@ impl App {
                             crate::i18n::tr("What the PC plays on this output"),
                             |ui| {
                                 let label = if h.device.is_empty() {
-                                    crate::i18n::tr("Windows default").to_string()
+                                    crate::i18n::tr(if cfg!(target_os = "linux") { "System default" } else { "Windows default" }).to_string()
                                 } else {
                                     h.device.clone()
                                 };
@@ -139,7 +144,7 @@ impl App {
                                         ui.selectable_value(
                                             &mut h.device,
                                             String::new(),
-                                            crate::i18n::tr("Windows default"),
+                                            crate::i18n::tr(if cfg!(target_os = "linux") { "System default" } else { "Windows default" }),
                                         );
                                         for d in &devices {
                                             ui.selectable_value(&mut h.device, d.clone(), d);
@@ -215,6 +220,8 @@ impl App {
                     crate::i18n::tr("Speaker sound over Bluetooth: a game's own speaker sounds through the virtual DualSense, and PC audio if you want it"),
                     |ui| {
                         let h = &mut p.haptics;
+                        #[cfg(target_os = "linux")]
+                        muted(ui, crate::i18n::tr("For direct desktop playback, choose DualWave Headphones in your app. Bluetooth and Stream haptics must be on."));
                         slider_row(
                             ui,
                             crate::i18n::tr("Volume"),
@@ -278,13 +285,13 @@ impl App {
         card(
             ui,
             crate::i18n::tr("Bluetooth microphone (experimental)"),
-            crate::i18n::tr("Controller or headset microphone as a Windows recording device"),
+            crate::i18n::tr(if cfg!(target_os = "linux") { "Controller or headset microphone as a PipeWire recording source" } else { "Controller or headset microphone as a Windows recording device" }),
             |ui| {
                 let m = &mut p.microphone;
                 toggle_row(
                     ui,
                     crate::i18n::tr("Enable microphone"),
-                    crate::i18n::tr("Requires Bluetooth and an active virtual DualSense controller"),
+                    crate::i18n::tr(if cfg!(target_os = "linux") { "Requires Bluetooth and working PipeWire audio or an active virtual DualSense controller" } else { "Requires Bluetooth and an active virtual DualSense controller" }),
                     &mut m.enabled,
                 );
                 if m.enabled {
@@ -320,9 +327,13 @@ impl App {
                         "%",
                     );
                     if let Some(d) = dev {
-                        let ready = bt && d.virt.active() == Some(VirtualKind::DualSense);
+                        let virtual_microphone = d.virt.active() == Some(VirtualKind::DualSense);
+                        #[cfg(windows)]
+                        let ready = bt && virtual_microphone;
+                        #[cfg(target_os = "linux")]
+                        let ready = bt && (virtual_microphone || d.native_audio().is_some_and(|audio| audio.healthy()));
                         if !ready {
-                            note(ui, crate::i18n::tr("Connect over Bluetooth and select DualSense on the Virtual controller page to expose the microphone to Windows."), WARN);
+                            note(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Connect over Bluetooth and check that PipeWire audio is available. A virtual DualSense can also expose its microphone." } else { "Connect over Bluetooth and select DualSense on the Virtual controller page to expose the microphone to Windows." }), WARN);
                         } else {
                             let toggled = d.toggles.lock().mute_engaged;
                             ui.horizontal(|ui| {
@@ -330,11 +341,18 @@ impl App {
                                 meter(ui, d.microphone.peak() as f32 / 255.0, VIOLET, 184.0);
                                 if m.muted || (m.mute_button && toggled) {
                                     pill(ui, crate::i18n::tr("muted"), WARN);
-                                } else if !d.virt.microphone_open() {
+                                } else if !d.virt.microphone_open()
+                                    && {
+                                        #[cfg(windows)]
+                                        { true }
+                                        #[cfg(target_os = "linux")]
+                                        { !d.native_audio().is_some_and(|audio| audio.recording()) }
+                                    }
+                                {
                                     pill(ui, crate::i18n::tr("no app recording"), FAINT);
                                 }
                             });
-                            muted(ui, crate::i18n::tr("In Windows, Discord or your game, select the virtual Wireless Controller microphone as the input device. The controller's microphone is on only while an app records from it."));
+                            muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "In your recording app, choose DualWave Microphone or the virtual Wireless Controller microphone. Capture starts only while an app records from it." } else { "In Windows, Discord or your game, select the virtual Wireless Controller microphone as the input device. The controller's microphone is on only while an app records from it." }));
                         }
                     } else {
                         muted(

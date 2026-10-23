@@ -254,6 +254,12 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
         let profile = cache.get(engine, device);
         let h = &profile.haptics;
         let vo = &profile.virtual_out;
+        #[cfg(target_os = "linux")]
+        let native_audio = device.native_audio();
+        #[cfg(target_os = "linux")]
+        let native_speaker = native_audio.as_ref().is_some_and(|audio| audio.playing());
+        #[cfg(windows)]
+        let native_speaker = false;
         device.apply_microphone(&profile.microphone);
         // Only opt-in capture may change the hardware-tuned media bytes.
         // Keep this latch for this physical connection, even after disabling.
@@ -263,14 +269,14 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
         let enabled = h.enabled && device.is_bluetooth();
         let game_src = device.game_audio.lock().clone();
         let game_speaker = game_src.is_some() && vo.game_speaker;
-        let pc_speaker = h.pc_audio_on_speaker;
-        let speaker_allowed = enabled && h.speaker_volume > 0 && (game_speaker || pc_speaker);
+        let pc_speaker = h.pc_audio_on_speaker && device.media_transport_ready();
+        let speaker_allowed = enabled && device.media_transport_ready() && h.speaker_volume > 0 && (game_speaker || pc_speaker || native_speaker);
         // The speaker route goes on when the speaker is first needed and
         // stays on (silent between sounds) while the profile allows it:
         // switching the amplifier on for every burst of sound pops. Off
         // (muted) only when the profile turns the speaker off.
         let speaker_possible =
-            enabled && h.speaker_volume > 0 && (vo.game_speaker || pc_speaker);
+            enabled && device.media_transport_ready() && h.speaker_volume > 0 && (vo.game_speaker || pc_speaker || native_speaker);
         let route_now = device.speaker_route.load(Ordering::Acquire);
         if speaker_allowed || (speaker_possible && route_now > SPEAKER_MUTED) {
             let headset = h.headset_when_plugged && device.live.lock().input.headphones;
@@ -291,6 +297,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
         // which is what an Xbox game with no haptic modes on gets.
         let continuous = h.source == AudioSource::SystemAudio
             || pc_speaker
+            || native_speaker
             || h.buttons.enabled
             || h.triggers.enabled
             || h.rumble_as_haptics
@@ -309,6 +316,8 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
             }
             source = None;
             encoder = None;
+            #[cfg(target_os = "linux")]
+            if let Some(audio) = native_audio.as_ref() { audio.clear_playback(); }
             if was_media {
                 was_media = false;
                 if mic_control(&mut counters, recording) {
@@ -530,6 +539,10 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
                 o[0] += v[0];
                 o[1] += v[1];
             }
+            #[cfg(target_os = "linux")]
+            if native_speaker {
+                if let Some(audio) = native_audio.as_ref() { audio.mix_playback(&mut spk[at..]); }
+            }
             for f in &spk[at..] {
                 speaker_peak = speaker_peak.max(f[0].abs()).max(f[1].abs());
             }
@@ -625,6 +638,8 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
             underruns = 0;
         }
     }
+    #[cfg(target_os = "linux")]
+    if let Some(audio) = device.native_audio() { audio.set_recording(false); }
     device.microphone.configure(false, true, 100);
     if was_media || capture_used {
         mic_control(&mut counters, false);

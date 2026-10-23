@@ -15,6 +15,27 @@ int main(void)
                 (type <= 1 ? DUALWAVE_STATE : DUALWAVE_LEGACY_MEDIA));
         }
     }
-    puts("512 routing cases passed: media never reaches physical input/raw readers in isolated mode");
+    unsigned char request[DUALWAVE_CONTROL_SIZE] = { DUALWAVE_CONTROL_REPORT, DUALWAVE_CONTROL_VERSION };
+    assert(dualwave_control_valid(request, sizeof(request)));
+    request[2] = 1;
+    assert(dualwave_control_valid(request, sizeof(request)));
+    for (unsigned command = 2; command < 256; command++) {
+        request[2] = command;
+        assert(!dualwave_control_valid(request, sizeof(request)));
+    }
+    request[2] = 1;
+    for (unsigned index = 3; index < sizeof(request); index++) {
+        request[index] = 1;
+        assert(!dualwave_control_valid(request, sizeof(request)));
+        request[index] = 0;
+    }
+    assert(!dualwave_control_valid(request, sizeof(request) - 1));
+    assert(!dualwave_control_valid(request, sizeof(request) + 1));
+    request[0] = 0x31;
+    assert(!dualwave_control_valid(request, sizeof(request)));
+    request[0] = DUALWAVE_CONTROL_REPORT;
+    request[1]++;
+    assert(!dualwave_control_valid(request, sizeof(request)));
+    puts("512 media routing cases and strict local exclusive-control ABI validation passed");
     return 0;
 }

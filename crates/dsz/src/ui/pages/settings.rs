@@ -45,8 +45,8 @@ impl App {
                     let mut auto = s.start_with_windows;
                     if toggle_row(
                         ui,
-                        crate::i18n::tr("Start with Windows"),
-                        crate::i18n::tr("Runs quietly in the tray after sign-in"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Start at sign-in" } else { "Start with Windows" }),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Runs after sign-in; uses the tray when your desktop supports it" } else { "Runs quietly in the tray after sign-in" }),
                         &mut auto,
                     ) {
                         if crate::platform::set_autostart(auto) {
@@ -59,19 +59,19 @@ impl App {
                     changed |= toggle_row(
                         ui,
                         crate::i18n::tr("Start minimized"),
-                        crate::i18n::tr("Open to the tray"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Open to the tray when available; otherwise keep the window visible" } else { "Open to the tray" }),
                         &mut s.start_minimized,
                     );
                     changed |= toggle_row(
                         ui,
                         crate::i18n::tr("Close to tray"),
-                        crate::i18n::tr("The X button keeps it running in the background"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "The X button keeps it running when a tray is available" } else { "The X button keeps it running in the background" }),
                         &mut s.close_to_tray,
                     );
                     changed |= toggle_row(
                         ui,
                         crate::i18n::tr("Minimize to tray"),
-                        crate::i18n::tr("The minimize button hides the window to the tray instead of the taskbar"),
+                        crate::i18n::tr(if cfg!(target_os = "linux") { "Hide to the tray when available; otherwise minimize normally" } else { "The minimize button hides the window to the tray instead of the taskbar" }),
                         &mut s.minimize_to_tray,
                     );
                     let hint = crate::localized_format!("Every controller starts on \"{}\"; picking another profile still sticks until the app restarts", "Todos os controles iniciam em \"{}\"; outro perfil escolhido permanece até reiniciar o aplicativo", s.default_profile);
@@ -84,7 +84,7 @@ impl App {
                     changed |=
                         toggle_row(ui, crate::i18n::tr("Show tips"), crate::i18n::tr("On the Overview page"), &mut s.show_tips);
                     let mut scale = s.ui_scale;
-                    let moved = row(ui, crate::i18n::tr("Interface size"), crate::i18n::tr("On top of the Windows display scale"), |ui| {
+                    let moved = row(ui, crate::i18n::tr("Interface size"), crate::i18n::tr(if cfg!(target_os = "linux") { "On top of the desktop display scale" } else { "On top of the Windows display scale" }), |ui| {
                         ui.add(
                             egui::Slider::new(&mut scale, 0.8..=1.6)
                                 .step_by(0.05)
@@ -316,7 +316,7 @@ impl App {
                         ))
                         .font(heading(14.0)),
                     );
-                    muted(ui, crate::i18n::tr("A fast native companion for DualSense and DualSense Edge. Virtual controllers need two free, open-source drivers, usbip-win2 and HidHide, which the Virtual controller page can install in one click. There is no license service."));
+                    muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "A fast native companion for DualSense and DualSense Edge. Linux uses PipeWire for audio, uinput for keyboard and mouse mappings, and USB/IP for virtual controllers. Configure system support on the Virtual controller page. There is no license service." } else { "A fast native companion for DualSense and DualSense Edge. Virtual controllers need two free, open-source drivers, usbip-win2 and HidHide, which the Virtual controller page can install in one click. There is no license service." }));
                     muted(
                         ui,
                         &crate::localized_format!(
@@ -368,7 +368,7 @@ impl App {
                     }
                 });
                 ui.add_space(4.0);
-                muted(ui, &crate::localized_format!("Dolphin: Controllers > Alternate Input Sources > enable DSU Client and add a server named DSZ (127.0.0.1, port {PORT}). Picking the DSUClient device maps nothing by itself: in the Wii Remote's Motion Input tab, right-click each Accelerometer and Gyroscope box and enter its DSU input, such as `DSUClient/0/DSZ:Accel Up` or `DSUClient/0/DSZ:Gyro Pitch Up`, then tick Enabled under Point for gyro pointing. Leave Device on the controller you use for buttons.", "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DSZ (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: na aba Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e digite a entrada DSU, como `DSUClient/0/DSZ:Accel Up` ou `DSUClient/0/DSZ:Gyro Pitch Up`, e marque Enabled em Point para apontar com o giroscópio. Deixe Device no controle que você usa para os botões."));
+                muted(ui, &crate::localized_format!("Dolphin: Controllers > Alternate Input Sources > enable DSU Client and add a server named DualWave (127.0.0.1, port {PORT}). Picking the DSUClient device maps nothing by itself: in the Wii Remote's Motion Input tab, right-click each Accelerometer and Gyroscope box and enter its DSU input, such as `DSUClient/0/DualWave:Accel Up` or `DSUClient/0/DualWave:Gyro Pitch Up`, then tick Enabled under Point for gyro pointing. Leave Device on the controller you use for buttons.", "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DualWave (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: na aba Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e digite a entrada DSU, como `DSUClient/0/DualWave:Accel Up` ou `DSUClient/0/DualWave:Gyro Pitch Up`, e marque Enabled em Point para apontar com o giroscópio. Deixe Device no controle que você usa para os botões."));
                 muted(ui, &crate::localized_format!("Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, port {PORT}). Yuzu-family emulators: Controls > Motion > CemuhookUDP.", "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, porta {PORT}). Emuladores da família Yuzu: Controls > Motion > CemuhookUDP."));
                 muted(ui, crate::i18n::tr("Buttons and sticks still come from the virtual controller. Set the profile's gyro to Off while playing, or the gyro moves the mouse as well."));
             },
@@ -384,7 +384,7 @@ impl App {
             if toggle_row(
                 ui,
                 crate::i18n::tr("Check for updates"),
-                crate::i18n::tr("Asks GitHub once a day whether a newer DSZ is out"),
+                crate::i18n::tr("Asks GitHub once a day whether a newer DualWave is out"),
                 &mut on,
             ) {
                 engine.settings.write().check_updates = on;
@@ -398,7 +398,7 @@ impl App {
                     note(
                         ui,
                         &crate::localized_format!(
-                            "DSZ {} is available (this is {}). Updating restarts DSZ, so the virtual controllers reconnect: best done outside a game.", "O DSZ {} está disponível (esta é a versão {}). A atualização reinicia o DSZ e reconecta os controles virtuais: prefira atualizar fora de um jogo.",
+                            "DualWave {} is available (this is {}). Updating restarts DualWave, so the virtual controllers reconnect: best done outside a game.", "O DualWave {} está disponível (esta é a versão {}). A atualização reinicia o DualWave e reconecta os controles virtuais: prefira atualizar fora de um jogo.",
                             r.version,
                             env!("CARGO_PKG_VERSION")
                         ),
@@ -414,7 +414,7 @@ impl App {
                         }
                     });
                     ui.add_space(4.0);
-                    muted(ui, crate::i18n::tr("Your browser downloads the new dsz.exe; DSZ then checks it against GitHub's checksum and installs it when you say so."));
+                    muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Your browser downloads the new AppImage; DualWave checks its checksum and replaces the current AppImage when you choose Install and restart." } else { "Your browser downloads the new dsz.exe; DualWave then checks it against GitHub's checksum and installs it when you say so." }));
                 }
                 Some(Status::Waiting(r)) => {
                     ui.horizontal(|ui| {
@@ -422,16 +422,16 @@ impl App {
                         muted(
                             ui,
                             &crate::localized_format!(
-                                "Waiting for your browser to download DSZ {} to the Downloads folder…", "Aguardando o navegador baixar o DSZ {} na pasta Downloads…",
+                                "Waiting for your browser to download DualWave {} to the Downloads folder…", "Aguardando o navegador baixar o DualWave {} na pasta Downloads…",
                                 r.version
                             ),
                         );
                     });
                     ui.add_space(6.0);
                     ui.horizontal_wrapped(|ui| {
-                        if button(ui, "I saved it somewhere else…").clicked() {
+                        if button(ui, crate::i18n::tr("I saved it somewhere else…")).clicked() {
                             if let Some(f) = rfd::FileDialog::new()
-                                .add_filter("DSZ", &["exe"])
+                                .add_filter("DualWave", if cfg!(target_os = "linux") { &["AppImage"] } else { &["exe"] })
                                 .pick_file()
                             {
                                 if let Err(e) = update::use_file(r.clone(), f) {
@@ -451,7 +451,7 @@ impl App {
                     note(
                         ui,
                         &crate::localized_format!(
-                            "DSZ {} is downloaded and checked ({}). Installing restarts DSZ, so the virtual controllers reconnect.", "O DSZ {} foi baixado e verificado ({}). A instalação reinicia o DSZ e reconecta os controles virtuais.",
+                            "DualWave {} is downloaded and checked ({}). Installing restarts DualWave, so the virtual controllers reconnect.", "O DualWave {} foi baixado e verificado ({}). A instalação reinicia o DualWave e reconecta os controles virtuais.",
                             r.version,
                             file.display()
                         ),
@@ -472,10 +472,10 @@ impl App {
                     let text = match &status {
                         Some(Status::Checking) => crate::i18n::tr("Checking…").to_string(),
                         Some(Status::UpToDate) => {
-                            format!("DSZ {} is the latest version.", env!("CARGO_PKG_VERSION"))
+                            crate::localized_format!("DualWave {} is the latest version.", "O DualWave {} é a versão mais recente.", env!("CARGO_PKG_VERSION"))
                         }
                         Some(Status::Failed(e)) => e.clone(),
-                        _ => crate::localized_format!("This is DSZ {}.", "Esta é a versão {} do DSZ.", env!("CARGO_PKG_VERSION")),
+                        _ => crate::localized_format!("This is DualWave {}.", "Esta é a versão {} do DualWave.", env!("CARGO_PKG_VERSION")),
                     };
                     if let Some(Status::Failed(_)) = status {
                         note(ui, &text, WARN);
@@ -524,7 +524,7 @@ impl App {
                 if primary_button(ui, crate::i18n::tr("Back up all settings…")).clicked() {
                     if let Some(f) = rfd::FileDialog::new()
                         .set_file_name(crate::backup::suggested_name())
-                        .add_filter(crate::i18n::tr("DSZ backup"), &["json"])
+                        .add_filter(crate::i18n::tr("DualWave backup"), &["json"])
                         .save_file()
                     {
                         match crate::backup::export(&engine, &f) {
@@ -535,7 +535,7 @@ impl App {
                 }
                 if button(ui, crate::i18n::tr("Restore from backup…")).clicked() {
                     if let Some(f) = rfd::FileDialog::new()
-                        .add_filter(crate::i18n::tr("DSZ backup"), &["json"])
+                        .add_filter(crate::i18n::tr("DualWave backup"), &["json"])
                         .pick_file()
                     {
                         match crate::backup::read(&f) {
@@ -596,9 +596,9 @@ impl App {
                 let mut on = was;
                 if toggle_row(
                     ui,
-                    crate::i18n::tr("Keep settings beside dsz.exe"),
+                    crate::i18n::tr(if cfg!(target_os = "linux") { "Keep settings beside the app" } else { "Keep settings beside dsz.exe" }),
                     &crate::localized_format!(
-                        "Portable: settings, profiles and the log go in a {} folder next to the app. Switching moves them and restarts DSZ", "Portátil: configurações, perfis e registros ficam em uma pasta {} ao lado do aplicativo. A troca move esses arquivos e reinicia o DSZ",
+                        "Portable: settings, profiles and the log go in a {} folder next to the app. Switching moves them and restarts DualWave", "Portátil: configurações, perfis e registros ficam em uma pasta {} ao lado do aplicativo. A troca move esses arquivos e reinicia o DualWave",
                         crate::portable::FOLDER
                     ),
                     &mut on,

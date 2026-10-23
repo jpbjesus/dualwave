@@ -184,6 +184,7 @@ impl<T: WinitApp> WinitAppWrapper<T> {
                     // redraw it asks for (Windows sends no WM_PAINT), so
                     // polling for it spins a core until the window is shown
                     // again. Drop the repaint; showing the window repaints.
+                    #[cfg(target_os = "windows")]
                     if window.is_visible() == Some(false) {
                         log::trace!("dropping repaint of hidden {window_id:?}");
                         return false;

@@ -52,10 +52,18 @@ struct Session {
     media: Option<MediaReader>,
     prefer_media: bool,
 }
+
+fn require_media_transport(required: bool, available: bool) -> io::Result<()> {
+    if required && !available {
+        return Err(io::Error::other("The isolated microphone driver is not active. Complete initial setup and reboot."));
+    }
+    Ok(())
+}
 impl Session {
-    fn open(path: &Path, source: Option<MicrophoneSource>) -> io::Result<Self> {
+    fn open(path: &Path, source: Option<MicrophoneSource>, required: bool) -> io::Result<Self> {
         let hid = Hid::open(path, true)?;
         let media = MediaReader::for_controller(&hid)?;
+        require_media_transport(required, media.is_some())?;
         if media.is_none() && hid::steam_running() {
             return Err(io::Error::other("Close Steam before audio probes (upstream AGENTS.md hardware rule)"));
         }
@@ -99,13 +107,13 @@ impl Drop for Session {
 #[derive(Clone, Copy, PartialEq)]
 pub enum Mode { Run, Tone, Microphone }
 
-pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSource, volume: u8) -> io::Result<()> {
+pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSource, volume: u8, required: bool) -> io::Result<()> {
     install_signals();
     let mut encoder = opus::Encoder::new().ok_or_else(|| io::Error::other("Opus encoder failed"))?;
     let mut decoder = opus::Decoder::new().ok_or_else(|| io::Error::other("Opus decoder failed"))?;
     let mut bridge = if mode == Mode::Run { Some(Bridge::new()?) } else { None };
     let selected = (mode != Mode::Tone).then_some(source);
-    let mut session = Session::open(path, selected)?;
+    let mut session = Session::open(path, selected, required)?;
     let initial_mute = match &session.media {
         Some(media) => media.kernel_muted()?.unwrap_or(false),
         None => false,
@@ -324,6 +332,12 @@ pub fn probe(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installed_launcher_must_not_fall_back_to_grabbing_gamepad_input() {
+        assert!(require_media_transport(true, false).is_err());
+        assert!(require_media_transport(true, true).is_ok());
+        assert!(require_media_transport(false, false).is_ok());
+    }
     #[test]
     fn audio_controls_never_claim_gameplay_outputs_and_keep_crc() {
         let report = control(true, 38, Some(MicrophoneSource::Headset), false);

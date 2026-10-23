@@ -107,7 +107,7 @@ impl App {
             ];
             let mut v: Vec<String> = crate::platform::process_names()
                 .into_iter()
-                .filter(|n| n.ends_with(".exe") && !skip.contains(&n.as_str()))
+                .filter(|n| (cfg!(target_os = "linux") || n.ends_with(".exe")) && !skip.contains(&n.as_str()) && n != "dsz" && n != "dualwave")
                 .collect();
             v.sort();
             self.processes = Some((Instant::now(), v));
@@ -435,11 +435,11 @@ impl App {
                                 }
                             }
                         });
-                    if button(ui, crate::i18n::tr("Browse for .exe…")).clicked() {
-                        if let Some(f) = rfd::FileDialog::new()
-                            .add_filter(crate::i18n::tr("Program"), &["exe"])
-                            .pick_file()
-                        {
+                    if button(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Browse for a program…" } else { "Browse for .exe…" })).clicked() {
+                        let dialog = rfd::FileDialog::new();
+                        #[cfg(windows)]
+                        let dialog = dialog.add_filter(crate::i18n::tr("Program"), &["exe"]);
+                        if let Some(f) = dialog.pick_file() {
                             if let Some(n) = f.file_name() {
                                 s.games.push(GameRule {
                                     enabled: true,
@@ -453,7 +453,7 @@ impl App {
                 });
                 ui.add_space(6.0);
                 if s.games.is_empty() {
-                    muted(ui, crate::i18n::tr("No games yet. Add one while it runs, or browse for its .exe."));
+                    muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "No games yet. Add one while it runs, or browse for its executable." } else { "No games yet. Add one while it runs, or browse for its .exe." }));
                 }
                 let mut remove = None;
                 for (i, g) in s.games.iter_mut().enumerate() {
@@ -461,7 +461,7 @@ impl App {
                         changed |= toggle(ui, &mut g.enabled).changed();
                         let r = ui.add(
                             egui::TextEdit::singleline(&mut g.exe)
-                                .hint_text("game.exe")
+                                .hint_text(if cfg!(target_os = "linux") { "game / game.exe" } else { "game.exe" })
                                 .desired_width(230.0),
                         );
                         changed |= r.changed();
@@ -582,7 +582,7 @@ impl App {
                 );
                 muted(
                     ui,
-                    crate::i18n::tr("Steam, GOG, and Xbox app installs, while Switch automatically is on. DualShock 4 is the one games such as Dead Cells use for PlayStation prompts. A rule above wins."),
+                    crate::i18n::tr(if cfg!(target_os = "linux") { "Steam and GOG installs, including Wine and Proton games, while Switch automatically is on. DualShock 4 is the one games such as Dead Cells use for PlayStation prompts. A rule above wins." } else { "Steam, GOG, and Xbox app installs, while Switch automatically is on. DualShock 4 is the one games such as Dead Cells use for PlayStation prompts. A rule above wins." }),
                 );
                 drop(s);
                 if changed {

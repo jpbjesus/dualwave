@@ -227,8 +227,8 @@ fn plug_with(
     }
     if !usbip::available() {
         return Err(format!(
-            "A virtual {} controller needs the usbip-win2 driver (free, open source). Install it from the Virtual controller page; until then games see the real controller.",
-            kind.label()
+            "A virtual {} controller needs {} support. Configure it from the Virtual controller page; until then games see the real controller.",
+            kind.label(), if cfg!(windows) { "usbip-win2" } else { "Linux USB/IP" }
         ));
     }
     let r = route.clone();
@@ -261,9 +261,9 @@ fn plug_with(
         mirror: route.mirror.clone(),
     };
     usbip::UsbPad::create_for(model, sink, mac, before_attach).map_err(|e| {
-        log::warn!("usbip-win2: {e}");
+        log::warn!("virtual controller host attachment: {e}");
         format!(
-            "usbip-win2 couldn't attach the virtual {} controller ({e}). Games see the real controller instead.",
+            "The host couldn't attach the virtual {} controller ({e}). Games see the real controller instead.",
             kind.label()
         )
     })
@@ -773,7 +773,7 @@ impl Pool {
                 s.hidhide_control,
                 s.last_controller.clone(),
                 s.fallback_pad,
-                s.keep_xbox_pad,
+                cfg!(windows) && s.keep_xbox_pad,
             )
         };
         let park_hide = hide_ok && hidhide::available();

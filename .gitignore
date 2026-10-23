@@ -1,3 +1,5 @@
 /target/
 *.json.tmp
 *.conflict*
+
+__pycache__/
