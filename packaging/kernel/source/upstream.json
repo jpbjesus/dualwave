@@ -1,0 +1,8 @@
+{
+  "repository": "https://linux.googlesource.com/linux/kernel/git/torvalds/linux/",
+  "ref": "refs/heads/master",
+  "retrieved": "2026-10-23",
+  "hid-playstation.c.upstream.sha256": "48a08dddf8d276a611195311a29cd4f113a949a1f5431ecc84b0396b106ec896",
+  "hid-ids.h.sha256": "4beaae21baf1b93abdfc5bbe3f509bfa03d97d53bcb2d7f3b40320d4ae312eeb",
+  "validated_kernel": "7.2.9-2-cachyos"
+}

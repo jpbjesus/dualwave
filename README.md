@@ -14,21 +14,19 @@ production GUI yet.
 | --- | --- |
 | Bluetooth discovery and status | Tested with standard DualSense, firmware 6.30 |
 | Stereo headphone playback over Bluetooth | Confirmed audible in both channels on the controller jack |
-| Bluetooth microphone decoding | Hardware probe decoded 1,198 CRC-checked headset packets in 12 seconds, with no rejected packets or concealed gaps |
+| Bluetooth headset microphone | Voice confirmed by the user after loading the state-parser filter on CachyOS 7.2.9 |
 | Native PipeWire endpoints | Sink/source registration and simultaneous playback/capture tested; a 10-second capture received nonzero samples without saving audio |
-| Physical Mute button | Implemented with queue clearing; hardware interaction still needs validation |
-| Controller input while audio runs | **Unavailable in this prototype**: evdev devices are isolated to keep microphone packets away from other input readers |
-| Steam coexistence, reconnection and GUI | Not implemented; close Steam before starting audio |
+| Physical Mute button | Confirmed by the user with the state-parser filter; the new isolated driver exposes its mute state for synchronization across app restarts |
+| Controller input while audio runs | Preserved when the dedicated microphone child is present; otherwise the legacy mode grabs evdev input |
+| Steam coexistence | New media-isolation path implemented, pending hardware validation; legacy mode still requires Steam closed |
+| Persistent kernel integration | Source-only Arch DKMS package prepared and compiled for installed current/LTS headers; installation and reboot validation pending |
+| Reconnection and GUI | Not implemented |
 
-Nonzero microphone samples confirm transport, not intelligible voice. Voice
-quality and reliable hardware mute are not yet confirmed. In addition, the
-current Linux `hid-playstation` parser can interpret media packets as state and
-toggle hardware mute or update battery status. Grabbing evdev protects apps,
-but cannot prevent those kernel-side effects.
+Stereo output, headset voice and the physical Mute button were confirmed by
+the user on the standard DualSense, firmware 6.30, with the first kernel filter.
+The new dedicated microphone interface is a further change: until hardware
+validation is complete, do not treat simultaneous Steam/game use as verified.
 
-The input limitation matters: this version is an audio proof of concept, not
-ready for playing games with the same controller while the audio bridge runs.
-A validated input path and kernel/Steam coexistence are required before that use.
 Headphones must be plugged in before starting playback. Audio stops being sent
 when the jack is unplugged; automatic selection of a newly plugged headset mic
 and controller reconnection still need work. USB audio uses the controller's
@@ -70,11 +68,19 @@ or writing to any controller. No audio is sent unless you explicitly start
 
 ### Input permissions for experimental audio mode
 
-Upstream's `AGENTS.md` requires Steam to be closed before speaker/microphone
-probes, because microphone packets can be mistaken for controller input. The
-prototype also grabs this controller's evdev devices temporarily and releases
-them on exit. This prevents false touch/button events reaching desktop apps.
-It deliberately does not forward gameplay input yet.
+Upstream's `AGENTS.md` requires Steam to be closed or the physical media stream
+hidden from it before speaker/microphone probes. DualWave now checks for a
+receive-only vendor HID child named **DualWave Microphone Transport** below the
+selected controller. In this mode the patched driver validates the Bluetooth
+CRC, keeps state reports on the original gamepad and routes microphone reports
+unchanged to the child. It stops those reports before HID core publishes them
+on the physical hidraw node, so raw-HID game clients do not receive microphone
+bytes. The original evdev input remains available and is not grabbed.
+
+Without that child, DualWave retains legacy mode: Steam must be closed and the
+controller's evdev devices are grabbed temporarily. Legacy mode cannot be used
+for gameplay during audio. Merely loading the first state-parser filter does
+not provide Steam isolation: audio still reaches physical hidraw readers.
 
 Access is limited to Sony's Bluetooth standard DualSense (`054c:0ce6`). To give
 the active desktop user access to its hidraw and input nodes, install the
@@ -94,22 +100,78 @@ permissions. A second DualWave process cannot claim the same controller.
 
 [`packaging/kernel/0001-ignore-dualsense-media-as-input.patch`](packaging/kernel/0001-ignore-dualsense-media-as-input.patch)
 adds a type check after the existing Bluetooth CRC check in `hid-playstation`.
-State types 0/1 keep their existing path; other types bypass state parsing while
-remaining available to hidraw. This targets false input, battery and hardware
-mute updates. It does not turn audio on by itself and it does not fix Steam's
-own raw-HID parsing.
+State types 0/1 keep their existing path. With media isolation enabled,
+microphone packets go only to the dedicated vendor HID child; other non-state
+types are discarded. With isolation disabled, non-state packets remain on
+physical hidraw but bypass controller-state parsing, as in the first tested
+filter. This targets false input, battery and hardware mute updates without
+starting audio on its own.
 
-The patch was prepared against the Linux master source retrieved on 2026-10-23
-and a patched module compiled successfully against CachyOS `7.2.9-2-cachyos`
-headers using LLVM. **It has not been loaded or hardware-tested.** The driver
-currently loaded in this session is unchanged. The patch's kernel changes are
-GPL-2.0-or-later, matching the original kernel file; the userspace bridge remains
-MIT. Inspect and adapt it to the exact kernel source before installing a custom
-module/kernel. Reference: [Linux driver source](https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/refs/heads/master/drivers/hid/hid-playstation.c).
+The full patched driver, the vendor HID helper and source provenance are
+shipped in `packaging/kernel/`. They retain **GPL-2.0-or-later**; the userspace
+bridge remains MIT. `source/upstream.json` records hashes of the original Linux
+source files. No controller packets are changed, no controller firmware is
+flashed, and the driver itself does not start any radio audio stream.
+
+The module parameter `dualwave_audio` defaults to off. The DKMS package opts in
+through `options hid_playstation dualwave_audio=1`. The child is not a Sony
+controller and has no gamepad descriptor or output reports. Its HID identity,
+name and ancestry are checked before DualWave uses it. The read-only
+`dualwave_mic_muted` sysfs attribute keeps the app's mute state aligned with the
+driver's button handling, including when the app restarts while muted.
+
+### Persistent driver on CachyOS / Arch
+
+Build the source-only package without root (the builder requires `makepkg`):
+
+```sh
+python3 packaging/build-kernel-package.py
+```
+
+It stages checksummed sources in `target/packages/dualwave-hid-dkms/` and builds
+`dualwave-hid-dkms-0.2.0-1-any.pkg.tar.zst`. Install DKMS and the package:
+
+```sh
+sudo pacman -S --needed dkms
+sudo pacman -U target/packages/dualwave-hid-dkms/dualwave-hid-dkms-0.2.0-1-any.pkg.tar.zst
+sudo udevadm control --reload-rules
+sudo mkinitcpio -P
+```
+
+Then reboot, reconnect the controller and run `./target/release/dualwave probe`.
+It should report **isolated microphone transport**. Installing the package does
+not stop the active audio session or reload the running module automatically.
+The initramfs rebuild ensures an older early-loaded copy cannot take precedence.
+The active user gets access through udev; the application continues to run
+without root. DKMS rebuilds the module on kernel updates when matching headers
+are available. Build failures must be resolved before booting the updated
+kernel; automatic rebuild is not a promise of compatibility with every future
+kernel API.
+
+The packaged sources compiled against `7.2.9-2-cachyos` and
+`6.18.55-2-cachyos-lts` headers. Actual DKMS installation, reboot persistence,
+new-interface hardware operation and Steam coexistence remain validation steps.
+No persistent module has been installed by the agent.
+
+To remove the packaged override and return to the stock module:
+
+```sh
+sudo pacman -R dualwave-hid-dkms
+sudo mkinitcpio -P
+```
+
+Reboot afterwards. Any manually installed `/etc/udev/rules.d/70-dualwave.rules`
+is independent of the package's `/usr/lib/udev/rules.d/70-dualwave.rules`; remove
+the manual copy as well if you want to undo that access rule.
+
+References: [Linux driver](https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/refs/heads/master/drivers/hid/hid-playstation.c),
+[Arch DKMS package guidelines](https://wiki.archlinux.org/title/DKMS_package_guidelines).
 
 ## Validation
 
 ```sh
+cc -std=c11 -Wall -Wextra -Werror packaging/kernel/test-routing.c -o /tmp/dualwave-routing-test
+/tmp/dualwave-routing-test
 cargo test -p ds-proto -p dualwave --locked
 cargo clippy -p dualwave --all-targets --locked -- -D warnings
 ```

@@ -26,3 +26,8 @@ crates/dsz/assets/OpenController-LICENSE.
 
 libopus (vendor/opus) is distributed under its own BSD license; see
 vendor/opus/COPYING.
+
+The optional Linux kernel driver and headers under packaging/kernel are
+GPL-2.0-or-later, matching their Linux source files; see packaging/kernel/COPYING
+and the SPDX notices in those files. This does not change the license of the
+userspace application.

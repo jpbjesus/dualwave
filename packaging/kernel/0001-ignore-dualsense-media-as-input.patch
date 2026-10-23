@@ -1,33 +1,70 @@
-Subject: [PATCH] HID: playstation: leave non-state DualSense Bluetooth reports to hidraw
+Subject: [PATCH] HID: playstation: separate DualSense Bluetooth media from input
 
-DualSense Bluetooth microphone packets use report ID 0x31 and the same
-78-byte size and CRC as controller state. Their type nibble is 2 instead
-of state type 1 (or the compatibility type 0). Parsing these as state
-causes false buttons/touches, battery updates and microphone mute writes.
+CRC-checked media packets must never be parsed as controller state. In opt-in
+mode (dualwave_audio=1), route microphone packets unchanged to a vendor HID
+child and prevent their delivery to physical hidraw readers such as Steam.
+The child is receive-only and is not identified as a Sony gamepad. The
+physical controller retains its original input devices and output path.
 
-After CRC validation, skip controller-state parsing for non-state types.
-Return success so HID core still delivers the report to hidraw clients.
-This does not enable or alter Bluetooth audio on its own.
+With the parameter disabled, retain the previously tested state-parser filter
+and physical hidraw delivery. No extra Bluetooth packets are sent by this
+change. The additional headers are shipped next to this patch; the complete
+patched driver is in source/ for reproducible DKMS builds.
 
-Experimental: not installed or hardware-validated. Prepared against the
-Linux master source retrieved on 2026-10-23 from:
-https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/refs/heads/master/drivers/hid/hid-playstation.c
-Kernel-file changes retain SPDX-License-Identifier: GPL-2.0-or-later.
+Kernel changes: GPL-2.0-or-later. See source/upstream.json for source provenance.
 
 --- a/drivers/hid/hid-playstation.c
 +++ b/drivers/hid/hid-playstation.c
-@@ -1463,6 +1463,14 @@
+@@ -183,6 +183,7 @@
+ 	struct input_dev *sensors;
+ 	struct input_dev *touchpad;
+ 	struct input_dev *jack;
++	struct hid_device __rcu *audio_hdev;
+ 
+ 	/* True if this is a DualSense Edge (product 0x0df2). */
+ 	bool is_edge;
+@@ -232,6 +233,8 @@
+ 	void *output_report_dmabuf;
+ 	u8 output_seq; /* Sequence number for output report. */
+ };
++
++#include "dualwave-audio.h"
+ 
+ struct dualsense_touch_point {
+ 	u8 contact;
+@@ -1463,6 +1466,20 @@
  			return -EILSEQ;
  		}
  
-+		/* Media packets share report ID 0x31 with controller state.
-+		 * Leave them available to hidraw without interpreting audio as
-+		 * buttons, touch contacts, battery status or microphone mute.
-+		 * Some firmware uses type 0 for state; type 1 is the normal form.
-+		 */
-+		if ((data[1] & 0x0f) != 0 && (data[1] & 0x0f) != 1)
++		/* CRC has already been checked. Never parse media as state. */
++		switch (dualwave_report_route(data[1], dualwave_audio)) {
++		case DUALWAVE_STATE:
++			break;
++		case DUALWAVE_AUDIO:
++			dualwave_audio_receive(ds, data, size);
++			fallthrough;
++		case DUALWAVE_DISCARD:
++			/* Stop HID core from delivering audio to physical hidraw readers. */
++			return -ENODATA;
++		case DUALWAVE_LEGACY_MEDIA:
 +			return 0;
++		}
 +
  		ds_report = (struct dualsense_input_report *)&data[2];
  	} else {
  		hid_err(hdev, "Unhandled reportID=%d\n", report->id);
+@@ -1899,6 +1916,14 @@
+ 	 * Reporting hardware and firmware is important as there are frequent updates, which
+ 	 * can change behavior.
+ 	 */
++	if (hdev->bus == BUS_BLUETOOTH && dualwave_audio) {
++		ret = dualwave_audio_create(ds);
++		if (ret) {
++			hid_err(hdev, "Failed to create DualWave microphone transport: %d\n", ret);
++			goto err;
++		}
++	}
++
+ 	hid_info(hdev, "Registered DualSense controller hw_version=0x%08x fw_version=0x%08x\n",
+ 		 ds->base.hw_version, ds->base.fw_version);
+ 

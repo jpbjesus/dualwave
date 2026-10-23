@@ -96,6 +96,85 @@ pub fn steam_running() -> bool {
     })
 }
 
+fn hidraw_name(name: &str) -> bool {
+    name.strip_prefix("hidraw")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+}
+
+fn find_media_interface(physical: &Path) -> io::Result<Option<PathBuf>> {
+    let mut found = None;
+    for entry in fs::read_dir(physical)? {
+        let child = entry?;
+        if !child.file_type()?.is_dir() || !child.file_name().to_string_lossy().starts_with("0006:0000:0000.") {
+            continue;
+        }
+        let uevent = match fs::read_to_string(child.path().join("uevent")) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
+        if !uevent.lines().any(|l| l == "HID_ID=0006:00000000:00000000")
+            || !uevent.lines().any(|l| l == "HID_NAME=DualWave Microphone Transport") {
+            continue;
+        }
+        for raw in fs::read_dir(child.path().join("hidraw"))? {
+            let raw = raw?;
+            if !hidraw_name(&raw.file_name().to_string_lossy()) { continue; }
+            if found.is_some() { return Err(io::Error::other("Multiple microphone transports for one controller")); }
+            found = Some(Path::new("/dev").join(raw.file_name()));
+        }
+    }
+    Ok(found)
+}
+
+/// A receive-only vendor HID child. Microphone reports never reach gamepad readers.
+pub struct MediaReader {
+    file: File,
+    pub path: PathBuf,
+    mute_state: PathBuf,
+}
+
+fn read_kernel_mute(path: &Path) -> io::Result<Option<bool>> {
+    let value = match fs::read_to_string(path) {
+        Ok(value) => value,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    match value.trim() {
+        "0" => Ok(Some(false)),
+        "1" => Ok(Some(true)),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid kernel microphone mute state")),
+    }
+}
+impl MediaReader {
+    pub fn for_controller(hid: &Hid) -> io::Result<Option<Self>> {
+        let name = hid.path.file_name().ok_or_else(|| io::Error::other("Invalid HID path"))?;
+        let physical = fs::canonicalize(Path::new("/sys/class/hidraw").join(name).join("device"))?;
+        let Some(path) = find_media_interface(&physical)? else { return Ok(None); };
+        let file = OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC).open(&path)
+            .map_err(|e| io::Error::new(e.kind(), format!("Cannot open {}: {e}. Install packaging/70-dualwave.rules.", path.display())))?;
+        let mut info = [0u8; 8];
+        if unsafe { libc::ioctl(file.as_raw_fd(), 0x80084803 as libc::c_ulong, info.as_mut_ptr()) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if u32::from_ne_bytes(info[..4].try_into().unwrap()) != 6 || info[4..].iter().any(|b| *b != 0) {
+            return Err(io::Error::other("Invalid microphone transport identity"));
+        }
+        Ok(Some(Self { file, path, mute_state: physical.join("dualwave_mic_muted") }))
+    }
+
+    pub fn kernel_muted(&self) -> io::Result<Option<bool>> { read_kernel_mute(&self.mute_state) }
+
+    pub fn read(&mut self, buf: &mut [u8]) -> io::Result<Option<usize>> {
+        match self.file.read(buf) {
+            Ok(0) => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Microphone transport disconnected")),
+            Ok(n) => Ok(Some(n)),
+            Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 /// Keep malformed microphone-as-input events away from desktop consumers.
 /// This experimental bridge deliberately disables physical evdev input while active.
 pub struct InputGuard(Vec<File>);
@@ -126,6 +205,33 @@ impl InputGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn kernel_mute_preserves_hardware_state_and_rejects_invalid_status() {
+        let path = std::env::temp_dir().join(format!("dualwave-mute-{}", std::process::id()));
+        fs::write(&path, "1\n").unwrap();
+        let muted = read_kernel_mute(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert_eq!(muted, Some(true));
+        assert_eq!(read_kernel_mute(&path).unwrap(), None);
+        fs::write(&path, "invalid").unwrap();
+        let invalid = read_kernel_mute(&path);
+        fs::remove_file(&path).unwrap();
+        assert!(invalid.is_err());
+    }
+    #[test]
+    fn media_discovery_requires_a_vendor_child_of_the_selected_controller() {
+        let root = std::env::temp_dir().join(format!("dualwave-media-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(find_media_interface(&root).unwrap().is_none());
+        let child = root.join("0006:0000:0000.0001");
+        fs::create_dir_all(child.join("hidraw/hidraw42")).unwrap();
+        fs::write(child.join("uevent"), "HID_ID=0006:00000000:00000000\nHID_NAME=Other device\n").unwrap();
+        assert!(find_media_interface(&root).unwrap().is_none());
+        fs::write(child.join("uevent"), "HID_ID=0006:00000000:00000000\nHID_NAME=DualWave Microphone Transport\n").unwrap();
+        let result = find_media_interface(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(result, Some(PathBuf::from("/dev/hidraw42")));
+    }
     #[test]
     fn microphone_requires_exact_length_type_and_crc_and_never_becomes_input() {
         let mut report = [0u8; 78];

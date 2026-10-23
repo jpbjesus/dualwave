@@ -2,7 +2,7 @@
 use std::{io, path::Path, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 use ds_proto::{crc, input::Button, output::{AudioRoute, Microphone, MicrophoneSource, OutputState},
     stream::{self, StreamCounters, BLOCKS, HAPTIC_FRAME, MAX_REPORT, OPUS_FRAME, OPUS_SAMPLES}, Connection};
-use crate::{hid::{self, Hid, InputGuard}, pipewire::Bridge};
+use crate::{hid::{self, Hid, InputGuard, MediaReader}, pipewire::Bridge};
 
 // Share the upstream codec and measured 16:15 resampler instead of changing wire behavior.
 #[path = "../../dsz/src/haptics/opus.rs"]
@@ -48,16 +48,37 @@ struct Session {
     counters: StreamCounters,
     source: Option<MicrophoneSource>,
     // Keep input hidden until the microphone stop command has drained.
-    _input: InputGuard,
+    _input: Option<InputGuard>,
+    media: Option<MediaReader>,
+    prefer_media: bool,
 }
 impl Session {
     fn open(path: &Path, source: Option<MicrophoneSource>) -> io::Result<Self> {
-        if hid::steam_running() {
+        let hid = Hid::open(path, true)?;
+        let media = MediaReader::for_controller(&hid)?;
+        if media.is_none() && hid::steam_running() {
             return Err(io::Error::other("Close Steam before audio probes (upstream AGENTS.md hardware rule)"));
         }
-        let hid = Hid::open(path, true)?;
-        let input = InputGuard::acquire(&hid)?;
-        Ok(Self { hid, counters: StreamCounters::new(), source, _input: input })
+        let input = if media.is_some() { None } else { Some(InputGuard::acquire(&hid)?) };
+        Ok(Self { hid, counters: StreamCounters::new(), source, _input: input, media, prefer_media: false })
+    }
+
+    /// Alternate reads so high-rate state reports cannot starve the microphone.
+    /// The boolean identifies the physical source; child packets are never input.
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<Option<(usize, bool)>> {
+        self.prefer_media = !self.prefer_media;
+        if self.prefer_media {
+            if let Some(media) = &mut self.media {
+                if let Some(n) = media.read(buf)? { return Ok(Some((n, false))); }
+            }
+        }
+        if let Some(n) = self.hid.read(buf)? { return Ok(Some((n, true))); }
+        if !self.prefer_media {
+            if let Some(media) = &mut self.media {
+                if let Some(n) = media.read(buf)? { return Ok(Some((n, false))); }
+            }
+        }
+        Ok(None)
     }
     fn admission(&mut self, capture: bool) -> io::Result<()> {
         let mut out = [0; MAX_REPORT];
@@ -85,6 +106,10 @@ pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSour
     let mut bridge = if mode == Mode::Run { Some(Bridge::new()?) } else { None };
     let selected = (mode != Mode::Tone).then_some(source);
     let mut session = Session::open(path, selected)?;
+    let initial_mute = match &session.media {
+        Some(media) => media.kernel_muted()?.unwrap_or(false),
+        None => false,
+    };
     let mut status = wait_state(&mut session.hid)?;
     if mode != Mode::Microphone && !status.headphones {
         return Err(io::Error::other("Connect headphones to the DualSense jack before playback"));
@@ -93,9 +118,13 @@ pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSour
         return Err(io::Error::other("No headset microphone detected in the controller jack"));
     }
     eprintln!("DualWave · {} · Opus {}", path.display(), opus::version());
-    eprintln!("Experimental audio mode: physical controller input is temporarily isolated. Ctrl+C stops it.");
+    if let Some(media) = &session.media {
+        eprintln!("Microphone transport: {} · physical controller input remains available. Ctrl+C stops audio.", media.path.display());
+    } else {
+        eprintln!("Legacy mode: physical controller input is temporarily isolated. Ctrl+C stops audio.");
+    }
     if bridge.is_some() { eprintln!("Select DualWave Headphones / DualWave Microphone in your sound settings."); }
-    session.hid.write(&control(mode != Mode::Microphone, volume, selected, false))?;
+    session.hid.write(&control(mode != Mode::Microphone, volume, selected, initial_mute))?;
     session.admission(false)?;
 
     let start = Instant::now();
@@ -105,7 +134,7 @@ pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSour
     let mut next_log = Instant::now() + Duration::from_secs(2);
     let mut capture = false;
     let mut media = false;
-    let mut muted = false;
+    let mut muted = initial_mute;
     let mut mute_down = false;
     let mut previous = None::<u8>;
     let mut packets = 0u64;
@@ -127,19 +156,24 @@ pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSour
         let now = Instant::now();
         // If Steam starts mid-session, cleanup runs before any more media is sent.
         if now >= next_log {
-            if hid::steam_running() { return Err(io::Error::other("Steam started; stopped audio to protect input")); }
+            if session.media.is_none() && hid::steam_running() { return Err(io::Error::other("Steam started; stopped audio to protect input")); }
             eprintln!("mic packets={packets}, rejected={bad}, concealed={concealed}, peak={peak:.3}, playback underruns={underruns}, jack={}, headset mic={}", status.headphones, status.mic_plugged);
             peak = 0.0;
             next_log = now + Duration::from_secs(2);
         }
         for _ in 0..128 {
-            let Some(n) = session.hid.read(&mut report)? else { break; };
+            let Some((n, physical)) = session.read(&mut report)? else { break; };
             let bytes = &report[..n];
-            if let Some(state) = hid::state(bytes) {
+            if let Some(state) = physical.then(|| hid::state(bytes)).flatten() {
                 status = state;
                 let down = state.buttons.has(Button::Mute);
                 if down && !mute_down && mode != Mode::Tone {
-                    muted = !muted;
+                    // hid-playstation updates its state before publishing the input report.
+                    // Mirror that value instead of racing a second, independent toggle.
+                    muted = match &session.media {
+                        Some(media) => media.kernel_muted()?.unwrap_or(!muted),
+                        None => !muted,
+                    };
                     if muted {
                         capture = false;
                         previous = None;
@@ -279,6 +313,10 @@ pub fn probe(path: &Path) -> io::Result<()> {
             println!("Firmware: {:X}.{:02X}", version >> 8, version & 255);
         }
         Err(e) => eprintln!("Firmware unavailable: {e}"),
+    }
+    match MediaReader::for_controller(&hid)? {
+        Some(media) => println!("Input mode: isolated microphone transport ({})", media.path.display()),
+        None => println!("Input mode: legacy (Steam must be closed; gameplay input is isolated during audio)"),
     }
     Ok(())
 }

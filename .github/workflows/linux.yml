@@ -12,6 +12,10 @@ jobs:
       - run: cargo test -p ds-proto -p dualwave --locked
       - run: cargo clippy -p dualwave --all-targets --locked -- -D warnings
       - run: cargo build --release -p dualwave --locked
+      - name: Check kernel packet routing
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror packaging/kernel/test-routing.c -o /tmp/dualwave-routing-test
+          /tmp/dualwave-routing-test
       - name: Check C ring concurrency and memory safety
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined \

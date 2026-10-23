@@ -1,3 +1,5 @@
 * text=auto eol=lf
 *.png binary
 *.ico binary
+# Unified patches contain significant context prefixes before kernel tabs/blank lines.
+*.patch -whitespace
