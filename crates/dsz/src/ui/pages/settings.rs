@@ -87,7 +87,7 @@ impl App {
                         crate::i18n::tr(if cfg!(target_os = "linux") { "Hide to the tray when available; otherwise minimize normally" } else { "The minimize button hides the window to the tray instead of the taskbar" }),
                         &mut s.minimize_to_tray,
                     );
-                    let hint = crate::localized_format!("Every controller starts on \"{}\"; picking another profile still sticks until the app restarts", "Todos os controles iniciam em \"{}\"; outro perfil escolhido permanece até reiniciar o aplicativo"; "Todos os comandos iniciam em \"{}\"; outro perfil escolhido permanece até reiniciar a aplicação", s.default_profile);
+                    let hint = crate::localized_format!("Every controller starts on \"{}\"; picking another profile still sticks until the app restarts", "Todos os controles iniciam em \"{}\"; outro perfil escolhido permanece até reiniciar o aplicativo"; "Todos os comandos arrancam com \"{}\"; a escolha de outro perfil mantém-se até reiniciar a aplicação", s.default_profile);
                     changed |= toggle_row(
                         ui,
                         crate::i18n::tr("Start on the default profile"),
@@ -573,7 +573,7 @@ impl App {
                 note(
                     ui,
                     &crate::localized_format!(
-                        "Restore \"{file}\" ({})? This replaces all your current profiles and settings. They are saved first to the {} folder, so you can go back.", "Restaurar \"{file}\" ({})? Seus perfis e configurações serão substituídos. Uma cópia será salva antes na pasta {} para permitir a recuperação."; "Restaurar \"{file}\" ({})? Seus perfis e definições serão substituídos. Uma cópia será guardada antes na pasta {} para permitir a recuperação.",
+                        "Restore \"{file}\" ({})? This replaces all your current profiles and settings. They are saved first to the {} folder, so you can go back.", "Restaurar \"{file}\" ({})? Seus perfis e configurações serão substituídos. Uma cópia será salva antes na pasta {} para permitir a recuperação."; "Restaurar \"{file}\" ({})? Esta ação substitui todos os perfis e definições atuais. Primeiro, é guardada uma cópia na pasta {}, para permitir a recuperação.",
                         b.summary(),
                         crate::backup::AUTO_DIR
                     ),

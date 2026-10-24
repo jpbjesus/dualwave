@@ -97,7 +97,7 @@ impl Backup {
         );
         s.push_str(crate::i18n::tr(" and app settings"));
         if !self.created.is_empty() {
-            s.push_str(&crate::localized_format!(", made {}", ", criado em {}"; ", criado em {}", self.created));
+            s.push_str(&crate::localized_format!(", made {}", ", criado em {}"; ", criada em {}", self.created));
         }
         if !self.app_version.is_empty() {
             s.push_str(&crate::localized_format!(" by DSZ {}", " pelo DSZ {}"; " pelo DSZ {}", self.app_version));

@@ -271,7 +271,7 @@ impl App {
                                 muted(
                                     ui,
                                     &crate::localized_format!(
-                                        "idle, holding {player}{}; presses Xbox buttons", "ocioso, mantendo {player}{}; envia botões Xbox"; "inativo, mantendo {player}{}; envia botões Xbox",
+                                        "idle, holding {player}{}; presses Xbox buttons", "ocioso, mantendo {player}{}; envia botões Xbox"; "inativo; mantém {player}{} e envia botões Xbox",
                                         if hidden { crate::i18n::tr(if cfg!(target_os = "linux") { ", input suppressed" } else { ", hidden from games" }) } else { "" }
                                     ),
                                 );
@@ -292,7 +292,7 @@ impl App {
                             note(
                                 ui,
                                 &crate::localized_format!(
-                                    "{exe} has no DualSense support, so games see the fallback controller from Profiles & games.", "{exe} não tem suporte a DualSense; será usado o controle alternativo de Perfis e jogos."; "{exe} não tem suporte a DualSense; será usado o comando alternativo de Perfis e jogos."
+                                    "{exe} has no DualSense support, so games see the fallback controller from Profiles & games.", "{exe} não tem suporte a DualSense; será usado o controle alternativo de Perfis e jogos."; "{exe} não tem suporte para DualSense; será usado o comando alternativo de Perfis e jogos."
                                 ),
                                 violet_color(),
                             );

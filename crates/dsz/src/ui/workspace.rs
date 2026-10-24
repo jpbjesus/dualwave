@@ -12,6 +12,20 @@ pub(super) enum Part { Lighting, Triggers, Buttons, Motion }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Side { Left, Both, Right }
 
+#[derive(Clone, Copy)]
+struct OutputFact { kind: VirtualKind, alive: bool, parked: bool }
+
+#[derive(Debug, PartialEq, Eq)]
+enum ActualOutput { Active(VirtualKind), Waiting(VirtualKind), Native, None }
+
+/// Persistent targets can outlive physical input. Parked helpers are not game outputs.
+fn actual_outputs(physical: bool, active: Option<VirtualKind>, targets: &[OutputFact]) -> Vec<ActualOutput> {
+    if physical { return vec![active.map(ActualOutput::Active).unwrap_or(ActualOutput::Native)]; }
+    let waiting: Vec<_> = targets.iter().filter(|target| target.alive && !target.parked && target.kind != VirtualKind::Off)
+        .map(|target| ActualOutput::Waiting(target.kind)).collect();
+    if waiting.is_empty() { vec![ActualOutput::None] } else { waiting }
+}
+
 fn apply_trigger(p: &mut Profile, side: Side, effect: TriggerEffect) {
     if side != Side::Right { p.triggers.left = effect.clone(); }
     if side != Side::Left { p.triggers.right = effect; }
@@ -241,9 +255,21 @@ impl App {
             cols[last].label(tr("Requested virtual output"));
             choice(&mut cols[last], &mut p.virtual_out.kind, &[(VirtualKind::Off, "Native"), (VirtualKind::Xbox360, "Xbox 360"), (VirtualKind::DualSense, "DualSense"), (VirtualKind::DualShock4, "DualShock 4")]);
             let actual = dev.and_then(|d| d.virt.active());
+            let targets = if dev.is_none() {
+                self.engine.pads.list().iter().map(|pad| OutputFact { kind: pad.kind(), alive: pad.target.alive(), parked: pad.is_parked() }).collect()
+            } else { Vec::new() };
             cols[last].horizontal_wrapped(|ui| {
                 ui.label(RichText::new(tr("Actual output")).color(muted_color()));
-                ui.label(actual.map(|v| tr(v.label())).unwrap_or_else(|| tr(if dev.is_some() { "Native / no virtual output" } else { "No controller" })));
+                ui.vertical(|ui| {
+                    for output in actual_outputs(dev.is_some(), actual, &targets) {
+                        match output {
+                            ActualOutput::Active(kind) => { ui.label(tr(kind.label())); },
+                            ActualOutput::Waiting(kind) => { ui.label([tr(kind.label()), tr("Waiting for a controller…")].join(" · ")); },
+                            ActualOutput::Native => { ui.label(tr("Native / no virtual output")); },
+                            ActualOutput::None => { ui.label(tr("None")); },
+                        }
+                    }
+                });
             });
             if let Some(d) = dev {
                 if let Some(error) = &d.virt.status.lock().error { widgets::muted(&mut cols[last], error); }
@@ -383,6 +409,26 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn actual_outputs_distinguish_selected_physical_and_live_persistent_targets() {
+        let targets = [
+            OutputFact { kind: VirtualKind::Xbox360, alive: true, parked: false },
+            OutputFact { kind: VirtualKind::DualSense, alive: false, parked: false },
+            OutputFact { kind: VirtualKind::DualShock4, alive: true, parked: true },
+        ];
+        assert_eq!(actual_outputs(true, Some(VirtualKind::DualSense), &targets), vec![ActualOutput::Active(VirtualKind::DualSense)]);
+        assert_eq!(actual_outputs(true, None, &targets), vec![ActualOutput::Native]);
+        assert_eq!(actual_outputs(false, None, &targets), vec![ActualOutput::Waiting(VirtualKind::Xbox360)]);
+        assert_eq!(actual_outputs(false, None, &targets[1..]), vec![ActualOutput::None]);
+        assert_eq!(actual_outputs(false, None, &[]), vec![ActualOutput::None]);
+        let live = [
+            targets[0],
+            OutputFact { kind: VirtualKind::DualSense, alive: true, parked: false },
+            OutputFact { kind: VirtualKind::DualShock4, alive: true, parked: false },
+        ];
+        assert_eq!(actual_outputs(false, None, &live), vec![ActualOutput::Waiting(VirtualKind::Xbox360), ActualOutput::Waiting(VirtualKind::DualSense), ActualOutput::Waiting(VirtualKind::DualShock4)]);
+    }
+
     #[test]
     fn strength_preserves_effect_shape_and_the_opposite_side() {
         let mut p = Profile::default();

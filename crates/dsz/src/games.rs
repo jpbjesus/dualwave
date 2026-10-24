@@ -288,7 +288,7 @@ pub fn run(engine: Arc<Engine>) {
                             .map(|d| engine.assigned_profile(d))
                             .unwrap_or_else(|| engine.settings.read().default_profile.clone());
                         log::info!("{exe} closed: back to profile \"{back}\"");
-                        engine.toast(crate::localized_format!("{exe} closed — back to \"{back}\"", "{exe} fechado — voltando para \"{back}\""; "{exe} fechado — voltando para \"{back}\""));
+                        engine.toast(crate::localized_format!("{exe} closed — back to \"{back}\"", "{exe} fechado — voltando para \"{back}\""; "{exe} fechado — a regressar a \"{back}\""));
                     }
                 }
             }
