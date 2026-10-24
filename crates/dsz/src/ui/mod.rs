@@ -10,6 +10,7 @@ mod pages;
 mod snapshot;
 mod theme;
 mod widgets;
+mod workspace;
 
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -65,19 +66,6 @@ impl Page {
         }
     }
     fn label(self) -> &'static str { crate::i18n::tr(self.key()) }
-    fn icon(self) -> &'static str {
-        match self {
-            Page::Overview => "◉",
-            Page::Lighting => "☀",
-            Page::Triggers => "◢",
-            Page::Haptics => "≋",
-            Page::Input => "✥",
-            Page::Mappings => "⌘",
-            Page::Virtual => "🎮",
-            Page::Profiles => "☰",
-            Page::Settings => "⚙",
-        }
-    }
     fn live(self) -> bool {
         matches!(
             self,
@@ -94,6 +82,13 @@ impl Page {
 pub struct App {
     engine: Arc<Engine>,
     page: Page,
+    advanced: bool,
+    part: workspace::Part,
+    trigger_side: workspace::Side,
+    selected_button: ds_proto::input::Button,
+    simulation: Option<Instant>,
+    quick_gesture: crate::profile::Gesture,
+    system_reduced_motion: bool,
     selected: Option<u64>,
     edit_pin: Option<String>,
     preview: Composer,
@@ -196,9 +191,25 @@ impl App {
             .position(|a| a == "--edit")
             .and_then(|i| args.get(i + 1))
             .cloned();
+        #[cfg(debug_assertions)]
+        let part = if snapshot::path().is_some() {
+            match std::env::var("DSZ_SNAPSHOT_PART").unwrap_or_default().as_str() {
+                "lighting" => workspace::Part::Lighting, "buttons" => workspace::Part::Buttons,
+                "motion" => workspace::Part::Motion, _ => workspace::Part::Triggers,
+            }
+        } else { workspace::Part::Triggers };
+        #[cfg(not(debug_assertions))]
+        let part = workspace::Part::Triggers;
         App {
             engine,
             page,
+            advanced: args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1)).is_some_and(|name| !name.eq_ignore_ascii_case("workspace")),
+            part,
+            trigger_side: workspace::Side::Both,
+            selected_button: ds_proto::input::Button::Cross,
+            simulation: None,
+            quick_gesture: crate::profile::Gesture::Press,
+            system_reduced_motion: theme::system_reduced_motion(),
             selected: None,
             edit_pin,
             preview: Composer::new(),
@@ -248,136 +259,12 @@ impl App {
         }
     }
 
-    fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(18.0);
-        ui.horizontal(|ui| {
-            ui.add_space(14.0);
-            let (r, _) = ui.allocate_exact_size(egui::vec2(38.0, 30.0), Sense::hover());
-            controller_view::logo(ui.painter(), r);
-            ui.vertical(|ui| {
-                ui.add_space(-2.0);
-                // Keep the original wordmark layout with the fork branding.
-                let mut mark = egui::text::LayoutJob::default();
-                for (s, c) in [("Dual", TEXT), ("Wave", ACCENT)] {
-                    mark.append(
-                        s,
-                        0.0,
-                        egui::TextFormat {
-                            font_id: heading(19.0),
-                            color: c,
-                            extra_letter_spacing: 1.5,
-                            ..Default::default()
-                        },
-                    );
-                }
-                ui.label(mark);
-                ui.add_space(-7.0);
-                ui.label(RichText::new("DualWave").size(12.0).color(MUTED));
-            });
-        });
-        ui.add_space(22.0);
-        // Rows give up their spacing on short windows so the footer never
-        // lands on them; past that the list scrolls.
-        let update = crate::update::available();
-        let footer = if update.is_some() { 84.0 } else { 44.0 };
-        let room = (ui.available_height() - footer).max(0.0);
-        let row_h = (room / Page::ALL.len() as f32).clamp(34.0, 46.0);
-        egui::ScrollArea::vertical()
-            .id_salt("nav")
-            .max_height(room)
-            .auto_shrink([false, true])
-            .show(ui, |ui| self.nav(ui, row_h));
-
-        // Footer: connection summary.
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.add_space(14.0);
-            let devs = self.engine.device_list();
-            ui.horizontal(|ui| {
-                ui.add_space(18.0);
-                let (txt, col) = if devs.is_empty() {
-                    (crate::i18n::tr("No controller").to_string(), FAINT)
-                } else {
-                    (crate::localized_format!("{} connected", "{} conectado(s)", devs.len()), GOOD)
-                };
-                let (r, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), Sense::hover());
-                ui.painter().circle_filled(r.center(), 4.0, col);
-                ui.label(RichText::new(txt).size(12.5).color(MUTED));
-            });
-            if let Some(r) = &update {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    let b = egui::Button::new(
-                        RichText::new(crate::localized_format!("Update to {}", "Atualizar para {}", r.version)).size(12.5).color(ACCENT),
-                    )
-                    .fill(ACCENT_SOFT)
-                    .stroke(egui::Stroke::NONE)
-                    .corner_radius(CornerRadius::same(R_CTRL));
-                    if ui
-                        .add(b)
-                        .on_hover_text(crate::i18n::tr("A newer DSZ is out. Settings has the update and its notes."))
-                        .clicked()
-                    {
-                        self.page = Page::Settings;
-                    }
-                });
-            }
-        });
-    }
-
-    fn nav(&mut self, ui: &mut egui::Ui, row_h: f32) {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for page in Page::ALL {
-            let sel = self.page == page;
-            let (rect, resp) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), Sense::click());
-            let rect = rect.shrink2(egui::vec2(10.0, (row_h - 34.0) / 2.0));
-            let p = ui.painter();
-            if sel {
-                p.rect_filled(rect, CornerRadius::same(R_CTRL + 2), ACCENT_SOFT);
-                p.rect_filled(
-                    egui::Rect::from_min_size(
-                        rect.min + egui::vec2(0.0, 9.0),
-                        egui::vec2(3.0, rect.height() - 18.0),
-                    ),
-                    CornerRadius::same(2),
-                    ACCENT,
-                );
-            } else if resp.hovered() {
-                p.rect_filled(rect, CornerRadius::same(R_CTRL + 2), CARD);
-            }
-            let fg = if sel || resp.hovered() { TEXT } else { MUTED };
-            p.text(
-                rect.left_center() + egui::vec2(18.0, 0.0),
-                egui::Align2::CENTER_CENTER,
-                page.icon(),
-                egui::FontId::proportional(16.0),
-                if sel { ACCENT } else { fg },
-            );
-            p.text(
-                rect.left_center() + egui::vec2(36.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                page.label(),
-                if sel {
-                    heading(14.0)
-                } else {
-                    egui::FontId::proportional(14.0)
-                },
-                fg,
-            );
-            if resp.clicked() {
-                self.page = page;
-                self.capture_key = None;
-            }
-        }
-    }
-
     fn top_bar(&mut self, ui: &mut egui::Ui, dev: Option<&Arc<Device>>) {
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
             let devs = self.engine.device_list();
             if devs.is_empty() {
-                widgets::pill(ui, crate::i18n::tr("Waiting for a controller…"), FAINT);
+                widgets::pill(ui, crate::i18n::tr("Waiting for a controller…"), faint_color());
             }
             for d in &devs {
                 let sel = dev.map(|x| x.id == d.id).unwrap_or(false);
@@ -387,29 +274,29 @@ impl App {
                 let conn = if d.is_bluetooth() { "BT" } else { "USB" };
                 let mut text = format!("{name}  ·  {conn}  ·  {}%", live.battery_percent);
                 if let Some(k) = d.virt.active() {
-                    text.push_str(&crate::localized_format!("  ·  as {}", "  ·  como {}", k.label()));
+                    text.push_str(&crate::localized_format!("  ·  as {}", "  ·  como {}"; "  ·  como {}", k.label()));
                 }
                 let font = egui::FontId::proportional(13.0);
-                let w = ui.fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), TEXT).size().x);
+                let w = ui.fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), text_color()).size().x);
                 let (rect, resp) =
                     ui.allocate_exact_size(egui::vec2(w + 38.0, 32.0), Sense::click());
                 let p = ui.painter();
                 p.rect_filled(
                     rect,
                     CornerRadius::same(16),
-                    if sel { CARD_HI } else { CARD },
+                    if sel { card_hi_color() } else { surface_color() },
                 );
                 p.rect_stroke(
                     rect,
                     CornerRadius::same(16),
-                    Stroke::new(1.0_f32, if sel { ACCENT } else { BORDER }),
+                    Stroke::new(1.0_f32, if sel { accent_color() } else { border_color() }),
                     StrokeKind::Inside,
                 );
                 let dot = match link {
-                    Link::Live => GOOD,
-                    Link::Quiet => WARN,
-                    Link::Opening => MUTED,
-                    Link::Error(_) => BAD,
+                    Link::Live => good_color(),
+                    Link::Quiet => warn_color(),
+                    Link::Opening => muted_color(),
+                    Link::Error(_) => bad_color(),
                 };
                 p.circle_filled(rect.left_center() + egui::vec2(16.0, 0.0), 4.0, dot);
                 p.text(
@@ -417,7 +304,7 @@ impl App {
                     egui::Align2::LEFT_CENTER,
                     text,
                     font,
-                    TEXT,
+                    text_color(),
                 );
                 if resp.clicked() {
                     self.selected = Some(d.id);
@@ -458,10 +345,10 @@ impl App {
                     }
                     self.edit_pin = None;
                 }
-                ui.label(RichText::new(crate::i18n::tr("Profile")).color(MUTED));
+                ui.label(RichText::new(crate::i18n::tr(if dev.is_some() { "Applied profile" } else { "Default profile" })).color(muted_color()));
                 if let Some((p, exe)) = &*self.engine.game_override.read() {
                     if self.engine.settings.read().auto_profiles {
-                        widgets::pill(ui, &format!("{exe} → {p}"), VIOLET).on_hover_text(
+                        widgets::pill(ui, &format!("{exe} → {p}"), violet_color()).on_hover_text(
                             crate::i18n::tr("A game rule is active. Its profile is in use until the game closes."),
                         );
                     }
@@ -475,7 +362,7 @@ impl App {
             Some(d) => self.engine.profile_name_for(d),
             None => self.engine.settings.read().default_profile.clone(),
         };
-        if self.page == Page::Overview || self.page == Page::Settings || self.page == Page::Profiles
+        if self.page == Page::Settings || self.page == Page::Profiles
         {
             return;
         }
@@ -483,8 +370,8 @@ impl App {
             ui.horizontal(|ui| {
                 widgets::pill(
                     ui,
-                    &crate::localized_format!("Editing \"{editing}\" — not active on this controller", "Editando \"{editing}\" — inativo neste controle"),
-                    WARN,
+                    &crate::localized_format!("Editing \"{editing}\" — not active on this controller", "Editando \"{editing}\" — inativo neste controle"; "A editar \"{editing}\" — inativo neste comando"),
+                    warn_color(),
                 );
                 if widgets::button(ui, crate::i18n::tr("Edit active profile")).clicked() {
                     self.edit_pin = None;
@@ -502,7 +389,7 @@ impl App {
             let o = d.overrides.lock().clone();
             if o.any() {
                 ui.horizontal(|ui| {
-                    widgets::pill(ui, crate::i18n::tr("A game mod is overriding some settings (UDP)"), VIOLET);
+                    widgets::pill(ui, crate::i18n::tr("A game mod is overriding some settings (UDP)"), violet_color());
                     if widgets::button(ui, crate::i18n::tr("Clear overrides")).clicked() {
                         *d.overrides.lock() = Default::default();
                         d.kick();
@@ -530,13 +417,13 @@ impl App {
             .show(ctx, |ui| {
                 for t in list {
                     let age = now.duration_since(t.at).as_secs_f32();
-                    let fade = ((4.2 - age) / 0.4).clamp(0.0, 1.0);
+                    let fade = if self.system_reduced_motion || self.engine.settings.read().reduced_motion { 1.0 } else { ((4.2 - age) / 0.4).clamp(0.0, 1.0) };
                     let a = (fade * 255.0) as u8;
                     egui::Frame::new()
-                        .fill(with_alpha(CARD_HI, a))
+                        .fill(with_alpha(card_hi_color(), a))
                         .stroke(Stroke::new(
                             1.0_f32,
-                            with_alpha(if t.warn { WARN } else { BORDER }, a),
+                            with_alpha(if t.warn { warn_color() } else { border_color() }, a),
                         ))
                         .corner_radius(CornerRadius::same(R_CTRL + 2))
                         .inner_margin(egui::Margin::symmetric(14, 10))
@@ -548,7 +435,7 @@ impl App {
                         })
                         .show(ui, |ui| {
                             ui.set_max_width(360.0);
-                            ui.label(RichText::new(&t.text).color(with_alpha(TEXT, a)));
+                            ui.label(RichText::new(&t.text).color(with_alpha(text_color(), a)));
                         });
                     ui.add_space(8.0);
                 }
@@ -671,18 +558,20 @@ impl eframe::App for App {
         let base = self.engine.profiles.get_or_first(&name);
         let mut profile: Profile = (*base).clone();
 
-        egui::SidePanel::left("nav")
-            .exact_width(222.0)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(SIDEBAR)
-                    .stroke(Stroke::new(1.0_f32, BORDER)),
-            )
-            .show(ctx, |ui| self.sidebar(ui));
+        theme::sync(ctx);
+        let settings = self.engine.settings.read().clone();
+        ctx.set_theme(match settings.appearance {
+            crate::settings::Appearance::System => egui::ThemePreference::System,
+            crate::settings::Appearance::Light => egui::ThemePreference::Light,
+            crate::settings::Appearance::Dark => egui::ThemePreference::Dark,
+        });
+        ctx.style_mut(|s| s.animation_time = if settings.reduced_motion || self.system_reduced_motion { 0.0 } else { 0.24 });
+        egui::TopBottomPanel::top("navigation")
+            .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin::symmetric(28, 16)))
+            .show(ctx, |ui| self.workspace_navigation(ui));
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin {
+            .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin {
                 left: 28,
                 right: 28,
                 top: 16,
@@ -701,9 +590,11 @@ impl eframe::App for App {
                         // Overflowing content grows max_rect too, so keep
                         // the column's width from before the page.
                         let column = ui.max_rect().width();
+                        self.advanced_navigation(ui);
                         self.editing_banner(ui, dev.as_ref(), &profile.name);
                         self.finish_game_test();
                         match self.page {
+                            Page::Overview if !self.advanced => self.page_workspace(ui, &mut profile, dev.as_ref()),
                             Page::Overview => self.page_overview(ui, &mut profile, dev.as_ref()),
                             Page::Lighting => self.page_lighting(ui, &mut profile, dev.as_ref()),
                             Page::Triggers => self.page_triggers(ui, &mut profile, dev.as_ref()),

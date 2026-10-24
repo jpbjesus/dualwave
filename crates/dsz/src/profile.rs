@@ -912,6 +912,7 @@ impl Default for Profile {
 }
 
 impl Profile {
+    #[cfg(test)]
     pub fn named(name: &str) -> Profile {
         Profile {
             name: name.to_string(),
@@ -1087,6 +1088,13 @@ impl ProfileStore {
         name
     }
 
+    /// Start a separate editable profile from the applied configuration.
+    pub fn copy_as(&self, source: &str, name: &str) -> String {
+        let mut copy = (*self.get_or_first(source)).clone();
+        copy.name = name.to_string();
+        self.add(copy)
+    }
+
     pub fn duplicate(&self, name: &str) -> Option<String> {
         let src = self.find(name)?;
         let mut p = (*src).clone();
@@ -1219,6 +1227,30 @@ mod tests {
             let q: Profile = serde_json::from_str(&s).unwrap();
             assert_eq!(p, q);
         }
+    }
+
+    #[test]
+    fn creating_and_editing_a_copy_preserves_the_applied_profile() {
+        let dir = std::env::temp_dir().join(format!("dsz-copy-profile-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = ProfileStore::load(&dir);
+        let active = store.get_or_first("DualSense");
+        let name = store.copy_as(&active.name, &active.name);
+        assert_eq!(name, "DualSense (1)");
+        let mut edited = (*store.get_or_first(&name)).clone();
+        let mut expected = (*active).clone();
+        expected.name = name.clone();
+        assert_eq!(edited, expected);
+        edited.lighting.brightness = 37;
+        edited.microphone.enabled = true;
+        edited.triggers.left = TriggerEffect::Feedback { position: 2, strength: 3 };
+        store.update(edited.clone());
+        assert_eq!(*store.get_or_first(&active.name), *active);
+        store.flush();
+        let reopened = ProfileStore::load(&dir);
+        assert_eq!(*reopened.get_or_first(&active.name), *active);
+        assert_eq!(*reopened.get_or_first(&name), edited);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

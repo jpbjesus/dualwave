@@ -21,19 +21,19 @@ pub fn card_glow<R>(
     glow: f32,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> (R, Response) {
-    let w = (ui.available_width() - 38.0).max(100.0);
+    let w = (ui.available_width() - 2.0).max(100.0);
     let r = egui::Frame::new()
-        .fill(mix(CARD, ACCENT, glow * 0.12))
-        .stroke(Stroke::new(1.0 + glow, mix(BORDER, ACCENT, glow)))
+        .fill(mix(surface_color(), accent_color(), glow * 0.12))
+        .stroke(Stroke::new(glow, accent_color()))
         .corner_radius(CornerRadius::same(R_CARD))
-        .inner_margin(egui::Margin::same(18))
+        .inner_margin(egui::Margin::symmetric(0, 12))
         .show(ui, |ui| {
             ui.set_width(w);
             if !title.is_empty() {
-                ui.label(RichText::new(title).font(heading(16.0)).color(TEXT));
+                ui.label(RichText::new(title).font(heading(16.0)).color(text_color()));
                 if !subtitle.is_empty() {
                     ui.add_space(-4.0);
-                    ui.label(RichText::new(subtitle).size(12.5).color(MUTED));
+                    ui.label(RichText::new(subtitle).size(12.5).color(muted_color()));
                 }
                 ui.add_space(8.0);
             }
@@ -44,9 +44,9 @@ pub fn card_glow<R>(
 
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
     ui.add_space(4.0);
-    ui.label(RichText::new(title).font(heading(26.0)).color(TEXT));
+    ui.label(RichText::new(title).font(heading(36.0)).color(text_color()));
     if !subtitle.is_empty() {
-        ui.label(RichText::new(subtitle).size(13.5).color(MUTED));
+        ui.label(RichText::new(subtitle).size(13.5).color(muted_color()));
     }
     ui.add_space(12.0);
 }
@@ -60,7 +60,7 @@ pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
         resp.mark_changed();
     }
     let t = ui.ctx().animate_bool(resp.id, *on);
-    let bg = mix(Color32::from_rgb(0x2C, 0x35, 0x48), ACCENT, t);
+    let bg = mix(Color32::from_rgb(0x2C, 0x35, 0x48), accent_color(), t);
     let p = ui.painter();
     p.rect_filled(rect, CornerRadius::same(11), bg);
     let r = rect.height() / 2.0 - 3.0;
@@ -86,10 +86,10 @@ pub fn row<R>(ui: &mut Ui, label: &str, hint: &str, control: impl FnOnce(&mut Ui
         ui.vertical(|ui| {
             ui.set_max_width(label_w);
             ui.add_space(2.0);
-            ui.label(RichText::new(label).color(TEXT));
+            ui.label(RichText::new(label).color(text_color()));
             if !hint.is_empty() {
                 ui.add_space(-6.0);
-                ui.label(RichText::new(hint).size(12.0).color(MUTED));
+                ui.label(RichText::new(hint).size(12.0).color(muted_color()));
             }
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -128,17 +128,17 @@ pub fn segmented<T: PartialEq + Clone>(ui: &mut Ui, value: &mut T, options: &[(T
     let widths: Vec<f32> = options
         .iter()
         .map(|(_, l)| {
-            ui.fonts(|f| f.layout_no_wrap(l.to_string(), font.clone(), TEXT).size().x) + 24.0
+            ui.fonts(|f| f.layout_no_wrap(l.to_string(), font.clone(), text_color()).size().x) + 24.0
         })
         .collect();
     let total = widths.iter().sum::<f32>() + 2.0 * (options.len().saturating_sub(1)) as f32 + 6.0;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(total, 34.0), Sense::hover());
     let p = ui.painter().clone();
-    p.rect_filled(rect, CornerRadius::same(R_CTRL + 2), FIELD);
+    p.rect_filled(rect, CornerRadius::same(R_CTRL + 2), field_color());
     p.rect_stroke(
         rect,
         CornerRadius::same(R_CTRL + 2),
-        Stroke::new(1.0_f32, BORDER),
+        Stroke::new(1.0_f32, border_color()),
         StrokeKind::Inside,
     );
     let mut changed = false;
@@ -154,16 +154,16 @@ pub fn segmented<T: PartialEq + Clone>(ui: &mut Ui, value: &mut T, options: &[(T
         );
         let sel = *value == *v;
         if sel {
-            p.rect_filled(r, CornerRadius::same(R_CTRL), ACCENT);
+            p.rect_filled(r, CornerRadius::same(R_CTRL), accent_color());
         } else if resp.hovered() {
-            p.rect_filled(r, CornerRadius::same(R_CTRL), CARD_HI);
+            p.rect_filled(r, CornerRadius::same(R_CTRL), card_hi_color());
         }
         let fg = if sel {
-            Color32::WHITE
+            accent_text_color()
         } else if resp.hovered() {
-            TEXT
+            text_color()
         } else {
-            MUTED
+            muted_color()
         };
         p.text(
             r.center(),
@@ -213,7 +213,7 @@ pub fn meter(ui: &mut Ui, v: f32, color: Color32, width: f32) -> Response {
     let width = width.min(ui.available_width()).max(24.0);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 8.0), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, CornerRadius::same(4), FIELD);
+    p.rect_filled(rect, CornerRadius::same(4), field_color());
     let mut fill = rect;
     fill.set_width(rect.width() * v.clamp(0.0, 1.0));
     if fill.width() > 0.5 {
@@ -224,8 +224,8 @@ pub fn meter(ui: &mut Ui, v: f32, color: Color32, width: f32) -> Response {
 
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
-        egui::Button::new(RichText::new(text).color(Color32::WHITE))
-            .fill(ACCENT)
+        egui::Button::new(RichText::new(text).color(accent_text_color()))
+            .fill(accent_color())
             .stroke(Stroke::NONE)
             .corner_radius(CornerRadius::same(R_CTRL))
             .min_size(Vec2::new(0.0, 32.0)),
@@ -242,9 +242,9 @@ pub fn button(ui: &mut Ui, text: &str) -> Response {
 
 pub fn danger_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
-        egui::Button::new(RichText::new(text).color(BAD))
-            .fill(with_alpha(BAD, 24))
-            .stroke(Stroke::new(1.0_f32, with_alpha(BAD, 80)))
+        egui::Button::new(RichText::new(text).color(bad_color()))
+            .fill(with_alpha(bad_color(), 24))
+            .stroke(Stroke::new(1.0_f32, with_alpha(bad_color(), 80)))
             .corner_radius(CornerRadius::same(R_CTRL))
             .min_size(Vec2::new(0.0, 32.0)),
     )
@@ -253,7 +253,7 @@ pub fn danger_button(ui: &mut Ui, text: &str) -> Response {
 pub fn muted(ui: &mut Ui, text: &str) {
     // Wraps in the room left even inside a row, where labels would
     // otherwise run past the column.
-    ui.add(egui::Label::new(RichText::new(text).size(12.5).color(MUTED)).wrap());
+    ui.add(egui::Label::new(RichText::new(text).size(12.5).color(muted_color())).wrap());
 }
 
 pub fn note(ui: &mut Ui, text: &str, color: Color32) {
@@ -265,7 +265,7 @@ pub fn note(ui: &mut Ui, text: &str, color: Color32) {
         .inner_margin(egui::Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.set_width(w);
-            ui.label(RichText::new(text).size(13.0).color(mix(color, TEXT, 0.55)));
+            ui.label(RichText::new(text).size(13.0).color(mix(color, text_color(), 0.55)));
         });
 }
 

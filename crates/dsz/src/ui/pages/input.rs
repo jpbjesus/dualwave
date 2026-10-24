@@ -25,27 +25,27 @@ fn button_combo(ui: &mut egui::Ui, id: &str, b: &mut Button, edge: bool) {
 fn gyro_bars(ui: &mut egui::Ui, dps: [f32; 3]) {
     for (label, v) in [(crate::i18n::tr("Pitch"), dps[0]), (crate::i18n::tr("Yaw"), dps[1]), (crate::i18n::tr("Roll"), dps[2])] {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(label).size(12.5).color(MUTED));
+            ui.label(RichText::new(label).size(12.5).color(muted_color()));
             let (r, _) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width() - 70.0, 10.0),
                 Sense::hover(),
             );
             let p = ui.painter();
-            p.rect_filled(r, CornerRadius::same(5), FIELD);
+            p.rect_filled(r, CornerRadius::same(5), field_color());
             let c = r.center().x;
             let t = (v / 360.0).clamp(-1.0, 1.0);
             let x = c + t * r.width() / 2.0;
             let bar = egui::Rect::from_min_max(pos2(c.min(x), r.top()), pos2(c.max(x), r.bottom()));
-            p.rect_filled(bar, CornerRadius::same(5), ACCENT);
+            p.rect_filled(bar, CornerRadius::same(5), accent_color());
             p.line_segment(
                 [pos2(c, r.top() - 2.0), pos2(c, r.bottom() + 2.0)],
-                Stroke::new(1.0_f32, FAINT),
+                Stroke::new(1.0_f32, faint_color()),
             );
             ui.label(
                 RichText::new(format!("{v:+5.0}°/s"))
                     .size(12.0)
                     .monospace()
-                    .color(TEXT),
+                    .color(text_color()),
             );
         });
     }
@@ -56,11 +56,11 @@ fn touch_preview(ui: &mut egui::Ui, input: &ds_proto::InputState) {
     let h = w * 1080.0 / 1920.0 * 0.6;
     let (r, _) = ui.allocate_exact_size(egui::vec2(w, h), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(r, CornerRadius::same(12), FIELD);
+    p.rect_filled(r, CornerRadius::same(12), field_color());
     p.rect_stroke(
         r,
         CornerRadius::same(12),
-        Stroke::new(1.0_f32, BORDER),
+        Stroke::new(1.0_f32, border_color()),
         StrokeKind::Inside,
     );
     p.line_segment(
@@ -68,13 +68,13 @@ fn touch_preview(ui: &mut egui::Ui, input: &ds_proto::InputState) {
             pos2(r.center().x, r.top() + 8.0),
             pos2(r.center().x, r.bottom() - 8.0),
         ],
-        Stroke::new(1.0_f32, with_alpha(BORDER, 140)),
+        Stroke::new(1.0_f32, with_alpha(border_color(), 140)),
     );
     for (k, t) in input.touch.iter().enumerate() {
         if t.active {
             let x = egui::lerp(r.left()..=r.right(), t.x as f32 / 1919.0);
             let y = egui::lerp(r.top()..=r.bottom(), t.y as f32 / 1079.0);
-            let c = if k == 0 { ACCENT } else { VIOLET };
+            let c = if k == 0 { accent_color() } else { violet_color() };
             p.circle_filled(pos2(x, y), 16.0, with_alpha(c, 60));
             p.circle_filled(pos2(x, y), 7.0, c);
         }
@@ -83,7 +83,7 @@ fn touch_preview(ui: &mut egui::Ui, input: &ds_proto::InputState) {
         p.rect_stroke(
             r,
             CornerRadius::same(12),
-            Stroke::new(2.0_f32, ACCENT),
+            Stroke::new(2.0_f32, accent_color()),
             StrokeKind::Inside,
         );
     }
@@ -94,19 +94,19 @@ fn stick_preview(ui: &mut egui::Ui, x: u8, y: u8, deadzone: f32, active: bool) {
     let p = ui.painter();
     let c = r.center();
     let rad = 44.0;
-    p.circle_filled(c, rad, FIELD);
-    p.circle_stroke(c, rad, Stroke::new(1.0_f32, BORDER));
-    p.circle_filled(c, rad * deadzone.clamp(0.0, 1.0), with_alpha(WARN, 30));
+    p.circle_filled(c, rad, field_color());
+    p.circle_stroke(c, rad, Stroke::new(1.0_f32, border_color()));
+    p.circle_filled(c, rad * deadzone.clamp(0.0, 1.0), with_alpha(warn_color(), 30));
     p.circle_stroke(
         c,
         rad * deadzone.clamp(0.0, 1.0),
-        Stroke::new(1.0_f32, with_alpha(WARN, 120)),
+        Stroke::new(1.0_f32, with_alpha(warn_color(), 120)),
     );
     let fx = (x as f32 - 128.0) / 128.0;
     let fy = (y as f32 - 128.0) / 128.0;
     let dot = c + egui::vec2(fx, fy) * rad;
-    p.line_segment([c, dot], Stroke::new(1.0_f32, with_alpha(ACCENT, 120)));
-    p.circle_filled(dot, 6.0, if active { ACCENT } else { MUTED });
+    p.line_segment([c, dot], Stroke::new(1.0_f32, with_alpha(accent_color(), 120)));
+    p.circle_filled(dot, 6.0, if active { accent_color() } else { muted_color() });
 }
 
 impl App {
@@ -123,7 +123,7 @@ impl App {
         );
         #[cfg(target_os = "linux")]
         if let Some(error) = crate::inputsim::error() {
-            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}"), WARN);
+            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
         let mut live = dev.map(|d| d.snapshot()).unwrap_or_default();
@@ -214,7 +214,7 @@ impl App {
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr("Invert")).color(TEXT));
+                                ui.label(RichText::new(crate::i18n::tr("Invert")).color(text_color()));
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -257,11 +257,11 @@ impl App {
                         ui.separator();
                         ui.horizontal(|ui| {
                             let (t, c) = if live.calibrating {
-                                (crate::i18n::tr("Calibrating — keep still"), WARN)
+                                (crate::i18n::tr("Calibrating — keep still"), warn_color())
                             } else if live.gyro_active {
-                                (crate::i18n::tr("Moving the cursor"), ACCENT)
+                                (crate::i18n::tr("Moving the cursor"), accent_color())
                             } else {
-                                (crate::i18n::tr("Live gyro"), MUTED)
+                                (crate::i18n::tr("Live gyro"), muted_color())
                             };
                             pill(ui, t, c);
                             ui.with_layout(

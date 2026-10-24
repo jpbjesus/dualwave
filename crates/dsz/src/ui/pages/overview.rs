@@ -14,7 +14,7 @@ use crate::ui::App;
 fn stat(ui: &mut egui::Ui, k: &str, v: impl Into<RichText>) {
     ui.horizontal(|ui| {
         ui.set_min_height(24.0);
-        ui.label(RichText::new(k).color(MUTED));
+        ui.label(RichText::new(k).color(muted_color()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(v.into());
         });
@@ -40,7 +40,7 @@ impl App {
             ui,
             &name,
             &crate::localized_format!(
-                "{} over {}  ·  profile \"{}\"", "{} por {}  ·  perfil \"{}\"",
+                "{} over {}  ·  profile \"{}\"", "{} por {}  ·  perfil \"{}\""; "{} por {}  ·  perfil \"{}\"",
                 d.model.name(),
                 if d.is_bluetooth() { "Bluetooth" } else { "USB" },
                 self.engine.profile_name_for(d)
@@ -127,22 +127,22 @@ impl App {
             card(ui, crate::i18n::tr("Status"), "", |ui| {
                 let link = d.link.lock().clone();
                 let (lt, lc) = match &link {
-                    Link::Live => (crate::i18n::tr("Connected").to_string(), GOOD),
-                    Link::Quiet => (crate::i18n::tr("No signal").to_string(), WARN),
-                    Link::Opening => (crate::i18n::tr("Connecting").to_string(), MUTED),
-                    Link::Error(e) => (e.clone(), BAD),
+                    Link::Live => (crate::i18n::tr("Connected").to_string(), good_color()),
+                    Link::Quiet => (crate::i18n::tr("No signal").to_string(), warn_color()),
+                    Link::Opening => (crate::i18n::tr("Connecting").to_string(), muted_color()),
+                    Link::Error(e) => (e.clone(), bad_color()),
                 };
                 stat(ui, crate::i18n::tr("Link"), RichText::new(lt).color(lc));
                 let bat = input.battery_percent;
                 let bcol = if bat <= 15 {
-                    BAD
+                    bad_color()
                 } else if bat <= 30 {
-                    WARN
+                    warn_color()
                 } else {
-                    GOOD
+                    good_color()
                 };
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(crate::i18n::tr("Battery")).color(MUTED));
+                    ui.label(RichText::new(crate::i18n::tr("Battery")).color(muted_color()));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let status = match input.battery_status {
                             ds_proto::BatteryStatus::Charging => crate::i18n::tr(" · charging"),
@@ -150,7 +150,7 @@ impl App {
                             ds_proto::BatteryStatus::Error => crate::i18n::tr(" · error"),
                             _ => "",
                         };
-                        ui.label(RichText::new(format!("{bat}%{status}")).color(TEXT));
+                        ui.label(RichText::new(format!("{bat}%{status}")).color(text_color()));
                         meter(ui, bat as f32 / 100.0, bcol, 90.0);
                     });
                 });
@@ -169,7 +169,7 @@ impl App {
                     stat(
                         ui,
                         crate::i18n::tr("Haptic stream"),
-                        crate::localized_format!("{} packets/s", "{} pacotes/s", s.stream_hz.load(Ordering::Relaxed)),
+                        crate::localized_format!("{} packets/s", "{} pacotes/s"; "{} pacotes/s", s.stream_hz.load(Ordering::Relaxed)),
                     );
                 }
                 stat(
@@ -186,11 +186,11 @@ impl App {
                     ui,
                     crate::i18n::tr("Recovered errors"),
                     RichText::new(crate::localized_format!(
-                        "{} write · {} CRC", "{} envios · {} CRC",
+                        "{} write · {} CRC", "{} envios · {} CRC"; "{} envios · {} CRC",
                         s.write_errors.load(Ordering::Relaxed),
                         s.crc_errors.load(Ordering::Relaxed)
                     ))
-                    .color(if errs > 0 { WARN } else { TEXT }),
+                    .color(if errs > 0 { warn_color() } else { text_color() }),
                 );
                 ui.separator();
                 let mac = d.mac.lock().clone();
@@ -209,7 +209,7 @@ impl App {
                     ui,
                     crate::i18n::tr("Gyro"),
                     if live.gyro_active {
-                        RichText::new(crate::i18n::tr("driving the mouse")).color(ACCENT)
+                        RichText::new(crate::i18n::tr("driving the mouse")).color(accent_color())
                     } else {
                         RichText::new(format!(
                             "{:+.0} / {:+.0} / {:+.0} °/s",

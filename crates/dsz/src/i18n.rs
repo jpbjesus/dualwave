@@ -14,34 +14,42 @@ pub enum Language {
     English,
     #[serde(rename = "pt-BR")]
     PortugueseBrazil,
+    #[serde(rename = "pt-PT")]
+    PortuguesePortugal,
 }
 
 impl Language {
-    pub const ALL: [Self; 2] = [Self::English, Self::PortugueseBrazil];
+    pub const ALL: [Self; 3] = [Self::English, Self::PortugueseBrazil, Self::PortuguesePortugal];
     pub fn label(self) -> &'static str {
         match self {
             Self::English => "English",
             Self::PortugueseBrazil => "Português (Brasil)",
+            Self::PortuguesePortugal => "Português (Portugal)",
         }
     }
 }
 
 static LANGUAGE: AtomicU8 = AtomicU8::new(0);
+static EUROPEAN_PORTUGUESE: OnceLock<BTreeMap<String, String>> = OnceLock::new();
 static PORTUGUESE: OnceLock<BTreeMap<String, String>> = OnceLock::new();
 
 pub fn set_language(language: Language) {
     LANGUAGE.store(
-        u8::from(language == Language::PortugueseBrazil),
+        match language { Language::English => 0, Language::PortugueseBrazil => 1, Language::PortuguesePortugal => 2 },
         Ordering::Relaxed,
     );
 }
 pub fn language() -> Language {
-    if LANGUAGE.load(Ordering::Relaxed) == 1 {
-        Language::PortugueseBrazil
-    } else {
-        Language::English
+    match LANGUAGE.load(Ordering::Relaxed) {
+        1 => Language::PortugueseBrazil,
+        2 => Language::PortuguesePortugal,
+        _ => Language::English,
     }
 }
+fn european_catalog() -> &'static BTreeMap<String, String> {
+    EUROPEAN_PORTUGUESE.get_or_init(|| serde_json::from_str(include_str!("../locales/pt-PT.json")).expect("bundled European Portuguese catalog"))
+}
+
 fn catalog() -> &'static BTreeMap<String, String> {
     PORTUGUESE.get_or_init(|| {
         serde_json::from_str(include_str!("../locales/pt-BR.json"))
@@ -49,15 +57,13 @@ fn catalog() -> &'static BTreeMap<String, String> {
     })
 }
 pub fn translate(language: Language, english: &str) -> &str {
-    if language == Language::PortugueseBrazil {
-        catalog()
-            .get(english)
-            .map(String::as_str)
-            .unwrap_or(english)
-    } else {
-        english
+    match language {
+        Language::English => english,
+        Language::PortugueseBrazil => catalog().get(english).map(String::as_str).unwrap_or(english),
+        Language::PortuguesePortugal => european_catalog().get(english).map(String::as_str).unwrap_or(english),
     }
 }
+
 pub fn tr(english: &str) -> &str {
     translate(language(), english)
 }
@@ -66,10 +72,12 @@ pub fn tr(english: &str) -> &str {
 /// formatting specifiers and implicit named captures in both languages.
 #[macro_export]
 macro_rules! localized_format {
-    ($english:literal, $portuguese:literal $($args:tt)*) => {
-        if $crate::i18n::language() == $crate::i18n::Language::PortugueseBrazil {
-            format!($portuguese $($args)*)
-        } else { format!($english $($args)*) }
+    ($english:literal, $portuguese:literal; $european:literal $($args:tt)*) => {
+        match $crate::i18n::language() {
+            $crate::i18n::Language::PortugueseBrazil => format!($portuguese $($args)*),
+            $crate::i18n::Language::PortuguesePortugal => format!($european $($args)*),
+            $crate::i18n::Language::English => format!($english $($args)*),
+        }
     };
 }
 
@@ -92,13 +100,16 @@ mod tests {
     }
     #[test]
     fn language_round_trips_without_renaming_profiles() {
-        let value = r#"{"language":"pt-BR","default_profile":"My English Profile"}"#;
-        let s: crate::settings::Settings = serde_json::from_str(value).unwrap();
-        assert_eq!(s.language, Language::PortugueseBrazil);
-        let restored: crate::settings::Settings =
-            serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
-        assert_eq!(restored, s);
-        assert_eq!(restored.default_profile, "My English Profile");
+        for (code, language) in [("pt-BR", Language::PortugueseBrazil), ("pt-PT", Language::PortuguesePortugal)] {
+            let value = serde_json::json!({"language": code, "default_profile": "My English Profile"});
+            let s: crate::settings::Settings = serde_json::from_value(value).unwrap();
+            assert_eq!(s.language, language);
+            let restored: crate::settings::Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            assert_eq!(restored, s);
+            assert_eq!(restored.default_profile, "My English Profile");
+        }
+        assert_eq!(translate(Language::PortuguesePortugal, "Controller"), "Comando");
+        assert_eq!(translate(Language::PortuguesePortugal, "Preferences"), "Preferências");
     }
     fn placeholders(text: &str) -> Vec<&str> {
         let mut out = Vec::new();
@@ -119,7 +130,7 @@ mod tests {
     #[test]
     fn catalog_preserves_every_format_argument() {
         assert!(catalog().len() > 450);
-        for (english, portuguese) in catalog() {
+        for (english, portuguese) in catalog().iter().chain(european_catalog().iter()) {
             assert!(!portuguese.trim().is_empty(), "{english}");
             assert_eq!(placeholders(english), placeholders(portuguese), "{english}");
         }
@@ -172,6 +183,10 @@ mod tests {
                 let (english, rest) = literal(call);
                 let (portuguese, _) = literal(rest);
                 assert_eq!(catalog().get(&english), Some(&portuguese), "{english}");
+                let (_, rest) = literal(call);
+                let (_, rest) = literal(rest);
+                let (european, _) = literal(rest.trim_start().trim_start_matches(';'));
+                assert_eq!(european_catalog().get(&english), Some(&european), "{english}");
                 checked += 1;
             }
         }

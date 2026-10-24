@@ -81,7 +81,7 @@ fn range_row(ui: &mut egui::Ui, label: &str, r: &mut [u8; 2]) {
         crate::i18n::tr("Below the start reads 0, past the end reads full"),
         |ui| {
             ui.add(egui::DragValue::new(&mut r[0]).range(0..=98).suffix("%"));
-            ui.label(RichText::new(crate::i18n::tr("to")).color(MUTED));
+            ui.label(RichText::new(crate::i18n::tr("to")).color(muted_color()));
             ui.add(egui::DragValue::new(&mut r[1]).range(1..=100).suffix("%"));
             if r[1] <= r[0] {
                 r[1] = (r[0] + 1).min(100);
@@ -115,7 +115,7 @@ fn driver_row(
                     | install::Status::Installing
             )
         );
-        if !busy && primary_button(ui, &crate::localized_format!("Install {}", "Instalar {}", pkg.name())).clicked() {
+        if !busy && primary_button(ui, &crate::localized_format!("Install {}", "Instalar {}"; "Instalar {}", pkg.name())).clicked() {
             let ctx = ui.ctx().clone();
             install::start(pkg, move || ctx.request_repaint());
         }
@@ -141,9 +141,9 @@ fn driver_row(
                 },
             ),
             Some(install::Status::Finished { ok: false }) => {
-                note(ui, crate::i18n::tr("The installer was closed before it finished."), WARN)
+                note(ui, crate::i18n::tr("The installer was closed before it finished."), warn_color())
             }
-            Some(install::Status::Failed(e)) => note(ui, &e, BAD),
+            Some(install::Status::Failed(e)) => note(ui, &e, bad_color()),
             None => {}
         }
     });
@@ -240,17 +240,17 @@ impl App {
                         match (st.active, &st.error) {
                             (Some(k), _) => {
                                 ui.horizontal(|ui| {
-                                    pill(ui, &crate::localized_format!("{} connected", "{} conectado(s)", crate::i18n::tr(k.label())), GOOD);
-                                    muted(ui, &crate::localized_format!("via {}", "via {}", st.backend));
+                                    pill(ui, &crate::localized_format!("{} connected", "{} conectado(s)"; "{} ligado(s)", crate::i18n::tr(k.label())), good_color());
+                                    muted(ui, &crate::localized_format!("via {}", "via {}"; "via {}", st.backend));
                                     if let Some(slot) = st.xinput_slot {
-                                        muted(ui, &crate::localized_format!("· XInput player {}", "· jogador XInput {}", slot + 1));
+                                        muted(ui, &crate::localized_format!("· XInput player {}", "· jogador XInput {}"; "· jogador XInput {}", slot + 1));
                                     }
                                 });
                                 let n = d.virt.reports.load(Ordering::Relaxed);
-                                muted(ui, &crate::localized_format!("{n} reports sent", "{n} relatórios enviados"));
+                                muted(ui, &crate::localized_format!("{n} reports sent", "{n} relatórios enviados"; "{n} relatórios enviados"));
                                 if st.game_audio_open {
                                     ui.horizontal(|ui| {
-                                        pill(ui, crate::i18n::tr("Game audio open"), VIOLET);
+                                        pill(ui, crate::i18n::tr("Game audio open"), violet_color());
                                         muted(
                                             ui,
                                             crate::i18n::tr("haptics are coming from the game"),
@@ -258,20 +258,20 @@ impl App {
                                     });
                                 }
                             }
-                            (None, Some(e)) => note(ui, e, WARN),
+                            (None, Some(e)) => note(ui, e, warn_color()),
                             (None, None) if vo.kind != VirtualKind::Off => muted(ui, crate::i18n::tr("Starting…")),
                             _ => muted(ui, crate::i18n::tr("Games see the physical controller.")),
                         }
                         if let Some((slot, hidden)) = st.parked {
                             ui.horizontal(|ui| {
-                                pill(ui, crate::i18n::tr("Xbox 360 kept"), FAINT);
+                                pill(ui, crate::i18n::tr("Xbox 360 kept"), faint_color());
                                 let player = slot
-                                    .map(|s| crate::localized_format!("XInput player {}", "Jogador XInput {}", s + 1))
+                                    .map(|s| crate::localized_format!("XInput player {}", "Jogador XInput {}"; "Jogador XInput {}", s + 1))
                                     .unwrap_or_else(|| crate::i18n::tr(if cfg!(target_os = "linux") { "its virtual controller" } else { "its XInput slot" }).into());
                                 muted(
                                     ui,
                                     &crate::localized_format!(
-                                        "idle, holding {player}{}; presses Xbox buttons", "ocioso, mantendo {player}{}; envia botões Xbox",
+                                        "idle, holding {player}{}; presses Xbox buttons", "ocioso, mantendo {player}{}; envia botões Xbox"; "inativo, mantendo {player}{}; envia botões Xbox",
                                         if hidden { crate::i18n::tr(if cfg!(target_os = "linux") { ", input suppressed" } else { ", hidden from games" }) } else { "" }
                                     ),
                                 );
@@ -280,21 +280,21 @@ impl App {
                         if st.active.is_some() {
                             if st.hidden {
                                 ui.horizontal(|ui| {
-                                    pill(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Physical input exclusive" } else { "Real controller hidden" }), ACCENT);
+                                    pill(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Physical input exclusive" } else { "Real controller hidden" }), accent_color());
                                     muted(ui, if cfg!(target_os = "linux") { "DualWave" } else { "HidHide" });
                                 });
                                 muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Physical device nodes remain visible. Input is redirected to DualWave while exclusive input is active, and restored when it stops." } else { "Apps that already had the controller open keep it until they restart (Steam, an open game)." }));
                             } else if let Some(n) = &st.hide_note {
-                                note(ui, n, WARN);
+                                note(ui, n, warn_color());
                             }
                         }
                         if let Some(exe) = self.engine.fallback_exe.read().clone() {
                             note(
                                 ui,
                                 &crate::localized_format!(
-                                    "{exe} has no DualSense support, so games see the fallback controller from Profiles & games.", "{exe} não tem suporte a DualSense; será usado o controle alternativo de Perfis e jogos."
+                                    "{exe} has no DualSense support, so games see the fallback controller from Profiles & games.", "{exe} não tem suporte a DualSense; será usado o controle alternativo de Perfis e jogos."; "{exe} não tem suporte a DualSense; será usado o comando alternativo de Perfis e jogos."
                                 ),
-                                VIOLET,
+                                violet_color(),
                             );
                         }
                     } else {
@@ -304,11 +304,11 @@ impl App {
                         }
                         for pad in idle {
                             ui.horizontal(|ui| {
-                                pill(ui, &crate::localized_format!("{} connected", "{} conectado(s)", pad.kind().label()), GOOD);
+                                pill(ui, &crate::localized_format!("{} connected", "{} conectado(s)"; "{} ligado(s)", pad.kind().label()), good_color());
                                 muted(
                                     ui,
                                     &crate::localized_format!(
-                                        "via {} · waiting for your controller", "via {} · aguardando seu controle",
+                                        "via {} · waiting for your controller", "via {} · aguardando seu controle"; "via {} · a aguardar o comando",
                                         pad.target.backend()
                                     ),
                                 );
@@ -370,11 +370,11 @@ impl App {
                             None => "usbip-win2".to_string(),
                         };
                         let usbip_state = if drivers.usbip_blocked.is_some() {
-                            (crate::i18n::tr("blocked"), WARN)
+                            (crate::i18n::tr("blocked"), warn_color())
                         } else if drivers.usbip {
-                            (crate::i18n::tr("ready"), GOOD)
+                            (crate::i18n::tr("ready"), good_color())
                         } else {
-                            (crate::i18n::tr("missing"), FAINT)
+                            (crate::i18n::tr("missing"), faint_color())
                         };
                         driver_row(
                             ui,
@@ -386,13 +386,13 @@ impl App {
                         );
                         driver_row(
                             ui,
-                            if drivers.hidhide { (crate::i18n::tr("ready"), GOOD) } else { (crate::i18n::tr("missing"), FAINT) },
+                            if drivers.hidhide { (crate::i18n::tr("ready"), good_color()) } else { (crate::i18n::tr("missing"), faint_color()) },
                             if cfg!(target_os = "linux") { crate::i18n::tr("Exclusive physical input") } else { "HidHide" },
                             crate::i18n::tr(if cfg!(target_os = "linux") { "Redirects physical input to DualWave; device nodes remain visible" } else { "Hides the real controller, so games see only the virtual one" }),
                             (!drivers.hidhide).then_some(install::Package::HidHide),
                         );
                         if let Some(why) = &drivers.usbip_blocked {
-                            note(ui, why, WARN);
+                            note(ui, why, warn_color());
                         }
                     },
                 );
@@ -456,11 +456,11 @@ impl App {
                         if let Some(d) = dev {
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr("Game speaker sound")).color(MUTED));
+                                ui.label(RichText::new(crate::i18n::tr("Game speaker sound")).color(muted_color()));
                                 meter(
                                     ui,
                                     d.speaker_level.load(Ordering::Relaxed) as f32 / 255.0,
-                                    VIOLET,
+                                    violet_color(),
                                     184.0,
                                 );
                             });
@@ -470,12 +470,12 @@ impl App {
                             drop(fb);
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr("Game rumble")).color(MUTED));
-                                meter(ui, h as f32 / 255.0, ACCENT, 90.0);
-                                meter(ui, l as f32 / 255.0, VIOLET, 90.0);
+                                ui.label(RichText::new(crate::i18n::tr("Game rumble")).color(muted_color()));
+                                meter(ui, h as f32 / 255.0, accent_color(), 90.0);
+                                meter(ui, l as f32 / 255.0, violet_color(), 90.0);
                             });
                             if g.reports > 0 {
-                                muted(ui, &crate::localized_format!("{} output report(s) from the game", "{} relatório(s) de saída do jogo", g.reports));
+                                muted(ui, &crate::localized_format!("{} output report(s) from the game", "{} relatório(s) de saída do jogo"; "{} relatório(s) de saída do jogo", g.reports));
                             }
                             ui.add_space(6.0);
                             let testing = self.game_test.is_some();

@@ -76,10 +76,20 @@ impl Default for GameRule {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Appearance {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub language: crate::i18n::Language,
+    pub appearance: Appearance,
+    pub reduced_motion: bool,
     pub start_with_windows: bool,
     pub start_minimized: bool,
     pub close_to_tray: bool,
@@ -148,6 +158,8 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             language: crate::i18n::Language::English,
+            appearance: Appearance::System,
+            reduced_motion: false,
             start_with_windows: false,
             start_minimized: false,
             close_to_tray: true,
@@ -214,6 +226,18 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_settings_keep_language_and_hardware_defaults_with_system_appearance() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings, Settings::default());
+        assert_eq!(settings.language, crate::i18n::Language::English);
+        assert_eq!(settings.appearance, Appearance::System);
+        assert!(!settings.reduced_motion);
+        let settings: Settings = serde_json::from_str(r#"{"appearance":"Dark","reduced_motion":true,"language":"pt-PT"}"#).unwrap();
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored, settings);
+    }
 
     #[test]
     fn fallback_pad_defaults_off_and_round_trips() {

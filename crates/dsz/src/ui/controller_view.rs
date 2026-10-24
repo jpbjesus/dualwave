@@ -6,8 +6,6 @@
 //! is flattened and triangulated once, drawn as a mesh, and lit here from
 //! the live input.
 //!
-//! The app's mark (`logo`) is the same silhouette as the app icon
-//! (`icon_art`).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -22,7 +20,6 @@ use ds_proto::input::Button;
 use ds_proto::{InputState, Model};
 
 use super::theme::*;
-use crate::icon_art;
 
 pub struct View<'a> {
     pub input: &'a InputState,
@@ -33,7 +30,7 @@ pub struct View<'a> {
     pub connected: bool,
 }
 
-use icon_art::PADS;
+use crate::icon_art::PADS;
 
 /// Maps design units to the screen: `origin` is where design (`ox`, `oy`)
 /// lands, `s` is pixels per unit.
@@ -42,17 +39,22 @@ struct Space {
     ox: f32,
     oy: f32,
     s: f32,
+    center: Pos2,
+    roll: f32,
+    squash: egui::Vec2,
 }
 
 impl Space {
     fn p(&self, x: f32, y: f32) -> Pos2 {
-        pos2(
-            self.origin.x + (x - self.ox) * self.s,
-            self.origin.y + (y - self.oy) * self.s,
-        )
+        let local = vec2(
+            self.origin.x + (x - self.ox) * self.s - self.center.x,
+            self.origin.y + (y - self.oy) * self.s - self.center.y,
+        ) * self.squash;
+        let (sin, cos) = self.roll.sin_cos();
+        self.center + vec2(local.x * cos - local.y * sin, local.x * sin + local.y * cos)
     }
     fn r(&self, x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
-        Rect::from_min_max(self.p(x0, y0), self.p(x1, y1))
+        Rect::from_points(&[self.p(x0, y0), self.p(x1, y0), self.p(x0, y1), self.p(x1, y1)])
     }
     fn l(&self, v: f32) -> f32 {
         v * self.s
@@ -185,7 +187,7 @@ fn outward_normals(pts: &[Pos2]) -> Vec<egui::Vec2> {
         .collect()
 }
 
-use icon_art::flatten_path as flatten;
+use crate::icon_art::flatten_path as flatten;
 
 #[derive(Deserialize)]
 struct RawLook {
@@ -415,58 +417,25 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
-struct Mark {
-    body: Poly,
-    plate: Poly,
-    lightbar: Poly,
-    touchpad: Poly,
-}
-
-fn mark() -> &'static Mark {
-    static G: OnceLock<Mark> = OnceLock::new();
-    G.get_or_init(|| {
-        let s = icon_art::silhouette(CURVE_STEPS);
-        Mark {
-            body: Poly::new(s.body),
-            plate: Poly::new(s.plate),
-            lightbar: Poly::new(s.lightbar),
-            touchpad: Poly::new(s.touchpad),
-        }
-    })
-}
-
-/// The app's mark: the controller silhouette (as in the app icon), fitted
-/// to `rect`.
-pub fn logo(p: &egui::Painter, rect: Rect) {
-    let g = mark();
-    let [x0, y0, x1, y1] = g.body.bb;
-    let s = (rect.width() / (x1 - x0)).min(rect.height() / (y1 - y0));
-    let origin = pos2(
-        rect.center().x - (x1 - x0) * s / 2.0,
-        rect.center().y - (y1 - y0) * s / 2.0,
-    );
-    let sp = Space { origin, ox: x0, oy: y0, s };
-    let rows = (y0, y1);
-    let shell = Color32::from_rgb(0xE4, 0xE8, 0xF0);
-    g.body.draw(p, &sp, shell, Color32::from_rgb(0xB4, 0xBC, 0xCB), Stroke::NONE, rows, 0.0);
-    // The plate shares the body's lower arch: cover it, or a hairline of
-    // shell shows along the bottom.
-    g.plate.draw_grown(p, &sp, Color32::from_rgb(0x1B, 0x21, 0x2E), Color32::from_rgb(0x12, 0x16, 0x1F), Stroke::NONE, rows, 0.0, 1.0);
-    // A hairline strip would vanish at this size: an outline of it, wider.
-    let strip: Vec<Pos2> = g.lightbar.pts.iter().map(|&(x, y)| sp.p(x, y)).collect();
-    p.add(Shape::closed_line(strip, Stroke::new(sp.l(5.0).max(1.2), ACCENT)));
-    g.touchpad.draw(p, &sp, Color32::WHITE, Color32::from_rgb(0xDD, 0xE1, 0xE8), Stroke::NONE, rows, 0.0);
-}
-
 pub fn draw(ui: &mut Ui, size: egui::Vec2, v: &View) -> egui::Response {
+    draw_preview(ui, size, v, [0.0; 3], egui::Vec2::ZERO, None, false).0
+}
+
+/// Pose and pointer offset affect only the vector preview, never device input.
+pub fn draw_stage(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset: egui::Vec2, selected: Option<Button>) -> (egui::Response, Option<Button>) {
+    draw_preview(ui, size, v, pose, offset, selected, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset: egui::Vec2, selected: Option<Button>, interactive: bool) -> (egui::Response, Option<Button>) {
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::hover());
     let edge = v.model.is_edge();
     let g = &looks()[if edge { "dualsenseEdge" } else { "dualsense" }];
     let [bx0, by0, bx1, by1] = g.bounds;
     let (w, h) = (bx1 - bx0, by1 - by0);
-    let s = (rect.width() / w).min(rect.height() / h);
+    let s = (rect.width() / w).min(rect.height() / h) * if pose == [0.0; 3] { 1.0 } else { 0.87 };
     let origin = pos2(rect.center().x - w * s / 2.0, rect.center().y - h * s / 2.0);
-    let sp = Space { origin, ox: bx0, oy: by0, s };
+    let sp = Space { origin: origin + offset, ox: bx0, oy: by0, s, center: rect.center() + offset, roll: pose[0].to_radians(), squash: vec2(pose[2].to_radians().cos(), pose[1].to_radians().cos()) };
     let p = ui.painter_at(rect);
     let i = v.input;
     let on = |b: Button| v.connected && i.buttons.has(b);
@@ -477,7 +446,7 @@ pub fn draw(ui: &mut Ui, size: egui::Vec2, v: &View) -> egui::Response {
             with_alpha(c, (c.a() as u32 * 120 / 255) as u8)
         }
     };
-    let lit = ACCENT;
+    let lit = accent_color();
     let rows = (g.body.bb[1], g.body.bb[3]);
     // Shell: soft white to a cooler grey. Center panel: near black.
     let shell_top = fade(Color32::from_rgb(0xDF, 0xE3, 0xEB));
@@ -490,7 +459,7 @@ pub fn draw(ui: &mut Ui, size: egui::Vec2, v: &View) -> egui::Response {
     let dark_key = fade(Color32::from_rgb(0x2C, 0x33, 0x42));
     let dark_rim = fade(Color32::from_rgb(0x3D, 0x46, 0x58));
     let well = fade(Color32::from_rgb(0x0A, 0x0D, 0x13));
-    let label = fade(with_alpha(TEXT, 190));
+    let label = fade(with_alpha(text_color(), 190));
     let thin = Stroke::new(1.0_f32, dark_rim);
 
     // Triggers, with pressure fill from the bottom, then bumpers: behind
@@ -555,7 +524,7 @@ pub fn draw(ui: &mut Ui, size: egui::Vec2, v: &View) -> egui::Response {
             if t.active {
                 let x = egui::lerp(tb[0] + mx..=tb[2] - mx, t.x as f32 / 1919.0);
                 let y = egui::lerp(tb[1] + my..=tb[3] - my, t.y as f32 / 1079.0);
-                let c = if k == 0 { ACCENT } else { VIOLET };
+                let c = if k == 0 { accent_color() } else { violet_color() };
                 p.circle_filled(sp.p(x, y), sp.l(7.0), with_alpha(c, 70));
                 p.circle_filled(sp.p(x, y), sp.l(3.3), c);
             }
@@ -604,7 +573,7 @@ pub fn draw(ui: &mut Ui, size: egui::Vec2, v: &View) -> egui::Response {
             Stroke::new(sp.l(0.8).max(1.0), fade(Color32::from_rgb(0x1F, 0x25, 0x31))),
         );
         if v.connected && moved {
-            p.circle_filled(cap, sp.l(2.0), ACCENT);
+            p.circle_filled(cap, sp.l(2.0), accent_color());
         }
     }
 
@@ -673,7 +642,21 @@ pub fn draw(ui: &mut Ui, size: egui::Vec2, v: &View) -> egui::Response {
             );
         }
     }
-    resp
+    let mut clicked = None;
+    for (button, part) in &g.buttons {
+        if !interactive || !matches!(button, Button::Cross | Button::Circle | Button::Square | Button::Triangle | Button::Ps | Button::Mute) { continue; }
+        let (center, radius) = match part {
+            Part::Circle(x, y, radius) => (sp.p(*x, *y), sp.l(*radius)),
+            Part::Shape(poly) => { let (x, y) = poly.center(); (sp.p(x, y), sp.l((poly.bb[2] - poly.bb[0]).max(poly.bb[3] - poly.bb[1]) * 0.5)) },
+        };
+        let hit = ui.interact(Rect::from_center_size(center, vec2(radius * 2.0, radius * 2.0)), resp.id.with(button), egui::Sense::click());
+        hit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr(button.short_name())));
+        if selected == Some(*button) || hit.hovered() || hit.has_focus() {
+            p.circle_stroke(center, radius + 2.0, Stroke::new(1.5, accent_color()));
+        }
+        if hit.clicked() { clicked = Some(*button); }
+    }
+    (resp, clicked)
 }
 
 fn face_symbol(p: &egui::Painter, c: Pos2, k: f32, b: Button, color: Color32) {
@@ -704,14 +687,6 @@ fn face_symbol(p: &egui::Painter, c: Pos2, k: f32, b: Button, color: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn mark_triangulates_fully() {
-        let g = mark();
-        for p in [&g.body, &g.plate, &g.lightbar, &g.touchpad] {
-            assert_eq!(p.tris.len(), (p.pts.len() - 2) * 3);
-        }
-    }
 
     #[test]
     fn both_looks_load_and_triangulate_fully() {

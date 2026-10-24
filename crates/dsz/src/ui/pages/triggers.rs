@@ -199,7 +199,7 @@ fn default_for(k: Kind) -> TriggerEffect {
 fn zone_strip(ui: &mut egui::Ui, e: &TriggerEffect, pressure: u8) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 86.0), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, CornerRadius::same(10), FIELD);
+    p.rect_filled(rect, CornerRadius::same(10), field_color());
     let inner = rect.shrink2(egui::vec2(10.0, 10.0));
     let z = e.zone_preview();
     let vib = e.is_vibration();
@@ -208,11 +208,11 @@ fn zone_strip(ui: &mut egui::Ui, e: &TriggerEffect, pressure: u8) {
     for (i, v) in z.iter().enumerate() {
         let x = inner.left() + i as f32 * (w + gap);
         let col = Rect::from_min_max(pos2(x, inner.top()), pos2(x + w, inner.bottom() - 14.0));
-        p.rect_filled(col, CornerRadius::same(4), CARD_HI);
+        p.rect_filled(col, CornerRadius::same(4), card_hi_color());
         if *v > 0.0 {
             let mut f = col;
             f.set_top(col.bottom() - col.height() * v);
-            let c = if vib { VIOLET } else { ACCENT };
+            let c = if vib { violet_color() } else { accent_color() };
             p.rect_filled(f, CornerRadius::same(4), mix(with_alpha(c, 255), c, *v));
             if vib {
                 // Ripple marks for vibration zones.
@@ -231,7 +231,7 @@ fn zone_strip(ui: &mut egui::Ui, e: &TriggerEffect, pressure: u8) {
             egui::Align2::CENTER_CENTER,
             format!("{i}"),
             egui::FontId::proportional(10.5),
-            FAINT,
+            faint_color(),
         );
     }
     // Live position.
@@ -239,9 +239,9 @@ fn zone_strip(ui: &mut egui::Ui, e: &TriggerEffect, pressure: u8) {
     let x = egui::lerp(inner.left()..=inner.right(), t);
     p.line_segment(
         [pos2(x, rect.top() + 4.0), pos2(x, rect.bottom() - 18.0)],
-        Stroke::new(2.0_f32, WARN),
+        Stroke::new(2.0_f32, warn_color()),
     );
-    p.circle_filled(pos2(x, rect.top() + 6.0), 3.5, WARN);
+    p.circle_filled(pos2(x, rect.top() + 6.0), 3.5, warn_color());
 }
 
 /// Editable bars for the zone effects. Drag to paint values 0..=8.
@@ -251,7 +251,7 @@ fn zone_editor(ui: &mut egui::Ui, v: &mut [u8; 10], color: egui::Color32) -> boo
         Sense::click_and_drag(),
     );
     let p = ui.painter();
-    p.rect_filled(rect, CornerRadius::same(10), FIELD);
+    p.rect_filled(rect, CornerRadius::same(10), field_color());
     let inner = rect.shrink(10.0);
     let gap = 4.0;
     let w = (inner.width() - gap * 9.0) / 10.0;
@@ -271,7 +271,7 @@ fn zone_editor(ui: &mut egui::Ui, v: &mut [u8; 10], color: egui::Color32) -> boo
     for (i, val) in v.iter().enumerate() {
         let x = inner.left() + i as f32 * (w + gap);
         let col = Rect::from_min_max(pos2(x, inner.top()), pos2(x + w, inner.bottom()));
-        p.rect_filled(col, CornerRadius::same(4), CARD_HI);
+        p.rect_filled(col, CornerRadius::same(4), card_hi_color());
         if *val > 0 {
             let mut f = col;
             f.set_top(col.bottom() - col.height() * (*val as f32 / 8.0));
@@ -282,7 +282,7 @@ fn zone_editor(ui: &mut egui::Ui, v: &mut [u8; 10], color: egui::Color32) -> boo
             egui::Align2::CENTER_CENTER,
             format!("{val}"),
             egui::FontId::proportional(11.0),
-            MUTED,
+            muted_color(),
         );
     }
     if resp.hovered() {
@@ -296,7 +296,7 @@ fn editor(ui: &mut egui::Ui, id: &str, e: &mut TriggerEffect) {
     let before = k;
     egui::ComboBox::from_id_salt(format!("{id}-kind"))
         .width(240.0)
-        .selected_text(e.kind_name())
+        .selected_text(crate::i18n::tr(e.kind_name()))
         .show_ui(ui, |ui| {
             for (kk, label) in [
                 (Kind::Off, crate::i18n::tr("Off")),
@@ -362,14 +362,14 @@ fn editor(ui: &mut egui::Ui, id: &str, e: &mut TriggerEffect) {
         }
         TriggerEffect::MultiFeedback { strengths } => {
             muted(ui, crate::i18n::tr("Drag across the bars to paint resistance per zone."));
-            zone_editor(ui, strengths, ACCENT);
+            zone_editor(ui, strengths, accent_color());
         }
         TriggerEffect::MultiVibration {
             amplitudes,
             frequency,
         } => {
             muted(ui, crate::i18n::tr("Drag across the bars to paint vibration per zone."));
-            zone_editor(ui, amplitudes, VIOLET);
+            zone_editor(ui, amplitudes, violet_color());
             row(ui, crate::i18n::tr("Frequency"), "", |ui| {
                 ui.add(egui::Slider::new(frequency, 1..=80).suffix(" Hz"))
             });
@@ -435,7 +435,7 @@ fn editor(ui: &mut egui::Ui, id: &str, e: &mut TriggerEffect) {
         TriggerEffect::Custom { .. } | TriggerEffect::Raw { .. } => {
             let b = e.encode();
             muted(ui, crate::i18n::tr("Imported raw effect bytes:"));
-            ui.label(RichText::new(format!("{:02X?}", b)).monospace().color(TEXT));
+            ui.label(RichText::new(format!("{:02X?}", b)).monospace().color(text_color()));
         }
     }
 }
@@ -456,7 +456,7 @@ impl App {
             note(
                 ui,
                 crate::i18n::tr("Adaptive triggers are a DualSense feature. On a DualShock 4, L2 and R2 stay ordinary analog triggers."),
-                WARN,
+                warn_color(),
             );
             ui.add_space(10.0);
         }
@@ -482,11 +482,11 @@ impl App {
                     for (name, eff) in presets() {
                         let sel = *e == eff;
                         let b = egui::Button::new(RichText::new(name).size(12.5).color(if sel {
-                            egui::Color32::WHITE
+                            accent_text_color()
                         } else {
-                            TEXT
+                            text_color()
                         }))
-                        .fill(if sel { ACCENT } else { CARD_HI })
+                        .fill(if sel { accent_color() } else { card_hi_color() })
                         .corner_radius(CornerRadius::same(14));
                         if ui.add(b).clicked() {
                             *e = eff;
@@ -514,7 +514,7 @@ impl App {
                         RichText::new(format!("{:02X?}", bytes))
                             .monospace()
                             .size(11.0)
-                            .color(FAINT),
+                            .color(faint_color()),
                     );
                 });
             });

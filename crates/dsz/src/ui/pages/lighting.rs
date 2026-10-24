@@ -36,7 +36,7 @@ impl App {
             note(
                 ui,
                 crate::i18n::tr("The lightbar follows this page. Player indicators and the mute light are DualSense only, so those controls do nothing on a DualShock 4."),
-                WARN,
+                warn_color(),
             );
             ui.add_space(10.0);
         }
@@ -54,7 +54,7 @@ impl App {
                         Sense::hover(),
                     );
                     let pt = ui.painter();
-                    pt.rect_filled(r, CornerRadius::same(12), FIELD);
+                    pt.rect_filled(r, CornerRadius::same(12), field_color());
                     let bar = r.shrink2(egui::vec2(r.width() * 0.2, 17.0));
                     for k in (1..8).rev() {
                         pt.rect_filled(
@@ -233,10 +233,10 @@ impl App {
                                 pt.circle_filled(
                                     r.center(),
                                     7.0,
-                                    if lit { egui::Color32::WHITE } else { BORDER },
+                                    if lit { egui::Color32::WHITE } else { border_color() },
                                 );
                                 if resp.hovered() {
-                                    pt.circle_stroke(r.center(), 11.0, Stroke::new(1.0_f32, MUTED));
+                                    pt.circle_stroke(r.center(), 11.0, Stroke::new(1.0_f32, muted_color()));
                                 }
                                 if resp.clicked() {
                                     l.player_leds = PlayerLeds::Custom(mask ^ (1 << k));

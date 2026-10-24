@@ -90,7 +90,7 @@ impl App {
         );
         #[cfg(target_os = "linux")]
         if let Some(error) = crate::inputsim::error() {
-            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}"), WARN);
+            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
         let edge = self
@@ -151,8 +151,8 @@ impl App {
         let p_name = p.name.clone();
         for (i, m) in p.mappings.iter_mut().enumerate() {
             egui::Frame::new()
-                .fill(CARD)
-                .stroke(Stroke::new(1.0_f32, if m.enabled { BORDER } else { with_alpha(BORDER, 120) }))
+                .fill(surface_color())
+                .stroke(Stroke::new(1.0_f32, if m.enabled { border_color() } else { with_alpha(border_color(), 120) }))
                 .corner_radius(CornerRadius::same(R_CARD))
                 .inner_margin(egui::Margin::symmetric(16, 12))
                 .show(ui, |ui| {
@@ -171,7 +171,7 @@ impl App {
                         egui::Align2::CENTER_CENTER,
                         "✕",
                         egui::FontId::proportional(14.0),
-                        if xr.hovered() { TEXT } else { MUTED },
+                        if xr.hovered() { text_color() } else { muted_color() },
                     );
                     if xr.clicked() {
                         remove = Some(i);
@@ -202,7 +202,7 @@ impl App {
                                 ui.selectable_value(&mut m.gesture, Gesture::LongPress, crate::i18n::tr("Long press"));
                                 ui.selectable_value(&mut m.gesture, Gesture::DoubleTap, crate::i18n::tr("Double tap"));
                             });
-                        ui.label(RichText::new("→").color(MUTED).size(16.0));
+                        ui.label(RichText::new("→").color(muted_color()).size(16.0));
                         let mut k = akind(&m.action);
                         let before = k;
                         fit(ui, 170.0);
@@ -254,7 +254,7 @@ impl App {
                                     });
                                 let rec = self.capture_key == Some(i);
                                 if ui
-                                    .add(egui::Button::new(if rec { crate::i18n::tr("Press a key…") } else { crate::i18n::tr("Record") }).fill(if rec { ACCENT } else { CARD_HI }))
+                                    .add(egui::Button::new(if rec { crate::i18n::tr("Press a key…") } else { crate::i18n::tr("Record") }).fill(if rec { accent_color() } else { card_hi_color() }))
                                     .clicked()
                                 {
                                     capture = Some(if rec { None } else { Some(i) });
@@ -311,7 +311,7 @@ impl App {
                                         }
                                     });
                                 if !virtual_on {
-                                    ui.label(RichText::new(crate::i18n::tr("needs a virtual controller")).size(12.0).color(WARN));
+                                    ui.label(RichText::new(crate::i18n::tr("needs a virtual controller")).size(12.0).color(warn_color()));
                                 }
                             }
                             Action::Xbox { button } => {
@@ -326,14 +326,14 @@ impl App {
                                     });
                                 #[cfg(target_os = "linux")]
                                 if !xbox_on && !can_hide {
-                                    ui.label(RichText::new(crate::i18n::tr("needs a virtual Xbox 360 controller")).size(12.0).color(WARN));
+                                    ui.label(RichText::new(crate::i18n::tr("needs a virtual Xbox 360 controller")).size(12.0).color(warn_color()));
                                 }
                                 #[cfg(windows)]
                                 if !xbox_on && can_hide {
-                                    ui.label(RichText::new(crate::i18n::tr("hidden helper Xbox controller")).size(12.0).color(MUTED))
+                                    ui.label(RichText::new(crate::i18n::tr("hidden helper Xbox controller")).size(12.0).color(muted_color()))
                                         .on_hover_text(crate::i18n::tr("This profile has no virtual Xbox controller, so DualWave keeps a helper one plugged in, hidden from games with HidHide. Only Windows (Task View, Game Bar) sees it. Needs usbip-win2."));
                                 } else if !xbox_on {
-                                    ui.label(RichText::new(crate::i18n::tr("games see a helper controller")).size(12.0).color(WARN))
+                                    ui.label(RichText::new(crate::i18n::tr("games see a helper controller")).size(12.0).color(warn_color()))
                                         .on_hover_text(crate::i18n::tr("Without HidHide, DualWave plugs in a helper Xbox controller for the press, which games can see, and unplugs it 30 seconds after the last press. Windows needs about a second to see it, so the first press arrives late. Install HidHide on the Virtual controller page to hide it."));
                                 }
                             }
@@ -346,7 +346,7 @@ impl App {
                                 }
                             }
                             Action::TurnOffController => {
-                                ui.label(RichText::new(crate::i18n::tr("powers off over Bluetooth")).size(12.0).color(MUTED))
+                                ui.label(RichText::new(crate::i18n::tr("powers off over Bluetooth")).size(12.0).color(muted_color()))
                                     .on_hover_text(crate::i18n::tr("Drops the Bluetooth link, which turns the controller off. Plugged in over USB, it stays on."));
                             }
                             _ => {}
@@ -354,7 +354,7 @@ impl App {
                     });
                     });
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(crate::i18n::tr("Together with")).size(12.5).color(MUTED));
+                        ui.label(RichText::new(crate::i18n::tr("Together with")).size(12.5).color(muted_color()));
                         let mut chosen: Vec<Button> = m.with.iter().copied().filter(|b| *b != m.button).collect();
                         let label = if chosen.is_empty() {
                             crate::i18n::tr("nothing (single button)").to_string()
@@ -388,7 +388,7 @@ impl App {
                             });
                     });
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(crate::i18n::tr("Behavior")).size(12.5).color(MUTED));
+                        ui.label(RichText::new(crate::i18n::tr("Behavior")).size(12.5).color(muted_color()));
                         fit(ui, 290.0);
                         segmented(
                             ui,
@@ -447,7 +447,7 @@ impl App {
         note(
             ui,
             crate::i18n::tr("Hold sends the output while held, Tap sends one click, Turbo repeats, Toggle latches on and off. Long press and double tap fire only when the gesture completes. Touchpad Left, Center, and Right follow the finger when the pad clicks: left of 640, the middle, and 1280 or further, on the 1920-wide pad. A click with no finger is Touchpad only. Hiding a zone from the game hides that click."),
-            ACCENT,
+            accent_color(),
         );
     }
 }

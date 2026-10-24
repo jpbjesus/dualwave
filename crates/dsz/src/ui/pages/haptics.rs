@@ -43,7 +43,7 @@ impl App {
             note(
                 ui,
                 crate::i18n::tr("A DualShock 4 has rumble motors, not the DualSense voice coils. Rumble and button clicks use classic rumble. The haptic stream and the speaker are DualSense only."),
-                WARN,
+                warn_color(),
             );
             ui.add_space(10.0);
         }
@@ -52,13 +52,13 @@ impl App {
             note(
                 ui,
                 crate::i18n::tr("This controller is on USB. PCM haptics stream over Bluetooth only, so rumble and button clicks use classic rumble here."),
-                WARN,
+                warn_color(),
             );
             ui.add_space(10.0);
         }
         #[cfg(target_os = "linux")]
         if let Some(error) = dev.and_then(|device| device.native_audio_error.lock().clone()) {
-            note(ui, &crate::localized_format!("Controller audio is unavailable: {error}", "O áudio do controle está indisponível: {error}"), WARN);
+            note(ui, &crate::localized_format!("Controller audio is unavailable: {error}", "O áudio do controle está indisponível: {error}"; "O áudio do comando está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
         let devices = self.audio_device_list();
@@ -83,22 +83,22 @@ impl App {
                         ui.horizontal(|ui| {
                             // Room for the two labels and the status pill.
                             let mw = ((ui.available_width() - 170.0) / 2.0).clamp(30.0, 120.0);
-                            ui.label(RichText::new(crate::i18n::tr("Left")).color(MUTED));
-                            meter(ui, lv[0], ACCENT, mw);
+                            ui.label(RichText::new(crate::i18n::tr("Left")).color(muted_color()));
+                            meter(ui, lv[0], accent_color(), mw);
                             ui.add_space(8.0);
-                            ui.label(RichText::new(crate::i18n::tr("Right")).color(MUTED));
-                            meter(ui, lv[1], ACCENT, mw);
+                            ui.label(RichText::new(crate::i18n::tr("Right")).color(muted_color()));
+                            meter(ui, lv[1], accent_color(), mw);
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     let (t, c) = if !h.enabled || !bt {
-                                        (crate::i18n::tr("off").to_string(), FAINT)
+                                        (crate::i18n::tr("off").to_string(), faint_color())
                                     } else if streaming > 0 {
-                                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s"), GOOD)
+                                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s"; "{streaming} pac/s"), good_color())
                                     } else if d.pcm_mode.load(Ordering::Relaxed) {
-                                        (crate::i18n::tr("idle").to_string(), MUTED)
+                                        (crate::i18n::tr("idle").to_string(), muted_color())
                                     } else {
-                                        (crate::i18n::tr("standby").to_string(), MUTED)
+                                        (crate::i18n::tr("standby").to_string(), muted_color())
                                     };
                                     pill(ui, &t, c);
                                 },
@@ -108,7 +108,7 @@ impl App {
                         if under > 0 {
                             muted(
                                 ui,
-                                &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão"),
+                                &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
                             );
                         }
                     }
@@ -154,19 +154,19 @@ impl App {
                         );
                         let peak = self.engine.audio.peak();
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new(crate::i18n::tr("Input")).color(MUTED));
-                            meter(ui, peak, VIOLET, 160.0);
+                            ui.label(RichText::new(crate::i18n::tr("Input")).color(muted_color()));
+                            meter(ui, peak, violet_color(), 160.0);
                             if capture.running {
                                 ui.label(
                                     RichText::new(crate::localized_format!(
-                                        "{} · {} Hz · {} ch", "{} · {} Hz · {} canais",
+                                        "{} · {} Hz · {} ch", "{} · {} Hz · {} canais"; "{} · {} Hz · {} canais",
                                         capture.device, capture.rate, capture.channels
                                     ))
                                     .size(12.0)
-                                    .color(FAINT),
+                                    .color(faint_color()),
                                 );
                             } else if let Some(e) = &capture.error {
-                                ui.label(RichText::new(e).size(12.0).color(BAD));
+                                ui.label(RichText::new(e).size(12.0).color(bad_color()));
                             }
                         });
                         ui.add_space(4.0);
@@ -251,11 +251,11 @@ impl App {
                         if let Some(d) = dev {
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr("Speaker sound")).color(MUTED));
+                                ui.label(RichText::new(crate::i18n::tr("Speaker sound")).color(muted_color()));
                                 meter(
                                     ui,
                                     d.speaker_level.load(Ordering::Relaxed) as f32 / 255.0,
-                                    VIOLET,
+                                    violet_color(),
                                     184.0,
                                 );
                             });
@@ -333,14 +333,14 @@ impl App {
                         #[cfg(target_os = "linux")]
                         let ready = bt && (virtual_microphone || d.native_audio().is_some_and(|audio| audio.healthy()));
                         if !ready {
-                            note(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Connect over Bluetooth and check that PipeWire audio is available. A virtual DualSense can also expose its microphone." } else { "Connect over Bluetooth and select DualSense on the Virtual controller page to expose the microphone to Windows." }), WARN);
+                            note(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Connect over Bluetooth and check that PipeWire audio is available. A virtual DualSense can also expose its microphone." } else { "Connect over Bluetooth and select DualSense on the Virtual controller page to expose the microphone to Windows." }), warn_color());
                         } else {
                             let toggled = d.toggles.lock().mute_engaged;
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr("Microphone level")).color(MUTED));
-                                meter(ui, d.microphone.peak() as f32 / 255.0, VIOLET, 184.0);
+                                ui.label(RichText::new(crate::i18n::tr("Microphone level")).color(muted_color()));
+                                meter(ui, d.microphone.peak() as f32 / 255.0, violet_color(), 184.0);
                                 if m.muted || (m.mute_button && toggled) {
-                                    pill(ui, crate::i18n::tr("muted"), WARN);
+                                    pill(ui, crate::i18n::tr("muted"), warn_color());
                                 } else if !d.virt.microphone_open()
                                     && {
                                         #[cfg(windows)]
@@ -349,7 +349,7 @@ impl App {
                                         { !d.native_audio().is_some_and(|audio| audio.recording()) }
                                     }
                                 {
-                                    pill(ui, crate::i18n::tr("no app recording"), FAINT);
+                                    pill(ui, crate::i18n::tr("no app recording"), faint_color());
                                 }
                             });
                             muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "In your recording app, choose DualWave Microphone or the virtual Wireless Controller microphone. Capture starts only while an app records from it." } else { "In Windows, Discord or your game, select the virtual Wireless Controller microphone as the input device. The controller's microphone is on only while an app records from it." }));

@@ -24,7 +24,7 @@ fn profile_swatch(ui: &mut egui::Ui, p: &Profile) {
             }
         }
         LightMode::Off => {
-            pt.circle_stroke(c, 14.0, Stroke::new(1.5_f32, BORDER));
+            pt.circle_stroke(c, 14.0, Stroke::new(1.5_f32, border_color()));
         }
         LightMode::Battery => {
             pt.circle_filled(c, 15.0, rgb(crate::composer::battery_color(70)));
@@ -51,10 +51,10 @@ fn profile_swatch(ui: &mut egui::Ui, p: &Profile) {
 /// controller's name, in that controller's color.
 fn virtual_badge(ui: &mut egui::Ui, kind: VirtualKind) {
     let (name, color) = match kind {
-        VirtualKind::Off => (crate::i18n::tr("Native: games see this controller"), MUTED),
-        VirtualKind::Xbox360 => (crate::i18n::tr("Virtual Xbox 360 controller"), GOOD),
-        VirtualKind::DualSense => (crate::i18n::tr("Virtual DualSense"), ACCENT),
-        VirtualKind::DualShock4 => (crate::i18n::tr("Virtual DualShock 4"), VIOLET),
+        VirtualKind::Off => (crate::i18n::tr("Native: games see this controller"), muted_color()),
+        VirtualKind::Xbox360 => (crate::i18n::tr("Virtual Xbox 360 controller"), good_color()),
+        VirtualKind::DualSense => (crate::i18n::tr("Virtual DualSense"), accent_color()),
+        VirtualKind::DualShock4 => (crate::i18n::tr("Virtual DualShock 4"), violet_color()),
     };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -118,6 +118,66 @@ impl App {
             .unwrap_or_default()
     }
 
+    fn profile_row_actions(&mut self, ui: &mut egui::Ui, prof: &Profile, dev: Option<&Arc<Device>>, is_active: bool, engine: &crate::engine::Engine) {
+        ui.horizontal(|ui| {
+            if !is_active && !(dev.is_none() && prof.name == engine.settings.read().default_profile) && primary_button(ui, crate::i18n::tr(if dev.is_some() { "Apply profile" } else { "Make default" })).clicked() {
+                match dev {
+                    Some(d) => engine.set_device_profile(d, &prof.name),
+                    None => {
+                        engine.settings.write().default_profile =
+                            prof.name.clone();
+                        engine.settings_changed();
+                    }
+                }
+                self.edit_pin = None;
+            }
+            if button(ui, crate::i18n::tr("Edit")).clicked() {
+                self.edit_pin = Some(prof.name.clone());
+                self.page = crate::ui::Page::Overview;
+                self.advanced = false;
+            }
+            ui.menu_button(crate::i18n::tr("More ▾"), |ui| {
+                if ui.button(crate::i18n::tr("Duplicate")).clicked() {
+                    engine.profiles.duplicate(&prof.name);
+                    ui.close();
+                }
+                if ui.button(crate::i18n::tr("Rename")).clicked() {
+                    self.rename =
+                        Some((prof.name.clone(), prof.name.clone()));
+                    ui.close();
+                }
+                if ui.button(crate::i18n::tr("Make default")).clicked() {
+                    engine.settings.write().default_profile =
+                        prof.name.clone();
+                    engine.settings_changed();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(crate::i18n::tr("Export profile…")).clicked() {
+                    if let Some(f) = rfd::FileDialog::new()
+                        .set_file_name(format!(
+                            "{}.json",
+                            sanitize_file_name(&prof.name)
+                        ))
+                        .add_filter(crate::i18n::tr("Profile"), &["json"])
+                        .save_file()
+                    {
+                        match engine.profiles.export(&prof.name, &f) {
+                            Ok(()) => engine.toast(crate::i18n::tr("Profile exported")),
+                            Err(e) => engine.warn_toast(e),
+                        }
+                    }
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(RichText::new(crate::i18n::tr("Delete")).color(bad_color())).clicked() {
+                    self.confirm_delete = Some(prof.name.clone());
+                    ui.close();
+                }
+            });
+        });
+    }
+
     pub(crate) fn page_profiles(
         &mut self,
         ui: &mut egui::Ui,
@@ -147,14 +207,15 @@ impl App {
             );
             if primary_button(ui, crate::i18n::tr("+ Create")).clicked() {
                 let name = if self.new_profile.trim().is_empty() {
-                    crate::i18n::tr("New profile")
+                    "New profile"
                 } else {
                     self.new_profile.trim()
                 };
-                let n = engine.profiles.add(Profile::named(name));
+                let n = engine.profiles.copy_as(&active, name);
                 self.new_profile.clear();
                 self.edit_pin = Some(n);
-                self.page = crate::ui::Page::Lighting;
+                self.page = crate::ui::Page::Overview;
+                self.advanced = false;
             }
             if button(ui, crate::i18n::tr("Import profile…")).clicked() {
                 if let Some(f) = rfd::FileDialog::new()
@@ -162,7 +223,7 @@ impl App {
                     .pick_file()
                 {
                     match engine.profiles.import(&f) {
-                        Ok(n) => engine.toast(crate::localized_format!("Imported \"{n}\"", "\"{n}\" importado")),
+                        Ok(n) => engine.toast(crate::localized_format!("Imported \"{n}\"", "\"{n}\" importado"; "\"{n}\" importado")),
                         Err(e) => engine.warn_toast(e),
                     }
                 }
@@ -181,226 +242,157 @@ impl App {
         ui.add_space(10.0);
 
         let all = engine.profiles.all();
-        let gap = 12.0;
-        let per_row = (((ui.available_width() + gap) / (290.0 + gap)).floor() as usize).max(1);
-        let card_w = (ui.available_width() + gap) / per_row as f32 - gap - 30.0;
-        for chunk in all.chunks(per_row) {
+        let width = ui.available_width();
+        for prof in &all {
+            let is_active = dev.is_some() && prof.name == active;
+            ui.separator();
+            ui.add_space(10.0);
             ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
-                for prof in chunk.iter() {
-                    let is_active = prof.name == active;
-                    egui::Frame::new()
-                        .fill(if is_active { CARD_HI } else { CARD })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if is_active { ACCENT } else { BORDER },
-                        ))
-                        .corner_radius(CornerRadius::same(R_CARD))
-                        .inner_margin(egui::Margin::same(14))
-                        .show(ui, |ui| {
-                            ui.set_width(card_w);
-                            ui.vertical(|ui| {
-                                ui.set_width(card_w);
-                                ui.horizontal(|ui| {
-                                    profile_swatch(ui, prof);
-                                    ui.vertical(|ui| {
-                                        let mut save: Option<(String, String)> = None;
-                                        let mut cancel = false;
-                                        let mut renaming = false;
-                                        if let Some((old, buf)) = &mut self.rename {
-                                            if *old == prof.name {
-                                                renaming = true;
-                                                let r = ui.add(
-                                                    egui::TextEdit::singleline(buf)
-                                                        .desired_width(150.0),
-                                                );
-                                                let commit = r.lost_focus()
-                                                    && ui
-                                                        .input(|i| i.key_pressed(egui::Key::Enter));
-                                                ui.horizontal(|ui| {
-                                                    if button(ui, crate::i18n::tr("Save")).clicked() || commit {
-                                                        save = Some((
-                                                            old.clone(),
-                                                            buf.trim().to_string(),
-                                                        ));
-                                                    }
-                                                    if button(ui, crate::i18n::tr("Cancel")).clicked() {
-                                                        cancel = true;
-                                                    }
-                                                });
-                                            }
-                                        }
-                                        if let Some((o, n)) = save {
-                                            match engine.profiles.rename(&o, &n) {
-                                                Ok(()) => {
-                                                    engine.rename_profile_refs(&o, &n);
-                                                    if self.edit_pin.as_deref() == Some(o.as_str())
-                                                    {
-                                                        self.edit_pin = Some(n);
-                                                    }
-                                                    self.rename = None;
-                                                }
-                                                Err(e) => engine.warn_toast(e),
-                                            }
-                                        }
-                                        if cancel {
-                                            self.rename = None;
-                                        }
-                                        if renaming {
-                                            return;
-                                        }
-                                        ui.label(RichText::new(&prof.name).font(heading(15.0)));
-                                        ui.horizontal(|ui| {
-                                            ui.spacing_mut().item_spacing.x = 4.0;
-                                            if is_active {
-                                                pill(ui, crate::i18n::tr("Active"), ACCENT);
-                                            }
-                                            if prof.name == default {
-                                                pill(ui, crate::i18n::tr("Default"), MUTED);
-                                            }
-                                            if ds_auto.as_deref() == Some(prof.name.as_str()) {
-                                                pill(ui, crate::i18n::tr("DualSense games"), ACCENT);
-                                            }
-                                            let n = games
-                                                .iter()
-                                                .filter(|g| g.profile == prof.name)
-                                                .count();
-                                            if n > 0 {
-                                                pill(
-                                                    ui,
-                                                    &crate::localized_format!(
-                                                        "{n} game{}", "{n} jogo{}",
-                                                        if n == 1 { "" } else { "s" }
-                                                    ),
-                                                    VIOLET,
-                                                );
-                                            }
-                                        });
-                                    });
-                                });
-                                ui.add_space(6.0);
-                                virtual_badge(ui, prof.virtual_out.kind);
-                                ui.add_space(2.0);
-                                let feats = [
-                                    (
-                                        prof.haptics.enabled
-                                            && prof.haptics.source == AudioSource::SystemAudio,
-                                        crate::i18n::tr("Audio haptics"),
-                                    ),
-                                    (prof.gyro.mode == GyroMode::Mouse, crate::i18n::tr("Gyro")),
-                                    (prof.touchpad.mode == TouchMode::Mouse, crate::i18n::tr("Touch mouse")),
-                                    (
-                                        !matches!(prof.triggers.left, ds_proto::TriggerEffect::Off)
-                                            || !matches!(
-                                                prof.triggers.right,
-                                                ds_proto::TriggerEffect::Off
-                                            ),
-                                        crate::i18n::tr("Triggers"),
-                                    ),
-                                    (!prof.mappings.is_empty(), crate::i18n::tr("Mappings")),
-                                ];
-                                let list: Vec<&str> =
-                                    feats.iter().filter(|f| f.0).map(|f| f.1).collect();
-                                muted(
-                                    ui,
-                                    &if list.is_empty() {
-                                        crate::i18n::tr("Lighting only").to_string()
-                                    } else {
-                                        list.join(" · ")
-                                    },
-                                );
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    if !is_active && primary_button(ui, crate::i18n::tr("Use")).clicked() {
-                                        match dev {
-                                            Some(d) => engine.set_device_profile(d, &prof.name),
-                                            None => {
-                                                engine.settings.write().default_profile =
-                                                    prof.name.clone();
-                                                engine.settings_changed();
-                                            }
-                                        }
-                                        self.edit_pin = None;
-                                    }
-                                    if button(ui, crate::i18n::tr("Edit")).clicked() {
-                                        self.edit_pin = Some(prof.name.clone());
-                                        self.page = crate::ui::Page::Lighting;
-                                    }
-                                    ui.menu_button(crate::i18n::tr("More ▾"), |ui| {
-                                        if ui.button(crate::i18n::tr("Duplicate")).clicked() {
-                                            engine.profiles.duplicate(&prof.name);
-                                            ui.close();
-                                        }
-                                        if ui.button(crate::i18n::tr("Rename")).clicked() {
-                                            self.rename =
-                                                Some((prof.name.clone(), prof.name.clone()));
-                                            ui.close();
-                                        }
-                                        if ui.button(crate::i18n::tr("Make default")).clicked() {
-                                            engine.settings.write().default_profile =
-                                                prof.name.clone();
-                                            engine.settings_changed();
-                                            ui.close();
-                                        }
-                                        ui.separator();
-                                        if ui.button(crate::i18n::tr("Export profile…")).clicked() {
-                                            if let Some(f) = rfd::FileDialog::new()
-                                                .set_file_name(format!(
-                                                    "{}.json",
-                                                    sanitize_file_name(&prof.name)
-                                                ))
-                                                .add_filter(crate::i18n::tr("Profile"), &["json"])
-                                                .save_file()
-                                            {
-                                                match engine.profiles.export(&prof.name, &f) {
-                                                    Ok(()) => engine.toast(crate::i18n::tr("Profile exported")),
-                                                    Err(e) => engine.warn_toast(e),
-                                                }
-                                            }
-                                            ui.close();
-                                        }
-                                        ui.separator();
-                                        if ui.button(RichText::new(crate::i18n::tr("Delete")).color(BAD)).clicked() {
-                                            self.confirm_delete = Some(prof.name.clone());
-                                            ui.close();
-                                        }
-                                    });
-                                });
-                                if self.confirm_delete.as_deref() == Some(prof.name.as_str()) {
-                                    ui.add_space(4.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new(crate::i18n::tr("Delete this profile?")).color(BAD));
-                                        if danger_button(ui, crate::i18n::tr("Delete")).clicked() {
-                                            if engine.profiles.delete(&prof.name) {
-                                                let first = engine
-                                                    .profiles
-                                                    .names()
-                                                    .first()
-                                                    .cloned()
-                                                    .unwrap_or_default();
-                                                engine.rename_profile_refs(&prof.name, &first);
-                                                if self.edit_pin.as_deref()
-                                                    == Some(prof.name.as_str())
-                                                {
-                                                    self.edit_pin = None;
-                                                }
-                                            } else {
-                                                engine.warn_toast(
-                                                    crate::i18n::tr("The last profile can't be deleted"),
-                                                );
-                                            }
-                                            self.confirm_delete = None;
-                                        }
-                                        if button(ui, crate::i18n::tr("Keep")).clicked() {
-                                            self.confirm_delete = None;
-                                        }
-                                    });
+                profile_swatch(ui, prof);
+                ui.vertical(|ui| {
+                    ui.set_width((width * 0.28).clamp(170.0, 330.0));
+                    let mut save: Option<(String, String)> = None;
+                    let mut cancel = false;
+                    let mut renaming = false;
+                    if let Some((old, buf)) = &mut self.rename {
+                        if *old == prof.name {
+                            renaming = true;
+                            let r = ui.add(
+                                egui::TextEdit::singleline(buf)
+                                    .desired_width(150.0),
+                            );
+                            let commit = r.lost_focus()
+                                && ui
+                                    .input(|i| i.key_pressed(egui::Key::Enter));
+                            ui.horizontal(|ui| {
+                                if button(ui, crate::i18n::tr("Save")).clicked() || commit {
+                                    save = Some((
+                                        old.clone(),
+                                        buf.trim().to_string(),
+                                    ));
+                                }
+                                if button(ui, crate::i18n::tr("Cancel")).clicked() {
+                                    cancel = true;
                                 }
                             });
-                        });
-                }
+                        }
+                    }
+                    if let Some((o, n)) = save {
+                        match engine.profiles.rename(&o, &n) {
+                            Ok(()) => {
+                                engine.rename_profile_refs(&o, &n);
+                                if self.edit_pin.as_deref() == Some(o.as_str())
+                                {
+                                    self.edit_pin = Some(n);
+                                }
+                                self.rename = None;
+                            }
+                            Err(e) => engine.warn_toast(e),
+                        }
+                    }
+                    if cancel {
+                        self.rename = None;
+                    }
+                    if renaming {
+                        return;
+                    }
+                    ui.label(RichText::new(&prof.name).font(heading(15.0)));
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        if is_active {
+                            pill(ui, crate::i18n::tr("Active"), accent_color());
+                        }
+                        if prof.name == default {
+                            pill(ui, crate::i18n::tr("Default"), muted_color());
+                        }
+                        if ds_auto.as_deref() == Some(prof.name.as_str()) {
+                            pill(ui, crate::i18n::tr("DualSense games"), accent_color());
+                        }
+                        let n = games
+                            .iter()
+                            .filter(|g| g.profile == prof.name)
+                            .count();
+                        if n > 0 {
+                            pill(
+                                ui,
+                                &crate::localized_format!(
+                                    "{n} game{}", "{n} jogo{}"; "{n} jogo{}",
+                                    if n == 1 { "" } else { "s" }
+                                ),
+                                violet_color(),
+                            );
+                        }
+                    });
+
+                });
+                ui.vertical(|ui| {
+                    ui.set_width((width * 0.30).clamp(180.0, 360.0));
+                    virtual_badge(ui, prof.virtual_out.kind);
+                    let feats = [
+                        (
+                            prof.haptics.enabled
+                                && prof.haptics.source == AudioSource::SystemAudio,
+                            crate::i18n::tr("Audio haptics"),
+                        ),
+                        (prof.gyro.mode == GyroMode::Mouse, crate::i18n::tr("Gyro")),
+                        (prof.touchpad.mode == TouchMode::Mouse, crate::i18n::tr("Touch mouse")),
+                        (
+                            !matches!(prof.triggers.left, ds_proto::TriggerEffect::Off)
+                                || !matches!(
+                                    prof.triggers.right,
+                                    ds_proto::TriggerEffect::Off
+                                ),
+                            crate::i18n::tr("Triggers"),
+                        ),
+                        (!prof.mappings.is_empty(), crate::i18n::tr("Mappings")),
+                    ];
+                    let list: Vec<&str> =
+                        feats.iter().filter(|f| f.0).map(|f| f.1).collect();
+                    muted(
+                        ui,
+                        &if list.is_empty() {
+                            crate::i18n::tr("Lighting only").to_string()
+                        } else {
+                            list.join(" · ")
+                        },
+                    );
+
+                });
+                if width >= 850.0 { self.profile_row_actions(ui, prof, dev, is_active, &engine); }
             });
-            ui.add_space(gap);
+            if width < 850.0 { self.profile_row_actions(ui, prof, dev, is_active, &engine); }
+            if self.confirm_delete.as_deref() == Some(prof.name.as_str()) {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(crate::i18n::tr("Delete this profile?")).color(bad_color()));
+                    if danger_button(ui, crate::i18n::tr("Delete")).clicked() {
+                        if engine.profiles.delete(&prof.name) {
+                            let first = engine
+                                .profiles
+                                .names()
+                                .first()
+                                .cloned()
+                                .unwrap_or_default();
+                            engine.rename_profile_refs(&prof.name, &first);
+                            if self.edit_pin.as_deref()
+                                == Some(prof.name.as_str())
+                            {
+                                self.edit_pin = None;
+                            }
+                        } else {
+                            engine.warn_toast(
+                                crate::i18n::tr("The last profile can't be deleted"),
+                            );
+                        }
+                        self.confirm_delete = None;
+                    }
+                    if button(ui, crate::i18n::tr("Keep")).clicked() {
+                        self.confirm_delete = None;
+                    }
+                });
+            }
+
+            ui.add_space(10.0);
         }
         ui.add_space(16.0);
         let running = self.running_exes();
@@ -414,7 +406,7 @@ impl App {
                 let mut changed = false;
                 changed |= toggle_row(ui, crate::i18n::tr("Switch automatically"), "", &mut s.auto_profiles);
                 if let Some((p, exe)) = &*engine.game_override.read() {
-                    note(ui, &crate::localized_format!("{exe} is running → \"{p}\"", "{exe} em execução → \"{p}\""), VIOLET);
+                    note(ui, &crate::localized_format!("{exe} is running → \"{p}\"", "{exe} em execução → \"{p}\""; "{exe} em execução → \"{p}\""), violet_color());
                 }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -465,7 +457,7 @@ impl App {
                                 .desired_width(230.0),
                         );
                         changed |= r.changed();
-                        ui.label(RichText::new("→").color(MUTED));
+                        ui.label(RichText::new("→").color(muted_color()));
                         let before = g.profile.clone();
                         egui::ComboBox::from_id_salt(("game-prof", i))
                             .width(180.0)
@@ -477,16 +469,16 @@ impl App {
                             });
                         changed |= before != g.profile;
                         if !names.contains(&g.profile) {
-                            pill(ui, crate::i18n::tr("missing"), WARN);
+                            pill(ui, crate::i18n::tr("missing"), warn_color());
                         }
                         let live = running.iter().any(|r| r.eq_ignore_ascii_case(g.exe.trim()));
                         if live {
-                            pill(ui, crate::i18n::tr("running"), GOOD);
+                            pill(ui, crate::i18n::tr("running"), good_color());
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
                                 .add(
-                                    egui::Button::new(RichText::new("✕").color(MUTED)).frame(false),
+                                    egui::Button::new(RichText::new("✕").color(muted_color())).frame(false),
                                 )
                                 .on_hover_text(crate::i18n::tr("Remove"))
                                 .clicked()
@@ -532,7 +524,7 @@ impl App {
                             });
                         changed |= before != s.dualsense_profile;
                         if !names.contains(&s.dualsense_profile) {
-                            pill(ui, crate::i18n::tr("missing"), WARN);
+                            pill(ui, crate::i18n::tr("missing"), warn_color());
                         }
                     });
                     if let Some(p) = engine.profiles.find(&s.dualsense_profile) {
@@ -540,7 +532,7 @@ impl App {
                             note(
                                 ui,
                                 crate::i18n::tr("This profile does not use a virtual DualSense, so over Bluetooth the game cannot send its haptics to the controller."),
-                                WARN,
+                                warn_color(),
                             );
                         }
                     }
@@ -549,7 +541,7 @@ impl App {
                     if found.is_empty() {
                         muted(ui, crate::i18n::tr("No DualSense games seen yet. They show up here the first time they run."));
                     } else {
-                        ui.label(RichText::new(crate::i18n::tr("Seen so far")).color(MUTED));
+                        ui.label(RichText::new(crate::i18n::tr("Seen so far")).color(muted_color()));
                         for (path, why) in found {
                             let name = std::path::Path::new(&path)
                                 .file_name()
