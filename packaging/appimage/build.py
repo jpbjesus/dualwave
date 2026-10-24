@@ -35,8 +35,11 @@ def main():
     payload = library / 'dualwave'
     payload.mkdir(parents=True)
     binary.mkdir(parents=True)
-    shutil.copy2(ROOT / 'target/release/dsz', binary / 'dualwave')
-    shutil.copy2(ROOT / 'target/release/dualwave', binary / 'dualwave-cli')
+    cargo_target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
+    if not cargo_target.is_absolute():
+        cargo_target = ROOT / cargo_target
+    shutil.copy2(cargo_target / 'release/dsz', binary / 'dualwave')
+    shutil.copy2(cargo_target / 'release/dualwave', binary / 'dualwave-cli')
     for name in ['AppRun', 'dualwave.desktop', 'dualwave.svg']:
         shutil.copy2(ROOT / 'packaging/appimage' / name, app / name)
     shutil.copy2(app / 'dualwave.svg', app / '.DirIcon')
@@ -76,6 +79,8 @@ def main():
     shutil.copy2(ROOT / 'LICENSE', licenses / 'LICENSE')
     shutil.copy2(ROOT / 'packaging/kernel/COPYING', licenses / 'kernel-COPYING')
     shutil.copy2(ROOT / 'vendor/opus/COPYING', licenses / 'opus-COPYING')
+    for name in ['Manrope-OFL.txt', 'OpenController-LICENSE']:
+        shutil.copy2(ROOT / 'crates/dsz/assets' / name, licenses / name)
     owners = set()
     for source in bundled_sources:
         owner = subprocess.run(['pacman', '-Qqo', str(source)], capture_output=True, text=True, check=True)

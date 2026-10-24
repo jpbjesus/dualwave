@@ -18,7 +18,7 @@ setup_tools() {
         fi
     done
     if [[ -n $missing ]]; then
-        report_error "Faltam ferramentas para configurar o DualWave:$missing. No CachyOS, instala os pacotes kdialog e polkit antes de voltar a abrir a configuração."
+        report_error "Faltam ferramentas para configurar o DualWave:$missing. No CachyOS, instale os pacotes kdialog e polkit antes de voltar a abrir a configuração."
         return 1
     fi
 }
@@ -40,7 +40,7 @@ setup() {
     fi
     pkexec /usr/bin/bash "$stage/setup-driver.sh" --install "$stage" > "$stage/setup.log" 2>&1 || result=$?
     if (( result == 0 )); then
-        kdialog --title DualWave --msgbox 'Configuração concluída. Reinicia o PC para ativar o suporte do comando e as permissões.' || true
+        kdialog --title DualWave --msgbox 'Configuração concluída. Reinicie o PC para ativar o suporte do comando e as permissões.' || true
     elif (( result != 126 )); then
         report_error "A configuração do DualWave falhou.
 $(tail -n 30 "$stage/setup.log")"
