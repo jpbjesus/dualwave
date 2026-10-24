@@ -181,6 +181,7 @@ impl App {
             .and_then(|i| args.get(i + 1))
             .and_then(|name| {
                 let n = name.to_ascii_lowercase();
+                if n == "audio" { return Some(Page::Haptics); }
                 Page::ALL
                     .into_iter()
                     .find(|p| p.key().to_ascii_lowercase().starts_with(&n))
@@ -203,7 +204,7 @@ impl App {
         App {
             engine,
             page,
-            advanced: args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1)).is_some_and(|name| !name.eq_ignore_ascii_case("workspace")),
+            advanced: args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1)).is_some_and(|name| !name.eq_ignore_ascii_case("workspace") && !name.eq_ignore_ascii_case("audio")),
             part,
             trigger_side: workspace::Side::Both,
             selected_button: ds_proto::input::Button::Cross,
@@ -567,14 +568,14 @@ impl eframe::App for App {
         });
         ctx.style_mut(|s| s.animation_time = if settings.reduced_motion || self.system_reduced_motion { 0.0 } else { 0.24 });
         egui::TopBottomPanel::top("navigation")
-            .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin::symmetric(28, 16)))
+            .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin::symmetric(24, 10)))
             .show(ctx, |ui| self.workspace_navigation(ui));
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin {
-                left: 28,
-                right: 28,
-                top: 16,
+                left: 24,
+                right: 24,
+                top: 8,
                 bottom: 8,
             }))
             .show(ctx, |ui| {
@@ -582,41 +583,49 @@ impl eframe::App for App {
                 const CONTENT: f32 = 1180.0;
                 centered(ui, CONTENT, |ui| self.top_bar(ui, dev.as_ref()));
                 ui.add_space(6.0);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .id_salt(format!("{:?}", self.page))
-                    .show(ui, |ui| {
-                        centered(ui, CONTENT, |ui| {
-                        // Overflowing content grows max_rect too, so keep
-                        // the column's width from before the page.
-                        let column = ui.max_rect().width();
-                        self.advanced_navigation(ui);
+                if !self.advanced && matches!(self.page, Page::Overview | Page::Haptics) {
+                    centered(ui, CONTENT, |ui| {
                         self.editing_banner(ui, dev.as_ref(), &profile.name);
                         self.finish_game_test();
-                        match self.page {
-                            Page::Overview if !self.advanced => self.page_workspace(ui, &mut profile, dev.as_ref()),
-                            Page::Overview => self.page_overview(ui, &mut profile, dev.as_ref()),
-                            Page::Lighting => self.page_lighting(ui, &mut profile, dev.as_ref()),
-                            Page::Triggers => self.page_triggers(ui, &mut profile, dev.as_ref()),
-                            Page::Haptics => self.page_haptics(ui, &mut profile, dev.as_ref()),
-                            Page::Input => self.page_input(ui, &mut profile, dev.as_ref()),
-                            Page::Mappings => self.page_mappings(ui, ctx, &mut profile),
-                            Page::Virtual => self.page_virtual(ui, &mut profile, dev.as_ref()),
-                            Page::Profiles => self.page_profiles(ui, &mut profile, dev.as_ref()),
-                            Page::Settings => self.page_settings(ui),
-                        }
-                        ui.add_space(24.0);
-                        // A row that can't wrap widens the whole page and
-                        // clips its right edge: say which page, once.
-                        let over = ui.min_rect().width() - column;
-                        if over > 1.0 && self.window_sized && self.overflow_logged.insert(self.page) {
-                            log::warn!(
-                                "layout: {:?} is {over:.0} pt wider than its {column:.0} pt column",
-                                self.page
-                            );
-                        }
-                        });
+                        if self.page == Page::Overview { self.page_workspace(ui, &mut profile, dev.as_ref()); }
+                        else { self.page_audio_workspace(ui, &mut profile, dev.as_ref()); }
                     });
+                } else {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .id_salt(format!("{:?}", self.page))
+                        .show(ui, |ui| {
+                            centered(ui, CONTENT, |ui| {
+                            // Overflowing content grows max_rect too, so keep
+                            // the column's width from before the page.
+                            let column = ui.max_rect().width();
+                            self.advanced_navigation(ui);
+                            self.editing_banner(ui, dev.as_ref(), &profile.name);
+                            self.finish_game_test();
+                            match self.page {
+                                Page::Overview => self.page_overview(ui, &mut profile, dev.as_ref()),
+                                Page::Lighting => self.page_lighting(ui, &mut profile, dev.as_ref()),
+                                Page::Triggers => self.page_triggers(ui, &mut profile, dev.as_ref()),
+                                Page::Haptics => self.page_haptics(ui, &mut profile, dev.as_ref()),
+                                Page::Input => self.page_input(ui, &mut profile, dev.as_ref()),
+                                Page::Mappings => self.page_mappings(ui, ctx, &mut profile),
+                                Page::Virtual => self.page_virtual(ui, &mut profile, dev.as_ref()),
+                                Page::Profiles => self.page_profiles(ui, &mut profile, dev.as_ref()),
+                                Page::Settings => self.page_settings(ui),
+                            }
+                            ui.add_space(24.0);
+                            // A row that can't wrap widens the whole page and
+                            // clips its right edge: say which page, once.
+                            let over = ui.min_rect().width() - column;
+                            if over > 1.0 && self.window_sized && self.overflow_logged.insert(self.page) {
+                                log::warn!(
+                                    "layout: {:?} is {over:.0} pt wider than its {column:.0} pt column",
+                                    self.page
+                                );
+                            }
+                            });
+                        });
+                }
             });
 
         // Publish edits (renames go through the store, not this path).

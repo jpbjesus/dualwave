@@ -785,5 +785,6 @@
   "Suppress original virtual button": "Suprimir o botão virtual original",
   "Edits the first enabled individual mapping for this gesture. Combinations, timing and additional mappings are available in Advanced.": "Edita a primeira atribuição individual ativa deste gesto. Combinações, temporizações e outras atribuições estão em Avançado.",
   "Bluetooth microphone; capture starts only while an app records.": "Microfone Bluetooth; a captação começa apenas enquanto uma aplicação grava.",
-  "Apply profile": "Aplicar perfil"
+  "Apply profile": "Aplicar perfil",
+  "Bluetooth audio stream": "Transmitir áudio Bluetooth"
 }

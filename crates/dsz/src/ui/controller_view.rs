@@ -459,7 +459,7 @@ fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset:
     let dark_key = fade(Color32::from_rgb(0x2C, 0x33, 0x42));
     let dark_rim = fade(Color32::from_rgb(0x3D, 0x46, 0x58));
     let well = fade(Color32::from_rgb(0x0A, 0x0D, 0x13));
-    let label = fade(with_alpha(text_color(), 190));
+    let label = fade(with_alpha(Color32::from_rgb(0xEC, 0xEF, 0xF4), 210));
     let thin = Stroke::new(1.0_f32, dark_rim);
 
     // Triggers, with pressure fill from the bottom, then bumpers: behind
