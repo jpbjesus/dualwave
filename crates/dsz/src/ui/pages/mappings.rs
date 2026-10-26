@@ -86,8 +86,12 @@ impl App {
         page_header(
             ui,
             crate::i18n::tr("Button mapping"),
-            crate::i18n::tr(if cfg!(target_os = "linux") { "Send keys, mouse buttons, media keys, or app actions from any button or combo, including turning a Bluetooth controller off. Touchpad Left, Center, and Right are the click in each third of the pad. With a virtual controller on, a mapping can suppress its original button or press a different controller button. Xbox mappings require an active virtual Xbox 360 controller." } else { "Send keys, mouse buttons, media keys, or app actions from any button or combo, including turning a Bluetooth controller off. Touchpad Left, Center, and Right are the click in each third of the pad. Touchpad is still the whole click. With a virtual controller on, a mapping can also hide its button from the game or press a different controller button. Xbox buttons work on any profile, so the Xbox button can open Game Bar (tap) or Task View (hold)." }),
+            crate::i18n::tr("Assign keys, clicks and actions to controller buttons or combinations."),
         );
+        ui.collapsing(crate::i18n::tr("Mapping help"), |ui| {
+            muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Send keys, mouse buttons, media keys, or app actions from any button or combo, including turning a Bluetooth controller off. Touchpad Left, Center, and Right are the click in each third of the pad. With a virtual controller on, a mapping can suppress its original button or press a different controller button. Xbox mappings require an active virtual Xbox 360 controller." } else { "Send keys, mouse buttons, media keys, or app actions from any button or combo, including turning a Bluetooth controller off. Touchpad Left, Center, and Right are the click in each third of the pad. Touchpad is still the whole click. With a virtual controller on, a mapping can also hide its button from the game or press a different controller button. Xbox buttons work on any profile, so the Xbox button can open Game Bar (tap) or Task View (hold)." }));
+        });
+        ui.add_space(8.0);
         #[cfg(target_os = "linux")]
         if let Some(error) = crate::inputsim::error() {
             note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());

@@ -185,13 +185,15 @@ impl App {
                 self.page = Page::Overview;
                 self.advanced = false;
             }
+            ui.label(RichText::new("/").color(muted_color()));
+            ui.label(RichText::new(self.page.label()).color(muted_color()));
             ui.menu_button(tr("Advanced"), |ui| {
                 for page in [Page::Overview, Page::Lighting, Page::Triggers, Page::Input, Page::Mappings, Page::Virtual, Page::Haptics] {
                     if ui.button(page.label()).clicked() { self.page = page; self.advanced = true; ui.close(); }
                 }
             });
         });
-        ui.add_space(10.0);
+        ui.add_space(4.0);
     }
 
     fn workspace_heading(&mut self, ui: &mut egui::Ui, title: &str) {
@@ -295,39 +297,47 @@ impl App {
     pub(super) fn page_audio_workspace(&mut self, ui: &mut egui::Ui, p: &mut Profile, dev: Option<&Arc<Device>>) {
         self.workspace_heading(ui, "Audio");
         ui.add_space(8.0);
-        ui.columns(2, |cols| {
-            cols[0].label(RichText::new(tr("Controller speaker / headset")).font(heading(18.0)));
-            cols[0].add_space(12.0);
-            cols[0].checkbox(&mut p.haptics.enabled, tr("Bluetooth audio stream"));
-            cols[0].add_space(8.0);
-            cols[0].spacing_mut().slider_width = (cols[0].available_width() - 140.0).clamp(80.0, 260.0);
-            cols[0].add(egui::Slider::new(&mut p.haptics.speaker_volume, 0..=100).text(tr("Volume")).suffix("%"));
-            cols[0].checkbox(&mut p.haptics.headset_when_plugged, tr("Headset when plugged in"));
-            let before = p.haptics.pc_audio_on_speaker;
-            cols[0].checkbox(&mut p.haptics.pc_audio_on_speaker, tr("PC audio on speaker / headset"));
-            if !before && p.haptics.pc_audio_on_speaker { p.haptics.enabled = true; }
-            cols[0].add_space(12.0);
-            #[cfg(target_os = "linux")]
-            cols[0].label(RichText::new("DualWave Headphones").color(muted_color())).on_hover_text(tr("For direct desktop playback, choose DualWave Headphones in your app. Bluetooth and Stream haptics must be on."));
-            #[cfg(target_os = "linux")]
-            if let Some(d) = dev {
-                if let Some(error) = &*d.native_audio_error.lock() { cols[0].add(egui::Label::new(RichText::new(error).color(muted_color())).truncate()).on_hover_text(error); }
-            }
-            cols[1].label(RichText::new(tr("Microphone")).font(heading(18.0)));
-            cols[1].add_space(12.0);
-            cols[1].horizontal(|ui| {
-                ui.checkbox(&mut p.microphone.enabled, tr("Enable microphone"));
-                ui.checkbox(&mut p.microphone.muted, tr("Mute"));
+        let spacing = ui.spacing().item_spacing.x;
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 28.0;
+            ui.columns(2, |cols| {
+                for col in cols.iter_mut() { col.spacing_mut().item_spacing.x = spacing; }
+                let titles = [tr("Controller speaker / headset"), tr("Microphone")];
+                let header_height = cols.iter().zip(titles).map(|(col, title)| {
+                    col.fonts(|f| f.layout(title.to_string(), heading(18.0), text_color(), col.available_width()).size().y)
+                }).fold(0.0_f32, f32::max);
+                for (col, title) in cols.iter_mut().zip(titles) {
+                    col.allocate_ui_with_layout(egui::vec2(col.available_width(), header_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_min_height(header_height);
+                        ui.label(RichText::new(title).font(heading(18.0)));
+                    });
+                    col.add_space(8.0);
+                    col.spacing_mut().slider_width = (col.available_width() * 0.43).clamp(70.0, 220.0);
+                }
+                widgets::toggle_row(&mut cols[0], tr("Bluetooth audio stream"), "", &mut p.haptics.enabled);
+                widgets::slider_row(&mut cols[0], tr("Volume"), "", &mut p.haptics.speaker_volume, 0..=100, "%");
+                widgets::toggle_row(&mut cols[0], tr("Headset when plugged in"), "", &mut p.haptics.headset_when_plugged);
+                let before = p.haptics.pc_audio_on_speaker;
+                widgets::toggle_row(&mut cols[0], tr("PC audio on speaker / headset"), "", &mut p.haptics.pc_audio_on_speaker);
+                if !before && p.haptics.pc_audio_on_speaker { p.haptics.enabled = true; }
+                cols[0].add_space(8.0);
+                #[cfg(target_os = "linux")]
+                cols[0].label(RichText::new("DualWave Headphones").size(12.5).color(muted_color())).on_hover_text(tr("For direct desktop playback, choose DualWave Headphones in your app. Bluetooth and Stream haptics must be on."));
+                #[cfg(target_os = "linux")]
+                if let Some(d) = dev {
+                    if let Some(error) = &*d.native_audio_error.lock() { cols[0].add(egui::Label::new(RichText::new(error).color(muted_color())).truncate()).on_hover_text(error); }
+                }
+                widgets::toggle_row(&mut cols[1], tr("Enable microphone"), "", &mut p.microphone.enabled);
+                widgets::toggle_row(&mut cols[1], tr("Mute"), "", &mut p.microphone.muted);
+                choice(&mut cols[1], &mut p.microphone.source, &[(MicrophoneSource::Auto, "Auto"), (MicrophoneSource::BuiltIn, "Built-in"), (MicrophoneSource::Headset, "Headset")]);
+                widgets::slider_row(&mut cols[1], tr("Microphone gain"), "", &mut p.microphone.gain_percent, 0..=200, "%");
+                widgets::toggle_row(&mut cols[1], tr("Mute button"), "", &mut p.microphone.mute_button);
+                cols[1].add_space(8.0);
+                cols[1].label(RichText::new(tr(self.microphone_status(dev))).size(12.5).color(muted_color())).on_hover_text(tr("Permission and mute above belong to the edited profile."));
+                if let Some(d) = dev {
+                    if *d.link.lock() == Link::Live && d.microphone.recording() { widgets::meter(&mut cols[1], d.microphone.peak() as f32 / 255.0, accent_color(), 160.0); }
+                }
             });
-            choice(&mut cols[1], &mut p.microphone.source, &[(MicrophoneSource::Auto, "Auto"), (MicrophoneSource::BuiltIn, "Built-in"), (MicrophoneSource::Headset, "Headset")]);
-            cols[1].spacing_mut().slider_width = (cols[1].available_width() - 200.0).clamp(60.0, 220.0);
-            cols[1].add(egui::Slider::new(&mut p.microphone.gain_percent, 0..=200).text(tr("Microphone gain")).suffix("%"));
-            cols[1].checkbox(&mut p.microphone.mute_button, tr("Mute button"));
-            cols[1].add_space(12.0);
-            cols[1].label(tr(self.microphone_status(dev))).on_hover_text(tr("Permission and mute above belong to the edited profile."));
-            if let Some(d) = dev {
-                if *d.link.lock() == Link::Live && d.microphone.recording() { widgets::meter(&mut cols[1], d.microphone.peak() as f32 / 255.0, accent_color(), 160.0); }
-            }
         });
     }
 

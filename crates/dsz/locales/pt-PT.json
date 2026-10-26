@@ -786,5 +786,10 @@
   "Edits the first enabled individual mapping for this gesture. Combinations, timing and additional mappings are available in Advanced.": "Edita a primeira atribuição individual ativa deste gesto. Combinações, temporizações e outras atribuições estão em Avançado.",
   "Bluetooth microphone; capture starts only while an app records.": "Microfone Bluetooth; a captação começa apenas enquanto uma aplicação grava.",
   "Apply profile": "Aplicar perfil",
-  "Bluetooth audio stream": "Transmitir áudio Bluetooth"
+  "Bluetooth audio stream": "Transmitir áudio Bluetooth",
+  "Integrations": "Integrações",
+  "Setup instructions": "Instruções de configuração",
+  "Manage profiles": "Gerir perfis",
+  "Mapping help": "Ajuda sobre atribuições",
+  "Assign keys, clicks and actions to controller buttons or combinations.": "Atribua teclas, cliques e ações a botões ou combinações do comando."
 }

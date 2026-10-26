@@ -185,6 +185,28 @@ impl App {
         dev: Option<&Arc<Device>>,
     ) {
         page_header(ui, crate::i18n::tr("Profiles & games"), crate::i18n::tr("Each profile holds lighting, triggers, haptics, motion, and mappings. Games can switch profiles automatically."));
+        let id = egui::Id::new("profiles-section");
+        let mut section = ui.ctx().data_mut(|d| d.get_temp::<usize>(id).unwrap_or(0));
+        #[cfg(debug_assertions)]
+        if crate::ui::snapshot::path().is_some() {
+            if let Ok(value) = std::env::var("DSZ_SNAPSHOT_SECTION") { section = value.parse::<usize>().unwrap_or(0).min(1); }
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut section, 0, crate::i18n::tr("Profiles"));
+            ui.selectable_value(&mut section, 1, crate::i18n::tr("Game profiles"));
+        });
+        ui.ctx().data_mut(|d| d.insert_temp(id, section));
+        ui.separator();
+        let scroll = egui::ScrollArea::vertical().id_salt(("profile-content", section)).auto_shrink([false, false]);
+        #[cfg(debug_assertions)]
+        let scroll = crate::ui::snapshot::scroll_area(scroll, ui.ctx());
+        scroll.show(ui, |ui| {
+            if section == 0 { self.profile_list(ui, dev); }
+            else { self.game_profiles(ui, dev); }
+        });
+    }
+
+    fn profile_list(&mut self, ui: &mut egui::Ui, dev: Option<&Arc<Device>>) {
         let engine = self.engine.clone();
         let active = match dev {
             Some(d) => engine.profile_name_for(d),
@@ -217,27 +239,29 @@ impl App {
                 self.page = crate::ui::Page::Overview;
                 self.advanced = false;
             }
-            if button(ui, crate::i18n::tr("Import profile…")).clicked() {
-                if let Some(f) = rfd::FileDialog::new()
-                    .add_filter(crate::i18n::tr("Profile"), &["json"])
-                    .pick_file()
-                {
-                    match engine.profiles.import(&f) {
-                        Ok(n) => engine.toast(crate::localized_format!("Imported \"{n}\"", "\"{n}\" importado"; "\"{n}\" importado")),
-                        Err(e) => engine.warn_toast(e),
+            ui.menu_button(crate::i18n::tr("Manage profiles"), |ui| {
+                if button(ui, crate::i18n::tr("Import profile…")).clicked() {
+                    if let Some(f) = rfd::FileDialog::new()
+                        .add_filter(crate::i18n::tr("Profile"), &["json"])
+                        .pick_file()
+                    {
+                        match engine.profiles.import(&f) {
+                            Ok(n) => engine.toast(crate::localized_format!("Imported \"{n}\"", "\"{n}\" importado"; "\"{n}\" importado")),
+                            Err(e) => engine.warn_toast(e),
+                        }
                     }
                 }
-            }
-            if button(ui, crate::i18n::tr("Open profiles folder")).clicked() {
-                crate::platform::open_in_explorer(engine.profiles.dir());
-            }
-            if button(ui, crate::i18n::tr("Backup & restore…"))
-                .on_hover_text(crate::i18n::tr("Back up or restore every profile and setting at once, on the Settings page"))
-                .clicked()
-            {
-                self.page = crate::ui::Page::Settings;
-                self.focus_backup = Some((std::time::Instant::now(), false));
-            }
+                if button(ui, crate::i18n::tr("Open profiles folder")).clicked() {
+                    crate::platform::open_in_explorer(engine.profiles.dir());
+                }
+                if button(ui, crate::i18n::tr("Backup & restore…"))
+                    .on_hover_text(crate::i18n::tr("Back up or restore every profile and setting at once, on the Settings page"))
+                    .clicked()
+                {
+                    self.page = crate::ui::Page::Settings;
+                    self.focus_backup = Some((std::time::Instant::now(), false));
+                }
+            });
         });
         ui.add_space(10.0);
 
@@ -395,6 +419,11 @@ impl App {
             ui.add_space(10.0);
         }
         ui.add_space(16.0);
+    }
+
+    fn game_profiles(&mut self, ui: &mut egui::Ui, dev: Option<&Arc<Device>>) {
+        let engine = self.engine.clone();
+        let active = dev.map(|d| engine.profile_name_for(d)).unwrap_or_else(|| engine.settings.read().default_profile.clone());
         let running = self.running_exes();
         let names = engine.profiles.names();
         card(
@@ -409,7 +438,7 @@ impl App {
                     note(ui, &crate::localized_format!("{exe} is running → \"{p}\"", "{exe} em execução → \"{p}\""; "{exe} em execução → \"{p}\""), violet_color());
                 }
                 ui.add_space(4.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let target = active.clone();
                     egui::ComboBox::from_id_salt("add-running")
                         .width(240.0)
@@ -449,7 +478,7 @@ impl App {
                 }
                 let mut remove = None;
                 for (i, g) in s.games.iter_mut().enumerate() {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         changed |= toggle(ui, &mut g.enabled).changed();
                         let r = ui.add(
                             egui::TextEdit::singleline(&mut g.exe)
@@ -459,6 +488,7 @@ impl App {
                         changed |= r.changed();
                         ui.label(RichText::new("→").color(muted_color()));
                         let before = g.profile.clone();
+                        fit(ui, 180.0);
                         egui::ComboBox::from_id_salt(("game-prof", i))
                             .width(180.0)
                             .selected_text(&g.profile)

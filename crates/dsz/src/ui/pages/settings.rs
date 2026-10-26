@@ -6,52 +6,78 @@ use crate::ui::App;
 
 impl App {
     pub(crate) fn page_settings(&mut self, ui: &mut egui::Ui) {
-        page_header(ui, crate::i18n::tr("Settings"), "");
+        ui.label(RichText::new(crate::i18n::tr("Settings")).font(heading(23.0)));
+        ui.add_space(8.0);
         let engine = self.engine.clone();
-        card(ui, crate::i18n::tr("Appearance"), "", |ui| {
-            let mut s = engine.settings.write();
-            let before = s.clone();
-            ui.horizontal_wrapped(|ui| {
-                for (value, label) in [(crate::settings::Appearance::System, "System"), (crate::settings::Appearance::Light, "Light appearance"), (crate::settings::Appearance::Dark, "Dark appearance")] {
-                    ui.selectable_value(&mut s.appearance, value, crate::i18n::tr(label));
-                }
-            });
-            ui.checkbox(&mut s.reduced_motion, crate::i18n::tr("Reduce interface motion"));
-            let changed = *s != before;
-            drop(s);
-            if changed { engine.settings_changed(); }
-        });
-        card(ui, crate::i18n::tr("Language"), "", |ui| {
-            let mut language = engine.settings.read().language;
-            let previous = language;
-            row(
-                ui,
-                crate::i18n::tr("Interface language"),
-                crate::i18n::tr("Applied immediately and saved automatically"),
-                |ui| {
-                    egui::ComboBox::from_id_salt("interface-language")
-                        .selected_text(language.label())
-                        .show_ui(ui, |ui| {
-                            for value in crate::i18n::Language::ALL {
-                                ui.selectable_value(
-                                    &mut language,
-                                    value,
-                                    value.label(),
-                                );
-                            }
-                        });
-                },
-            );
-            if language != previous {
-                engine.settings.write().language = language;
-                crate::i18n::set_language(language);
-                engine.settings_changed();
-                ui.ctx().request_repaint();
+        let id = egui::Id::new("preferences-section");
+        let mut section = ui.ctx().data_mut(|d| d.get_temp::<usize>(id).unwrap_or(0));
+        #[cfg(debug_assertions)]
+        if crate::ui::snapshot::path().is_some() {
+            if let Ok(value) = std::env::var("DSZ_SNAPSHOT_SECTION") {
+                section = value.parse::<usize>().unwrap_or(0).min(6);
+            }
+        }
+        if self.focus_backup.is_some() { section = 4; }
+        ui.horizontal_wrapped(|ui| {
+            for (index, label) in ["Appearance", "Startup", "Controllers", "Integrations", "Backup & restore", "Logs", "About"].iter().enumerate() {
+                ui.selectable_value(&mut section, index, crate::i18n::tr(label));
             }
         });
-        ui.add_space(12.0);
-        two_columns(ui, |ui, col| {
-            if col == 0 {
+        ui.ctx().data_mut(|d| d.insert_temp(id, section));
+        ui.add_space(8.0);
+        ui.separator();
+        let scroll = egui::ScrollArea::vertical().id_salt(("preferences-content", section)).auto_shrink([false, false]);
+        #[cfg(debug_assertions)]
+        let scroll = crate::ui::snapshot::scroll_area(scroll, ui.ctx());
+        scroll.show(ui, |ui| {
+            // One readable column; category navigation stays outside scrolling.
+            let width = ui.available_width().min(820.0);
+            ui.set_max_width(width);
+            match section {
+            0 => {
+                card(ui, crate::i18n::tr("Appearance"), "", |ui| {
+                    let mut s = engine.settings.write();
+                    let before = s.clone();
+                    ui.horizontal_wrapped(|ui| {
+                        for (value, label) in [(crate::settings::Appearance::System, "System"), (crate::settings::Appearance::Light, "Light appearance"), (crate::settings::Appearance::Dark, "Dark appearance")] {
+                            ui.selectable_value(&mut s.appearance, value, crate::i18n::tr(label));
+                        }
+                    });
+                    ui.checkbox(&mut s.reduced_motion, crate::i18n::tr("Reduce interface motion"));
+                    let changed = *s != before;
+                    drop(s);
+                    if changed { engine.settings_changed(); }
+                });
+                card(ui, crate::i18n::tr("Language"), "", |ui| {
+                    let mut language = engine.settings.read().language;
+                    let previous = language;
+                    row(
+                        ui,
+                        crate::i18n::tr("Interface language"),
+                        crate::i18n::tr("Applied immediately and saved automatically"),
+                        |ui| {
+                            egui::ComboBox::from_id_salt("interface-language")
+                                .selected_text(language.label())
+                                .show_ui(ui, |ui| {
+                                    for value in crate::i18n::Language::ALL {
+                                        ui.selectable_value(
+                                            &mut language,
+                                            value,
+                                            value.label(),
+                                        );
+                                    }
+                                });
+                        },
+                    );
+                    if language != previous {
+                        engine.settings.write().language = language;
+                        crate::i18n::set_language(language);
+                        engine.settings_changed();
+                        ui.ctx().request_repaint();
+                    }
+                });
+            }
+            1 => {
                 card(ui, crate::i18n::tr("Startup"), "", |ui| {
                     let mut s = engine.settings.write();
                     let mut changed = false;
@@ -123,7 +149,9 @@ impl App {
                         engine.settings_changed();
                     }
                 });
-                ui.add_space(12.0);
+
+            }
+            2 => {
                 card(ui, crate::i18n::tr("Controllers"), "", |ui| {
                     let mut s = engine.settings.write();
                     let mut changed = false;
@@ -216,7 +244,9 @@ impl App {
                         engine.settings_changed();
                     }
                 });
-            } else {
+
+            }
+            3 => {
                 card(
                     ui,
                     crate::i18n::tr("Game mod API"),
@@ -269,9 +299,13 @@ impl App {
                 );
                 ui.add_space(12.0);
                 self.motion_server_card(ui);
-                ui.add_space(12.0);
+
+            }
+            4 => {
                 self.backup_card(ui);
-                ui.add_space(12.0);
+
+            }
+            5 => {
                 card(ui, crate::i18n::tr("Logs"), "", |ui| {
                     ui.horizontal(|ui| {
                         muted(ui, crate::i18n::tr("Show"));
@@ -317,7 +351,9 @@ impl App {
                                 });
                         });
                 });
-                ui.add_space(12.0);
+
+            }
+            6 => {
                 self.updates_card(ui);
                 ui.add_space(12.0);
                 card(ui, crate::i18n::tr("About"), "", |ui| {
@@ -338,6 +374,8 @@ impl App {
                         ),
                     );
                 });
+            }
+            _ => {}
             }
         });
     }
@@ -380,10 +418,12 @@ impl App {
                         pill(ui, &e, bad_color());
                     }
                 });
+                ui.collapsing(crate::i18n::tr("Setup instructions"), |ui| {
                 ui.add_space(4.0);
                 muted(ui, &crate::localized_format!("Dolphin: Controllers > Alternate Input Sources > enable DSU Client and add a server named DualWave (127.0.0.1, port {PORT}). Picking the DSUClient device maps nothing by itself: in the Wii Remote's Motion Input tab, right-click each Accelerometer and Gyroscope box and enter its DSU input, such as `DSUClient/0/DualWave:Accel Up` or `DSUClient/0/DualWave:Gyro Pitch Up`, then tick Enabled under Point for gyro pointing. Leave Device on the controller you use for buttons.", "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DualWave (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: na aba Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e digite a entrada DSU, como `DSUClient/0/DualWave:Accel Up` ou `DSUClient/0/DualWave:Gyro Pitch Up`, e marque Enabled em Point para apontar com o giroscópio. Deixe Device no controle que você usa para os botões."; "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DualWave (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: no separador Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e introduza a entrada DSU, como `DSUClient/0/DualWave:Accel Up` ou `DSUClient/0/DualWave:Gyro Pitch Up`, e assinale Enabled em Point para apontar com o giroscópio. Deixe Device no comando que o utilizador usa para os botões."));
                 muted(ui, &crate::localized_format!("Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, port {PORT}). Yuzu-family emulators: Controls > Motion > CemuhookUDP.", "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, porta {PORT}). Emuladores da família Yuzu: Controls > Motion > CemuhookUDP."; "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, porta {PORT}). Emuladores da família Yuzu: Controls > Motion > CemuhookUDP."));
                 muted(ui, crate::i18n::tr("Buttons and sticks still come from the virtual controller. Set the profile's gyro to Off while playing, or the gyro moves the mouse as well."));
+                });
             },
         );
     }
@@ -631,5 +671,37 @@ impl App {
             Some((at, true)) if at.elapsed().as_secs_f32() >= GLOW_FOR => self.focus_backup = None,
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preferences_fit_the_window() {
+        let dir = std::env::temp_dir().join(format!("dualwave-preferences-test-{}", std::process::id()));
+        let mut app = App::new(crate::engine::Engine::new(dir.clone()));
+        let ctx = egui::Context::default();
+        crate::ui::theme::install(&ctx, 1.0);
+        for size in [egui::vec2(1230.0, 740.0), egui::vec2(760.0, 440.0)] {
+            for section in 0usize..7 {
+                ctx.data_mut(|d| d.insert_temp(egui::Id::new("preferences-section"), section));
+                for pass in 0..3 {
+                    let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() }, |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            let bounds = ui.available_rect_before_wrap();
+                            app.page_settings(ui);
+                            if pass == 2 {
+                                assert!(ui.min_rect().bottom() <= bounds.bottom() + 1.0, "section {section} overflows vertically at {size:?}: {:?}", ui.min_rect());
+                                assert!(ui.min_rect().right() <= bounds.right() + 1.0, "section {section} overflows horizontally at {size:?}");
+                            }
+                        });
+                    });
+                }
+            }
+        }
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

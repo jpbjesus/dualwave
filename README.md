@@ -13,8 +13,9 @@ renders on Linux; the full integrated application still needs hardware testing.
 | Feature | Current status |
 | --- | --- |
 | Controller workspace | Viewport-based controller and audio pages, fixed quick controls, four destinations, a selectable controller drawing, lighting/trigger/button/motion inspectors, six visual trigger presets and quick audio controls; complete editors remain under Advanced |
-| Appearance and accessibility | Manrope typography, flat light/dark/system themes, keyboard controls and finite visual preview motion; Reduce interface motion and startup Windows/KDE/GNOME preferences disable preview animation |
-| Profiles and languages | Profile rows with create-from-applied, edit without applying, clone/import/export/delete and game rules; English, Português (Brasil) and Português (Portugal), with English unchanged as the default |
+| Preferences | Fixed category navigation for appearance, startup, controllers, integrations, backups, logs and application information; long setup instructions expand on demand |
+| Appearance and accessibility | Manrope typography, flat light/dark/system themes, responsive option groups, aligned setting rows, fixed editor navigation, keyboard controls and finite visual preview motion; Reduce interface motion and startup Windows/KDE/GNOME preferences disable preview animation |
+| Profiles and languages | Fixed profile/game-rule navigation, profile rows with create-from-applied, edit without applying, clone/import/export/delete and game rules; English, Português (Brasil) and Português (Portugal), with English unchanged as the default |
 | Bluetooth headphone playback, headset mic, physical Mute | Confirmed by the user with the earlier CLI and first kernel filter, standard DualSense firmware 6.30 |
 | GUI Bluetooth audio | Native PipeWire endpoints and original audio encoder integrated; hardware validation pending |
 | Lighting, adaptive triggers, haptics, mappings, motion and touch | Original core retained; Linux HID/uinput backends implemented, integrated hardware validation pending |

@@ -80,9 +80,13 @@ fn range_row(ui: &mut egui::Ui, label: &str, r: &mut [u8; 2]) {
         label,
         crate::i18n::tr("Below the start reads 0, past the end reads full"),
         |ui| {
-            ui.add(egui::DragValue::new(&mut r[0]).range(0..=98).suffix("%"));
-            ui.label(RichText::new(crate::i18n::tr("to")).color(muted_color()));
-            ui.add(egui::DragValue::new(&mut r[1]).range(1..=100).suffix("%"));
+            // The setting row anchors controls on the right; the range
+            // itself still reads from its lower endpoint to its upper one.
+            ui.allocate_ui_with_layout(egui::vec2(170.0, 34.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::DragValue::new(&mut r[0]).range(0..=98).suffix("%"));
+                ui.label(RichText::new(crate::i18n::tr("to")).color(muted_color()));
+                ui.add(egui::DragValue::new(&mut r[1]).range(1..=100).suffix("%"));
+            });
             if r[1] <= r[0] {
                 r[1] = (r[0] + 1).min(100);
             }
@@ -524,5 +528,25 @@ impl App {
                 );
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn trigger_range_reads_from_start_to_end() {
+        let ctx = egui::Context::default();
+        crate::ui::theme::install(&ctx, 1.0);
+        let mut range = [0, 100];
+        let output = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 200.0))), ..Default::default() }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| range_row(ui, "L2", &mut range));
+        });
+        let x = |value: &str| output.shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.job.text == value => Some(t.pos.x), _ => None,
+        }).expect("range endpoint rendered");
+        assert!(x("0%") < x("100%"), "the starting percentage must appear before the ending percentage");
+        assert_eq!(range, [0, 100]);
     }
 }

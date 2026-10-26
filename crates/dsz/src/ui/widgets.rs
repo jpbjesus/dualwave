@@ -32,7 +32,6 @@ pub fn card_glow<R>(
             if !title.is_empty() {
                 ui.label(RichText::new(title).font(heading(16.0)).color(text_color()));
                 if !subtitle.is_empty() {
-                    ui.add_space(-4.0);
                     ui.label(RichText::new(subtitle).size(12.5).color(muted_color()));
                 }
                 ui.add_space(8.0);
@@ -43,12 +42,11 @@ pub fn card_glow<R>(
 }
 
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
-    ui.add_space(4.0);
-    ui.label(RichText::new(title).font(heading(36.0)).color(text_color()));
+    ui.label(RichText::new(title).font(heading(24.0)).color(text_color()));
     if !subtitle.is_empty() {
         ui.label(RichText::new(subtitle).size(13.5).color(muted_color()));
     }
-    ui.add_space(12.0);
+    ui.add_space(8.0);
 }
 
 /// iOS-style switch.
@@ -79,24 +77,27 @@ pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
 
 /// A setting row: label (+ hint) on the left, control on the right.
 pub fn row<R>(ui: &mut Ui, label: &str, hint: &str, control: impl FnOnce(&mut Ui) -> R) -> R {
-    let mut out = None;
-    let label_w = (ui.available_width() * 0.42).max(120.0);
-    ui.horizontal(|ui| {
-        ui.set_min_height(34.0);
-        ui.vertical(|ui| {
-            ui.set_max_width(label_w);
-            ui.add_space(2.0);
-            ui.label(RichText::new(label).color(text_color()));
-            if !hint.is_empty() {
-                ui.add_space(-6.0);
-                ui.label(RichText::new(hint).size(12.0).color(muted_color()));
-            }
-        });
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            out = Some(control(ui));
-        });
-    });
-    out.unwrap()
+    let origin = ui.cursor().min;
+    let width = ui.available_width();
+    // Lay out controls first so a switch reserves only its actual width.
+    // Help text can then use the rest, rather than a fixed 42% column.
+    let control_rect = egui::Rect::from_min_size(origin + egui::vec2(width * 0.42, 0.0), egui::vec2(width * 0.58, 34.0));
+    let mut controls = ui.new_child(egui::UiBuilder::new().max_rect(control_rect)
+        .layout(Layout::right_to_left(Align::Center)));
+    let out = control(&mut controls);
+    let control_bounds = controls.min_rect();
+    let label_right = (control_bounds.left() - 16.0).max(origin.x + 1.0);
+    let mut labels = ui.new_child(egui::UiBuilder::new()
+        .max_rect(egui::Rect::from_min_max(origin + egui::vec2(0.0, 3.0), egui::pos2(label_right, origin.y + 34.0)))
+        .layout(Layout::top_down(Align::Min)));
+    labels.spacing_mut().item_spacing.y = 4.0;
+    labels.add(egui::Label::new(RichText::new(label).color(text_color())).wrap());
+    if !hint.is_empty() {
+        labels.add(egui::Label::new(RichText::new(hint).size(12.0).color(muted_color())).wrap());
+    }
+    let bottom = labels.min_rect().bottom().max(control_bounds.bottom()).max(origin.y + 34.0);
+    ui.advance_cursor_after_rect(egui::Rect::from_min_max(origin, egui::pos2(origin.x + width, bottom)));
+    out
 }
 
 pub fn toggle_row(ui: &mut Ui, label: &str, hint: &str, on: &mut bool) -> bool {
@@ -132,7 +133,20 @@ pub fn segmented<T: PartialEq + Clone>(ui: &mut Ui, value: &mut T, options: &[(T
         })
         .collect();
     let total = widths.iter().sum::<f32>() + 2.0 * (options.len().saturating_sub(1)) as f32 + 6.0;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(total, 34.0), Sense::hover());
+    let width = total.min(ui.available_width()).max(1.0);
+    let mut positions = Vec::new();
+    let mut x = 3.0;
+    let mut y = 3.0;
+    for natural_width in &widths {
+        let w = natural_width.min((width - 6.0).max(1.0));
+        if x > 3.0 && x + w > width - 3.0 {
+            x = 3.0;
+            y += 32.0;
+        }
+        positions.push((x, y, w));
+        x += w + 2.0;
+    }
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, y + 31.0), Sense::hover());
     let p = ui.painter().clone();
     p.rect_filled(rect, CornerRadius::same(R_CTRL + 2), field_color());
     p.rect_stroke(
@@ -142,10 +156,8 @@ pub fn segmented<T: PartialEq + Clone>(ui: &mut Ui, value: &mut T, options: &[(T
         StrokeKind::Inside,
     );
     let mut changed = false;
-    let mut x = rect.left() + 3.0;
-    for (i, ((v, label), w)) in options.iter().zip(widths.iter()).enumerate() {
-        let r = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 3.0), egui::vec2(*w, 28.0));
-        x += w + 2.0;
+    for (i, ((v, label), (x, y, w))) in options.iter().zip(positions).enumerate() {
+        let r = egui::Rect::from_min_size(rect.min + egui::vec2(x, y), egui::vec2(w, 28.0));
         let resp = ui.interact(
             r,
             ui.id()
@@ -165,7 +177,7 @@ pub fn segmented<T: PartialEq + Clone>(ui: &mut Ui, value: &mut T, options: &[(T
         } else {
             muted_color()
         };
-        p.text(
+        p.with_clip_rect(ui.clip_rect().intersect(r)).text(
             r.center(),
             egui::Align2::CENTER_CENTER,
             *label,
@@ -319,10 +331,16 @@ pub fn two_columns(ui: &mut Ui, mut f: impl FnMut(&mut Ui, usize)) {
         f(ui, 1);
         return;
     }
-    ui.columns(2, |cols| {
-        // Columns default to a justified layout, which spreads wrapped text.
-        let (a, b) = cols.split_at_mut(1);
-        a[0].with_layout(Layout::top_down(Align::Min), |ui| f(ui, 0));
-        b[0].with_layout(Layout::top_down(Align::Min), |ui| f(ui, 1));
+    let spacing = ui.spacing().item_spacing.x;
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 28.0;
+        ui.columns(2, |cols| {
+            cols[0].spacing_mut().item_spacing.x = spacing;
+            cols[1].spacing_mut().item_spacing.x = spacing;
+            // Columns default to a justified layout, which spreads wrapped text.
+            let (a, b) = cols.split_at_mut(1);
+            a[0].with_layout(Layout::top_down(Align::Min), |ui| f(ui, 0));
+            b[0].with_layout(Layout::top_down(Align::Min), |ui| f(ui, 1));
+        });
     });
 }

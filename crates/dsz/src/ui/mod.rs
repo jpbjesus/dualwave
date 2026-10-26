@@ -571,6 +571,7 @@ impl eframe::App for App {
             .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin::symmetric(24, 10)))
             .show(ctx, |ui| self.workspace_navigation(ui));
 
+        self.finish_game_test();
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin {
                 left: 24,
@@ -581,27 +582,33 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 // Pages are at most CONTENT wide, centred in a wider window.
                 const CONTENT: f32 = 1180.0;
-                centered(ui, CONTENT, |ui| self.top_bar(ui, dev.as_ref()));
+                if self.page != Page::Settings {
+                    centered(ui, CONTENT, |ui| self.top_bar(ui, dev.as_ref()));
+                }
                 ui.add_space(6.0);
                 if !self.advanced && matches!(self.page, Page::Overview | Page::Haptics) {
                     centered(ui, CONTENT, |ui| {
                         self.editing_banner(ui, dev.as_ref(), &profile.name);
-                        self.finish_game_test();
                         if self.page == Page::Overview { self.page_workspace(ui, &mut profile, dev.as_ref()); }
                         else { self.page_audio_workspace(ui, &mut profile, dev.as_ref()); }
                     });
+                } else if self.page == Page::Settings {
+                    centered(ui, CONTENT, |ui| self.page_settings(ui));
+                } else if self.page == Page::Profiles {
+                    centered(ui, CONTENT, |ui| self.page_profiles(ui, &mut profile, dev.as_ref()));
                 } else {
-                    egui::ScrollArea::vertical()
+                    centered(ui, CONTENT, |ui| self.advanced_navigation(ui));
+                    let scroll = egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
-                        .id_salt(format!("{:?}", self.page))
-                        .show(ui, |ui| {
+                        .id_salt(format!("{:?}", self.page));
+                    #[cfg(debug_assertions)]
+                    let scroll = snapshot::scroll_area(scroll, ui.ctx());
+                    scroll.show(ui, |ui| {
                             centered(ui, CONTENT, |ui| {
                             // Overflowing content grows max_rect too, so keep
                             // the column's width from before the page.
                             let column = ui.max_rect().width();
-                            self.advanced_navigation(ui);
                             self.editing_banner(ui, dev.as_ref(), &profile.name);
-                            self.finish_game_test();
                             match self.page {
                                 Page::Overview => self.page_overview(ui, &mut profile, dev.as_ref()),
                                 Page::Lighting => self.page_lighting(ui, &mut profile, dev.as_ref()),
@@ -698,3 +705,6 @@ fn tray_available() -> bool {
     #[cfg(target_os = "linux")]
     { crate::tray::available() }
 }
+
+#[cfg(test)]
+mod layout_tests;

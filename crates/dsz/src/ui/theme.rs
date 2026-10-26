@@ -142,7 +142,7 @@ pub fn install(ctx: &egui::Context, scale: f32) {
         s.spacing.slider_width = 160.0;
         s.spacing.combo_width = 180.0;
         s.spacing.icon_width = 16.0;
-        s.spacing.scroll = egui::style::ScrollStyle::floating();
+        s.spacing.scroll = egui::style::ScrollStyle::solid();
         s.interaction.selectable_labels = false;
 
         let v = &mut s.visuals;

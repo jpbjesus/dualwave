@@ -39,6 +39,13 @@ pub fn tick(ctx: &egui::Context, frames: u64) {
     }
 }
 
+/// Inspect the bottom of long editors without waiting for scroll animation.
+pub fn scroll_area(area: egui::ScrollArea, ctx: &egui::Context) -> egui::ScrollArea {
+    if path().is_some() && std::env::var_os("DSZ_SNAPSHOT_BOTTOM").is_some() && ctx.cumulative_frame_nr() == 2 {
+        area.vertical_scroll_offset(1_000_000.0)
+    } else { area }
+}
+
 /// 32-bit top-down BMP.
 fn bmp(img: &egui::ColorImage) -> Vec<u8> {
     let [w, h] = img.size;
