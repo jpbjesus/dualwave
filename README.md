@@ -3,47 +3,156 @@
 </p>
 
 <h1 align="center">DualWave</h1>
-<p align="center">A native Linux companion for your DualSense.</p>
+<p align="center">Your DualSense. Your controls. Your sound.</p>
 <p align="center">
   Bluetooth headset audio · Microphone · Adaptive triggers · Controller profiles
 </p>
 <p align="center">
   <a href="#getting-started">Getting started</a> ·
   <a href="#inside-the-app">Screenshots</a> ·
-  <a href="#features-and-validation">Features</a> ·
+  <a href="#features">Features</a> ·
   <a href="#building">Build</a> ·
   <a href="https://github.com/jpbjesus/dualwave/issues">Report an issue</a>
 </p>
 
 ![DualWave controller workspace](.github/screenshots/controller.png)
 
-DualWave brings the DualSense's controls and Bluetooth audio into one native
-Linux application. Configure lighting, trigger effects, button mappings and
-motion, switch profiles for games, and use headphones and a microphone through
-the controller's 3.5 mm jack.
+DualWave puts your DualSense at the centre of your setup. Shape its lighting,
+feel the resistance of adaptive triggers, map controls to the way you play, and
+bring headphone audio and microphone capture to the controller's 3.5 mm jack
+over Bluetooth. Keep separate profiles for games and switch between them in one
+native desktop application.
 
-It is an independent fork of [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz).
-The original controller protocol and profile format are retained; Linux backends
-provide HID access, PipeWire audio, keyboard/mouse input, a desktop tray and
-virtual controllers.
+**Explore visually, fine-tune when needed.** Select a region of the controller
+for quick adjustments, or open a dedicated editor for the full set of controls.
+Playback, microphone and virtual output stay within reach in the workspace.
 
-**Development preview.** CachyOS is the primary integration target. Bluetooth
-stereo playback, headset recording and the physical Mute button were confirmed
-on a standard DualSense with firmware 6.30 using the earlier CLI/kernel filter.
-The complete GUI integration, current media-isolation driver and virtual
-controller paths still need broader hardware validation. See the
-[validation table](#features-and-validation) before relying on a particular path.
+An independent fork of [DSZ](https://github.com/MaximumFreak/dsz), with a new
+identity and native Linux integration. This is a **development preview**;
+platform requirements and the distinction between implemented and
+hardware-validated features are documented under [Compatibility](#compatibility).
+
+## Features
+
+| Make it yours | What you can configure |
+| --- | --- |
+| **Light and colour** | Lightbar effects, custom colours, brightness, player indicators and mute LED behaviour |
+| **Adaptive triggers** | Independent L2/R2 effects, resistance presets, firing points, vibration and per-zone settings |
+| **Headphone audio** | Bluetooth stereo playback through the 3.5 mm jack, output routing and volume |
+| **Microphone** | Automatic, built-in or headset source; gain, capture permission, mute and the physical Mute button |
+| **Haptics** | Audio-driven feedback, system audio, button clicks, trigger texture and rumble conversion |
+| **Buttons and gestures** | Keyboard, mouse and controller actions; combinations, long press and double tap |
+| **Motion and touch** | Gyro aiming, mouse control, touchpad behaviour and stick modes |
+| **Virtual output** | Xbox 360, DualSense and DualShock 4 controller targets |
+| **Profiles for games** | Create, duplicate, rename, import/export and automatically select profiles using game rules |
+| **Emulator and mod integration** | DSU motion server and local UDP mod API |
+| **A personal workspace** | English, Português (Portugal), Português (Brasil), light/dark/system themes and reduced motion |
+| **Everyday convenience** | Desktop tray, startup preferences, device naming and complete settings backups |
+
+## Inside the app
+
+### A visual controller workspace
+
+The controller drawing is interactive: select lighting, a trigger or a button to
+open its contextual controls. The adjacent selector also gives direct access to
+motion. Quick controls keep playback volume, microphone state and virtual output
+available below the preview.
+
+The **Controller** navigation always returns to this visual workspace. Dedicated
+**Lighting**, **Triggers**, **Motion**, **Buttons**, **Virtual controller** and
+**Device status** tabs give access to complete editors without a hidden advanced
+mode.
+
+### Lighting, from a colour to a complete effect
+
+Choose a static colour, breathing or rainbow animation, or turn the lightbar off.
+The full editor adds effects such as strobe, battery and audio response, together
+with player LED and mute indicator settings. The preview reflects the edited
+profile's lightbar settings.
+
+![Lighting effects and LED configuration](.github/screenshots/lighting.png)
+
+### Triggers with a distinct feel
+
+Start with visual resistance presets, apply an effect to one trigger or both,
+and fine-tune firing points and force in the full editor. A visual simulation
+lets you inspect the preview without sending a test effect to the controller.
+
+![Independent adaptive trigger effect editors](.github/screenshots/triggers.png)
+
+### Buttons, motion and touch
+
+Map a press, long press or double tap to keyboard, mouse or controller actions.
+Use combinations for additional controls, choose whether to suppress the original
+virtual button, and keep custom actions in the profile.
+
+![Button mappings and gesture configuration](.github/screenshots/buttons.png)
+
+Configure gyro behaviour, touchpad interaction and stick modes in the motion
+editor. Quick mouse and game controls are also available beside the visual
+controller preview.
+
+![Gyro, touchpad and stick configuration](.github/screenshots/motion.png)
+
+### Playback and microphone, together
+
+**Audio** opens the playback and microphone workspace. Set output volume, select
+a microphone source and adjust gain. The microphone control combines capture
+permission, mute state and an actual recording level in one place. Its separate
+power control disables capture without discarding the saved mute state.
+
+Recording is disabled by default. Enabling capture allows a recording application
+to use it; it does not save a recording. The level indicator follows actual
+samples only while an application is recording. The physical Mute button can
+control recording when enabled in the profile.
+
+Open **Haptics & audio** for the full audio and feedback editor. Clicking **Audio**
+returns to playback and microphone controls.
+
+![Playback volume, microphone source and capture controls](.github/screenshots/audio.png)
+
+### Audio you can feel
+
+Use audio as haptic feedback, adjust rumble conversion, and configure button
+clicks and trigger texture. The full editor brings playback routing and haptic
+sources together with the feedback controls.
+
+![Haptic sources and full audio configuration](.github/screenshots/haptics.png)
+
+### Profiles that follow the game
+
+Keep a different configuration for each game or play style. Create profiles from
+existing ones, duplicate them, rename them, or exchange them through import and
+export. Game rules can select a profile automatically, including process
+discovery for Wine/Proton games.
+
+Choosing a profile to edit does not silently apply it to a connected controller.
+Edits are saved automatically; profile names remain independent of the interface
+language. **Backup & restore** exports application settings and profiles together.
+
+![Profile management and access to game rules](.github/screenshots/profiles.png)
+
+### Preferences with a place for everything
+
+Appearance, language, startup behaviour, controller settings, integrations and
+backups have their own categories. Choose a theme, adjust interface size or
+reduce motion without changing your controller profiles.
+
+![Appearance and language preferences](.github/screenshots/preferences.png)
+
+Screenshots show the native application with isolated example profiles and no
+controller connected. They illustrate configuration, not a live hardware test.
 
 ## Getting started
 
-### AppImage on CachyOS
+### Open the application
 
 There is no published release yet. The AppImage can be built from this repository
 using the [instructions below](#building); release artifacts will appear in
 [Releases](https://github.com/jpbjesus/dualwave/releases).
 
-1. Make `DualWave-x86_64.AppImage` executable and open it.
-2. Accept the first-run system configuration if requested. One administrator
+1. On a supported Linux system, make `DualWave-x86_64.AppImage` executable and open it.
+2. On CachyOS, accept the first-run system configuration if requested. One administrator
    authorization installs the bundled DKMS/device support and missing kernel
    headers. The desktop needs `kdialog` and `polkit` for this setup.
 3. Reboot once after system configuration, reconnect the controller over
@@ -58,48 +167,15 @@ Everyday use runs as your normal user. System configuration is separate from
 launching the application; DKMS handles rebuilds when the kernel changes.
 Automatic first-run configuration currently targets CachyOS.
 
-### Microphone controls
+## Compatibility
 
-The microphone control combines its icon, state and recording level:
+The current native port targets Linux with PipeWire. CachyOS is the primary
+integration environment; automatic system setup is currently specific to it.
+The presentation above describes the application, while the details below record
+which paths have actually been tested.
 
-- Click the microphone to enable capture, or to mute/unmute it when enabled.
-- Use its power button to disable capture independently of the saved mute state.
-- The level indicator follows actual samples only while a recording application
-  is using the microphone.
-
-Recording is disabled by default. Enabling it allows capture; it does not start
-recording by itself. DualWave does not save microphone recordings during normal
-operation or diagnostic probes. The physical Mute button can control recording
-when enabled in the profile.
-
-## Inside the app
-
-The main navigation groups related tasks into **Controller**, **Audio**,
-**Profiles** and **Preferences**. Complete configuration pages are accessible
-through visible tabs, without an Advanced menu. Controller opens in the visual
-workspace, with the controller drawing, contextual inspectors and quick controls.
-Lighting, triggers, motion, mappings and virtual output remain directly
-accessible. Click Controller or Visual workspace to return to the visual view
-from any editor. Device status contains live information. Audio separates
-Playback & microphone from Haptics & audio; clicking Audio returns to playback
-and microphone controls.
-
-| Controller and lighting | Audio and microphone |
-| --- | --- |
-| ![DualWave lighting controls](.github/screenshots/lighting.png) | ![DualWave audio and microphone controls](.github/screenshots/audio.png) |
-| Lighting, triggers, mappings, motion and virtual output. | Headphone playback, microphone source, gain and mute. |
-
-| Profiles and games | Preferences |
-| --- | --- |
-| ![DualWave profiles](.github/screenshots/profiles.png) | ![DualWave appearance preferences](.github/screenshots/preferences.png) |
-| Separate profile management and automatic game rules. | Appearance, startup, device settings, integrations and backups. |
-
-These are captures of the native Linux UI, rendered with isolated example
-profiles and no controller connected. They show the application itself, rather
-than a web prototype. The interface supports English, Português (Portugal) and
-Português (Brasil), light/dark/system appearance and reduced motion.
-
-## Features and validation
+<details>
+<summary>Implementation and hardware validation by feature</summary>
 
 “Implemented” describes the code available in this fork; it does not imply every
 controller, Bluetooth adapter or game has been tested.
@@ -120,7 +196,9 @@ controller, Bluetooth adapter or game has been tested.
 | Desktop integration | StatusNotifier tray, XDG autostart, bundled fonts, themes and motion preferences | Native implementation; desktop-dependent tray behavior |
 | System support | Source-only DKMS package, device permissions and AppImage first-run setup | Package/build checks; first-install/reboot flow needs end-to-end validation |
 
-### Compatibility and current limits
+</details>
+
+### Devices and current limits
 
 - **Primary audio target:** standard DualSense over Bluetooth (`054c:0ce6`).
   Do not assume Bluetooth audio support for Edge, DualShock 4 or clone devices
@@ -138,12 +216,24 @@ controller, Bluetooth adapter or game has been tested.
 
 ## Building
 
-On CachyOS/Arch, install the development dependencies and build as a normal user:
+Install a Rust toolchain, a C/C++ build toolchain, and the PipeWire and Opus
+libraries with development headers using your system's package manager. Build
+as a normal user:
+
+```sh
+cargo build --release --locked -p dsz -p dualwave
+```
+
+<details>
+<summary>Dependency example: CachyOS / Arch Linux</summary>
 
 ```sh
 sudo pacman -S --needed base-devel rust pipewire libpipewire opus
-cargo build --release --locked -p dsz -p dualwave
 ```
+
+Package names and system integration differ between distributions.
+
+</details>
 
 - `target/release/dsz` — native GUI.
 - `target/release/dualwave` — audio diagnostic CLI.

@@ -176,9 +176,13 @@ impl App {
         ui.scope_builder(egui::UiBuilder::new().max_rect(inspector), |ui| {
             egui::ScrollArea::vertical().id_salt("controller-inspector").max_height(inspector.height()).auto_shrink([false, false]).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = 5.0;
+                ui.spacing_mut().item_spacing.y = 10.0;
                 ui.spacing_mut().button_padding = egui::vec2(7.0, 4.0);
                 ui.spacing_mut().slider_width = (inspector.width() - 170.0).clamp(70.0, 160.0);
+                choice(ui, &mut self.part, &[(Part::Lighting, "Lighting"), (Part::Triggers, "Triggers"), (Part::Buttons, "Buttons"), (Part::Motion, "Motion")]);
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
                 self.inspector(ui, p);
             });
         });
@@ -337,8 +341,6 @@ impl App {
             let mut hotspot = ui.new_child(egui::UiBuilder::new().max_rect(r));
             if hotspot.add_sized(r.size(), egui::Button::new(tr(label)).wrap_mode(egui::TextWrapMode::Extend).fill(if selected { accent_soft_color() } else { bg_color() })).clicked() { self.part = part; self.trigger_side = side; }
         }
-        choice(ui, &mut self.part, &[(Part::Lighting, "Lighting"), (Part::Triggers, "Triggers"), (Part::Buttons, "Buttons"), (Part::Motion, "Motion")]);
-
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui, p: &mut Profile) {
@@ -348,10 +350,20 @@ impl App {
         match self.part {
             Part::Lighting => {
                 choice(ui, &mut p.lighting.mode, &[(LightMode::Static, "Static"), (LightMode::Breathing, "Breathing"), (LightMode::Rainbow, "Rainbow"), (LightMode::Off, "Off")]);
+                ui.add_space(14.0);
                 ui.label(tr("Color"));
-                if let Some(color) = widgets::swatches(ui, p.lighting.color, &[[45,127,249], [147,94,238], [237,93,129], [239,151,54], [58,181,140], [255,255,255]]) { p.lighting.color = color; }
-                ui.color_edit_button_srgb(&mut p.lighting.color);
-                ui.add(egui::Slider::new(&mut p.lighting.brightness, 0..=100).text(tr("Brightness")).suffix("%"));
+                ui.horizontal_wrapped(|ui| {
+                    if let Some(color) = widgets::swatches(ui, p.lighting.color, &[[45,127,249], [147,94,238], [237,93,129], [239,151,54], [58,181,140], [255,255,255]]) { p.lighting.color = color; }
+                    ui.add_space(8.0);
+                    ui.color_edit_button_srgb(&mut p.lighting.color);
+                });
+                ui.add_space(14.0);
+                ui.label(tr("Brightness"));
+                ui.scope(|ui| {
+                    ui.spacing_mut().slider_width = (ui.available_width() - 65.0).max(70.0);
+                    ui.add(egui::Slider::new(&mut p.lighting.brightness, 0..=100).suffix("%"));
+                });
+                ui.add_space(14.0);
                 widgets::muted(ui, tr("The preview reflects this profile's lightbar settings."));
             }
             Part::Triggers => {
