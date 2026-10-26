@@ -149,9 +149,11 @@ controller connected. They illustrate configuration, not a live hardware test.
 
 ### Open the application
 
-There is no published release yet. The AppImage can be built from this repository
-using the [instructions below](#building); release artifacts will appear in
-[Releases](https://github.com/jpbjesus/dualwave/releases).
+Download the AppImage and SHA-256 manifest from
+[Releases](https://github.com/jpbjesus/dualwave/releases). The first release,
+[v0.4.0-alpha.1](https://github.com/jpbjesus/dualwave/releases/tag/v0.4.0-alpha.1),
+is an alpha preview. You can also build from source using the
+[instructions below](#building).
 
 1. On a supported Linux system, make `DualWave-x86_64.AppImage` executable and open it.
 2. On CachyOS, accept the first-run system configuration if requested. One administrator
