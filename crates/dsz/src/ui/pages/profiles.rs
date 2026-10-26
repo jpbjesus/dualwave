@@ -5,7 +5,7 @@ use eframe::egui::{self, CornerRadius, RichText, Sense, Stroke, StrokeKind};
 
 use crate::device::Device;
 use crate::profile::*;
-use crate::settings::{FallbackPad, GameRule};
+use crate::settings::FallbackPad;
 use crate::ui::theme::*;
 use crate::ui::widgets::*;
 use crate::ui::App;
@@ -423,9 +423,11 @@ impl App {
 
     fn game_profiles(&mut self, ui: &mut egui::Ui, dev: Option<&Arc<Device>>) {
         let engine = self.engine.clone();
+        engine.request_game_discovery();
         let active = dev.map(|d| engine.profile_name_for(d)).unwrap_or_else(|| engine.settings.read().default_profile.clone());
         let running = self.running_exes();
         let names = engine.profiles.names();
+        let status = engine.game_status.read().clone();
         card(
             ui,
             crate::i18n::tr("Game profiles"),
@@ -437,7 +439,30 @@ impl App {
                 if let Some((p, exe)) = &*engine.game_override.read() {
                     note(ui, &crate::localized_format!("{exe} is running → \"{p}\"", "{exe} em execução → \"{p}\""; "{exe} em execução → \"{p}\""), violet_color());
                 }
-                ui.add_space(4.0);
+                if let Some(exe) = &status.exe {
+                    muted(ui, &format!("{} · {}", exe, crate::i18n::tr(status.reason.label())));
+                }
+                ui.add_space(10.0);
+                ui.label(RichText::new(crate::i18n::tr("Detected games")).strong());
+                if status.games.is_empty() {
+                    muted(ui, crate::i18n::tr("Open a game to associate its profile here, or add a running application below."));
+                }
+                for game in status.games.iter().rev() {
+                    ui.push_id(("detected-game", &game.exe), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.add_sized([210.0_f32.min(ui.available_width()), 26.0], egui::Label::new(&game.exe).truncate()).on_hover_text(&game.exe);
+                            let mut chosen = s.games.iter().find(|g| g.enabled && g.exe.trim().eq_ignore_ascii_case(&game.exe))
+                                .map(|g| g.profile.clone()).unwrap_or_default();
+                            let before = chosen.clone();
+                            egui::ComboBox::from_id_salt("detected-profile").width(190.0)
+                                .selected_text(if chosen.is_empty() { crate::i18n::tr("Associate a profile…") } else { &chosen })
+                                .show_ui(ui, |ui| { for name in &names { ui.selectable_value(&mut chosen, name.clone(), name); } });
+                            if chosen != before { changed |= crate::games::associate_rule(&mut s.games, &game.exe, &chosen); }
+                            if game.native { pill(ui, crate::i18n::tr("Native DualSense support"), accent_color()); }
+                        });
+                    });
+                }
+                ui.add_space(10.0);
                 ui.horizontal_wrapped(|ui| {
                     let target = active.clone();
                     egui::ComboBox::from_id_salt("add-running")
@@ -447,12 +472,7 @@ impl App {
                         .show_ui(ui, |ui| {
                             for exe in &running {
                                 if ui.selectable_label(false, exe).clicked() {
-                                    s.games.push(GameRule {
-                                        enabled: true,
-                                        exe: exe.clone(),
-                                        profile: target.clone(),
-                                    });
-                                    changed = true;
+                                    changed |= crate::games::associate_rule(&mut s.games, exe, &target);
                                 }
                             }
                         });
@@ -462,12 +482,7 @@ impl App {
                         let dialog = dialog.add_filter(crate::i18n::tr("Program"), &["exe"]);
                         if let Some(f) = dialog.pick_file() {
                             if let Some(n) = f.file_name() {
-                                s.games.push(GameRule {
-                                    enabled: true,
-                                    exe: n.to_string_lossy().into_owned(),
-                                    profile: target.clone(),
-                                });
-                                changed = true;
+                                changed |= crate::games::associate_rule(&mut s.games, &n.to_string_lossy(), &target);
                             }
                         }
                     }

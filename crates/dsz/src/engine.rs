@@ -44,7 +44,11 @@ pub struct Engine {
     pub fallback_exe: RwLock<Option<String>>,
     /// A game whose profile was overridden by a manual pick: its rule stays
     /// off until it closes.
-    pub game_dismissed: Mutex<Option<String>>,
+    pub game_dismissed: Mutex<HashMap<String, Vec<u32>>>,
+    pub game_status: RwLock<crate::games::GameStatus>,
+    pub(crate) game_selection: Mutex<()>,
+    manual_profile_revision: AtomicU64,
+    game_discovery_requested: AtomicBool,
     pub dsdetect: crate::dsdetect::Detector,
     /// Controllers given a profile since the app started (for
     /// `default_on_start`).
@@ -105,7 +109,11 @@ impl Engine {
             settings_dirty: AtomicBool::new(false),
             game_override: RwLock::new(None),
             fallback_exe: RwLock::new(None),
-            game_dismissed: Mutex::new(None),
+            game_dismissed: Mutex::new(HashMap::new()),
+            game_status: RwLock::new(Default::default()),
+            game_selection: Mutex::new(()),
+            manual_profile_revision: AtomicU64::new(0),
+            game_discovery_requested: AtomicBool::new(false),
             session_assigned: Mutex::new(Default::default()),
             audio: AudioHub::new(),
             udp: Mutex::new(UdpStatus::default()),
@@ -201,7 +209,21 @@ impl Engine {
             .unwrap_or_else(|| s.default_profile.clone())
     }
 
+    pub(crate) fn manual_profile_revision(&self) -> u64 {
+        self.manual_profile_revision.load(Ordering::Acquire)
+    }
+
+    pub fn request_game_discovery(&self) {
+        self.game_discovery_requested.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn take_game_discovery_request(&self) -> bool {
+        self.game_discovery_requested.swap(false, Ordering::AcqRel)
+    }
+
     pub fn set_device_profile(&self, device: &Device, name: &str) {
+        let _selection = self.game_selection.lock();
+        self.manual_profile_revision.fetch_add(1, Ordering::AcqRel);
         let mac = device.mac.lock().clone();
         {
             let mut s = self.settings.write();
@@ -224,7 +246,12 @@ impl Engine {
             log::info!(
                 "profile \"{name}\" picked while {exe} runs: game profile off until it closes"
             );
-            *self.game_dismissed.lock() = Some(exe);
+            let instances = self.game_status.read().instances.iter()
+                .filter(|(_, name)| name.eq_ignore_ascii_case(&exe)).map(|(pid, _)| *pid).collect();
+            self.game_dismissed.lock().insert(exe.to_ascii_lowercase(), instances);
+            let mut status = self.game_status.write();
+            status.exe = Some(exe);
+            status.reason = crate::games::SelectionReason::Manual;
             self.bump_config();
         }
         // A manual choice clears mod overrides that belonged to the old profile.

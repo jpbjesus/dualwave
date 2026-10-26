@@ -617,7 +617,6 @@
   "Virtual {} controller connected ({})": "Controle virtual {} conectado ({})",
   "{exe} detected — profile \"{profile}\"": "{exe} detectado — perfil \"{profile}\"",
   "{exe} — virtual {}": "{exe} — virtual {}",
-  "{exe} closed — back to \"{back}\"": "{exe} fechado — voltando para \"{back}\"",
   "Profile: {name}": "Perfil: {name}",
   "{} write · {} CRC": "{} envios · {} CRC",
   "This file isn't valid JSON ({e}).": "Este arquivo não contém JSON válido ({e}).",
@@ -827,5 +826,17 @@
   "Installing…": "Instalando…",
   "Recovery keeps the applied profile and microphone permission. Audio applications may need to select the recreated endpoint again.": "A recuperação mantém o perfil aplicado e a permissão do microfone. Pode ser necessário selecionar novamente o dispositivo nos aplicativos de áudio.",
   "The copied report excludes device addresses, paths, profile names and audio samples.": "O relatório copiado exclui endereços de dispositivos, caminhos, nomes de perfis e amostras de áudio.",
-  "Live device details and pairing help": "Detalhes do controle e ajuda para parear"
+  "Live device details and pairing help": "Detalhes do controle e ajuda para parear",
+  "Assigned profile": "Perfil atribuído",
+  "Game rule": "Regra do jogo",
+  "Native DualSense support": "Suporte DualSense nativo",
+  "Fallback controller": "Controle alternativo",
+  "Manual choice for this session": "Escolha manual nesta sessão",
+  "Automatic switching is off": "Seleção automática desativada",
+  "Game profile is missing": "O perfil do jogo não existe",
+  "Detected games": "Jogos detectados",
+  "Open a game to associate its profile here, or add a running application below.": "Abra um jogo para associar seu perfil aqui ou adicione um aplicativo em execução abaixo.",
+  "Associate a profile…": "Associar um perfil…",
+  "Manage game profiles": "Gerenciar perfis de jogos",
+  "Automatic profile ended — back to \"{back}\"": "Perfil automático encerrado — voltando para \"{back}\""
 }

@@ -123,6 +123,7 @@ fn profiles_keep_navigation_visible_with_long_lists_and_game_rules() {
     let engine = Engine::new(dir.clone());
     for n in 0..8 { engine.profiles.copy_as("Xbox", &format!("Profile {n} for controller and audio")); }
     engine.settings.write().games.push(crate::settings::GameRule { enabled: true, exe: "example-game.exe".into(), profile: "A profile that is no longer present".into() });
+    engine.game_status.write().games.push(crate::games::DetectedGame { exe: "A very long detected game executable with additional edition and platform identifiers.exe".into(), native: true });
     let mut app = App::new(engine);
     let ctx = egui::Context::default();
     theme::install(&ctx, 1.0);
@@ -279,5 +280,40 @@ fn main_navigation_returns_to_the_visual_workspaces() {
     click(&mut app, &ctx, "Audio");
     assert_eq!((app.page, app.detailed), (Page::Haptics, false));
     drop(app);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn detected_game_can_be_associated_without_enabling_automatic_switching() {
+    fn render(app: &mut App, ctx: &egui::Context, events: Vec<egui::Event>) -> egui::FullOutput {
+        ctx.run(egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1024., 800.))), ..Default::default() }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.page_profiles(ui, &mut Profile::default(), None));
+        })
+    }
+    fn click(app: &mut App, ctx: &egui::Context, label: &str) {
+        let out = render(app, ctx, Vec::new());
+        let pos = out.shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr(label) => Some(t.pos + t.galley.rect.center().to_vec2()), _ => None,
+        }).expect("association control visible");
+        for pressed in [true, false] { render(app, ctx, vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]); }
+    }
+    let dir = std::env::temp_dir().join(format!("dualwave-game-association-ui-{}", std::process::id()));
+    let engine = Engine::new(dir.clone());
+    engine.settings.write().auto_profiles = false;
+    engine.settings.write().auto_dualsense = false;
+    engine.game_status.write().games.push(crate::games::DetectedGame { exe: "example-game.exe".into(), native: false });
+    let mut app = App::new(engine.clone());
+    let ctx = egui::Context::default(); theme::install(&ctx, 1.0);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("profiles-section"), 1usize));
+    click(&mut app, &ctx, "Associate a profile…");
+    click(&mut app, &ctx, "Xbox");
+    let settings = engine.settings.read();
+    assert!(!settings.auto_profiles);
+    assert_eq!(settings.games.len(), 1);
+    assert_eq!(settings.games[0].exe, "example-game.exe");
+    assert_eq!(settings.games[0].profile, "Xbox");
+    assert!(engine.game_override.read().is_none());
+    assert!(engine.take_game_discovery_request(), "opening game profiles requests discovery even with switching off");
+    drop(settings); drop(app); drop(engine);
     let _ = std::fs::remove_dir_all(dir);
 }

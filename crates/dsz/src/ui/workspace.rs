@@ -173,7 +173,23 @@ impl App {
 
     pub(super) fn page_workspace(&mut self, ui: &mut egui::Ui, p: &mut Profile, dev: Option<&Arc<Device>>) {
         let available = dev.is_some_and(|d| *d.link.lock() == Link::Live);
-        self.workspace_heading(ui, if available { "Controller available" } else { "Controller offline" });
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr(if available { "Controller available" } else { "Controller offline" })).font(heading(23.0)).color(text_color()));
+            let status = self.engine.game_status.read().clone();
+            let profile = dev.map(|d| self.engine.profile_name_for(d))
+                .unwrap_or_else(|| self.engine.settings.read().default_profile.clone());
+            let reason = if !self.engine.settings.read().auto_profiles { crate::games::SelectionReason::Disabled } else { status.reason };
+            let summary = [Some(profile.as_str()), Some(tr(reason.label())), status.exe.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(egui::Button::new(RichText::new(&summary).size(12.0).color(muted_color())).frame(false)
+                    .wrap_mode(egui::TextWrapMode::Truncate)).on_hover_text(format!("{}\n{}", summary, tr("Manage game profiles"))).clicked() {
+                    self.page = super::Page::Profiles;
+                    self.detailed = false;
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("profiles-section"), 1usize));
+                }
+            });
+        });
+        ui.add_space(6.0);
         let area = ui.available_rect_before_wrap();
         let footer_height = 82.0;
         let footer = egui::Rect::from_min_max(egui::pos2(area.left(), area.bottom() - footer_height), area.right_bottom());

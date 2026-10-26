@@ -44,7 +44,7 @@ hardware-validated features are documented under [Compatibility](#compatibility)
 | **Buttons and gestures** | Keyboard, mouse and controller actions; combinations, long press and double tap |
 | **Motion and touch** | Gyro aiming, mouse control, touchpad behaviour and stick modes |
 | **Virtual output** | Xbox 360, DualSense and DualShock 4 controller targets |
-| **Profiles for games** | Create, duplicate, rename, import/export and automatically select profiles using game rules |
+| **Profiles for games** | Detected-game association, start-time priority, visible selection reasons, session-aware manual choices, import/export and automatic game rules |
 | **Emulator and mod integration** | DSU motion server and local UDP mod API |
 | **A personal workspace** | English, Português (Portugal), Português (Brasil), light/dark/system themes and reduced motion |
 | **Everyday convenience** | Desktop tray, startup preferences, device naming and complete settings backups |
@@ -135,6 +135,35 @@ language. **Backup & restore** exports application settings and profiles togethe
 
 ![Profile management and access to game rules](.github/screenshots/profiles.png)
 
+### Associate a game, understand the active profile
+
+Open **Profiles → Game profiles** to see detected games and select a profile
+beside each executable. Steam installations and resolved Wine/Proton game
+executables use the existing native process discovery. You can also add any
+running application or browse for a program. Associating an existing executable
+updates and enables its rule without creating duplicate rules.
+
+Detection on this page works with **Switch automatically** turned off; configuring
+a rule does not enable switching. When automatic selection is enabled, the most
+recently started matched game takes priority. Closing it returns to the next
+eligible running game, or to the controller's assigned profile.
+
+The Workspace heading shows the profile and selection reason: a game rule,
+native DualSense support, fallback controller, manual choice or assigned profile.
+Click this indicator to open game profiles directly.
+
+A manual profile choice takes priority for that game session, including when its
+first detection is still in progress. Separate manual choices remain respected
+when several games run. Closing those process instances clears the pause;
+launching the game again permits automatic selection again. A rule pointing to a
+missing profile is not applied.
+
+![Example executable-to-profile rules with no games running](.github/screenshots/game-profiles.png)
+
+These example associations illustrate configuration; they do not claim live
+Steam/Proton or individual game validation. Real games and multiple-game sessions
+still need broader end-to-end testing.
+
 ### Connection diagnostics and recovery
 
 Open **Controller → Device status** to inspect the physical connection,
@@ -224,7 +253,7 @@ controller, Bluetooth adapter or game has been tested.
 | Mappings and motion | Keys, mouse, controller buttons, combinations, long press, double tap, gyro, touchpad and stick modes | Native uinput backend implemented; hardware validation pending |
 | Virtual controllers | Xbox 360, DualSense and DualShock 4 over native Linux USB/IP, with scoped privileged broker | Host attachment and game compatibility validation pending |
 | Exclusive physical input | Scoped evdev grabs and kernel raw-state redirection; device nodes remain visible | Routing/build tests; hardware validation pending |
-| Profiles and games | Create, rename, duplicate, import/export, backups and automatic per-game rules, including Wine/Proton process discovery | Native implementation and layout tests |
+| Profiles and games | Detected-game association, per-game rules, start-time priority, manual session priority, selection reasons and Wine/Proton process discovery | Selection lifecycle, relaunch, duplicate-rule, pointer interaction and layout tests; real game sessions pending |
 | Integrations | Local UDP mod API and DSU motion server for supported emulators | Implemented; game/emulator integration checks pending |
 | Desktop integration | StatusNotifier tray, XDG autostart, bundled fonts, themes and motion preferences | Native implementation; desktop-dependent tray behavior |
 | System support | Source-only DKMS package, device permissions and AppImage first-run setup | Package/build checks; first-install/reboot flow needs end-to-end validation |
