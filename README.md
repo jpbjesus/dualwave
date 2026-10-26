@@ -237,10 +237,10 @@ application startup. Automatic system setup currently targets CachyOS.
 | Flatpak | Under evaluation; no package or Flatpak repository is provided | Requires validation of HID access, uinput, process discovery, PipeWire and communication with the host USB/IP broker |
 | `curl` download | Available for published release assets | Downloads the AppImage and checksum; installation script is planned separately |
 
-Example download for the published alpha.2 release:
+Example download for the published 0.4.1 alpha release:
 
 ```sh
-release=v0.4.0-alpha.2
+release=v0.4.1-alpha.1
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
