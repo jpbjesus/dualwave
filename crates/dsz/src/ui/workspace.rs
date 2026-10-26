@@ -131,12 +131,26 @@ fn apply_quick_action(p: &mut Profile, button: Button, gesture: Gesture, action:
 }
 
 pub(super) fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
+    choices(ui, value, options, false)
+}
+
+pub(super) fn choices<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)], icons: bool) -> bool {
     let mut clicked = false;
     ui.horizontal_wrapped(|ui| {
         for (candidate, label) in options {
             let selected = *value == *candidate;
-            let response = ui.add(egui::Button::new(RichText::new(tr(label)).color(if selected { accent_color() } else { muted_color() }))
-                .frame(false).min_size(egui::vec2(32.0, 30.0)));
+            let color = if selected { accent_color() } else { muted_color() };
+            let response = if icons {
+                let galley = ui.painter().layout_no_wrap(tr(label).to_string(), egui::TextStyle::Button.resolve(ui.style()), color);
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(galley.size().x + 34.0, 32.0), egui::Sense::click());
+                if response.hovered() { ui.painter().rect_filled(rect, 3., accent_soft_color()); }
+                super::icons::navigation(ui, egui::Rect::from_center_size(egui::pos2(rect.left() + 12., rect.center().y), egui::vec2(18., 18.)), label, color);
+                ui.painter().galley(egui::pos2(rect.left() + 27., rect.center().y - galley.size().y * 0.5), galley, color);
+                response.on_hover_cursor(egui::CursorIcon::PointingHand)
+            } else {
+                ui.add(egui::Button::new(RichText::new(tr(label)).color(color))
+                    .frame(false).min_size(egui::vec2(32.0, 30.0)))
+            };
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, tr(label)));
             let t = ui.ctx().animate_bool(response.id.with("line"), selected);
             if t > 0.0 {

@@ -6,6 +6,7 @@
 
 mod controller_view;
 mod navigation;
+mod icons;
 mod pages;
 #[cfg(debug_assertions)]
 mod snapshot;

@@ -1,6 +1,6 @@
 //! Work areas and their directly accessible configuration pages.
 use eframe::egui::{self, RichText, Stroke};
-use super::{App, Page, theme::*, workspace::choice};
+use super::{App, Page, theme::*, workspace::{choice, choices}};
 
 fn mark(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(40.0, 30.0), egui::Sense::hover());
@@ -21,7 +21,7 @@ impl App {
             ui.label(RichText::new("DualWave").font(heading(24.0)).color(text_color()));
             ui.add_space(if ui.available_width() > 900.0 { ui.available_width() * 0.24 } else { 24.0 });
             let mut destination = current;
-            if choice(ui, &mut destination, &[(0, "Controller"), (1, "Audio"), (2, "Profiles"), (3, "Preferences")]) {
+            if choices(ui, &mut destination, &[(0, "Controller"), (1, "Audio"), (2, "Profiles"), (3, "Preferences")], true) {
                 let (page, detailed) = match destination {
                     0 => (Page::Overview, false),
                     1 => (Page::Haptics, false),
@@ -42,7 +42,7 @@ impl App {
             &[((Page::Haptics, false), "Playback & microphone"), ((Page::Haptics, true), "Haptics & audio")]
         } else {
             &[
-                ((Page::Overview, false), "Visual workspace"),
+                ((Page::Overview, false), "Workspace"),
                 ((Page::Lighting, true), "Lighting"), ((Page::Triggers, true), "Triggers"),
                 ((Page::Input, true), "Motion"), ((Page::Mappings, true), "Buttons"),
                 ((Page::Virtual, true), "Virtual controller"),

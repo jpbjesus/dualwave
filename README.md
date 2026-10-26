@@ -51,14 +51,16 @@ hardware-validated features are documented under [Compatibility](#compatibility)
 
 ## Inside the app
 
-### A visual controller workspace
+### The controller workspace
 
 The controller drawing is interactive: select lighting, a trigger or a button to
 open its contextual controls. The adjacent selector also gives direct access to
 motion. Quick controls keep playback volume, microphone state and virtual output
 available below the preview.
 
-The **Controller** navigation always returns to this visual workspace. Dedicated
+Icon-labelled navigation keeps **Controller**, **Audio**, **Profiles** and
+**Preferences** recognisable alongside their text labels. **Controller** always
+returns to **Workspace**. Dedicated
 **Lighting**, **Triggers**, **Motion**, **Buttons**, **Virtual controller** and
 **Device status** tabs give access to complete editors without a hidden advanced
 mode.

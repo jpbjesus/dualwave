@@ -274,7 +274,7 @@ fn main_navigation_returns_to_the_visual_workspaces() {
     click(&mut app, &ctx, "Controller");
     assert_eq!((app.page, app.detailed), (Page::Overview, false));
     click(&mut app, &ctx, "Motion");
-    click(&mut app, &ctx, "Visual workspace");
+    click(&mut app, &ctx, "Workspace");
     assert_eq!((app.page, app.detailed), (Page::Overview, false));
     click(&mut app, &ctx, "Audio");
     assert_eq!((app.page, app.detailed), (Page::Haptics, false));
