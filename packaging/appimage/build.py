@@ -45,6 +45,8 @@ def main():
     shutil.copy2(app / 'dualwave.svg', app / '.DirIcon')
     shutil.copy2(ROOT / 'packaging/appimage/setup-driver.sh', payload / 'setup-driver.sh')
     shutil.copy2(package, payload / package.name)
+    subprocess.run(['python3', str(ROOT / 'packaging/build-host-support.py')], check=True)
+    shutil.copytree(ROOT / 'target/host-support/dualwave-host-support', payload / 'host-setup')
     (payload / 'driver-package').write_text(package.name + '\n')
     (payload / 'driver-version').write_text('0.2.1\n')
     (payload / 'driver.sha256').write_text(hashlib.sha256(package.read_bytes()).hexdigest() + '\n')

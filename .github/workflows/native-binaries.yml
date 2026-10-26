@@ -1,0 +1,37 @@
+name: Native Linux release archive
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and upload
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  archive:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?$ ]]'
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libopus-dev libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev pkg-config
+      - run: cargo test --workspace --locked
+      - run: python3 -m unittest discover -s packaging/tests -v
+      - run: python3 packaging/build-binaries.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-x86_64
+          path: target/binaries/*
+      - name: Upload to the selected existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release view "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" target/binaries/DualWave-linux-x86_64.tar.gz target/binaries/DualWave-linux-x86_64.tar.gz.sha256 packaging/install.sh

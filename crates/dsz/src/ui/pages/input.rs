@@ -223,6 +223,10 @@ fn reach_editor(ui: &mut egui::Ui, reach: &mut StickReach, state: &mut ReachEdit
     ui.add_space(8.0);
     ui.label(RichText::new(crate::i18n::tr("Directional reach")).font(heading(14.0)));
     muted(ui, crate::i18n::tr("Applies only to the virtual controller. Follows axis inversion."));
+    ui.collapsing(crate::i18n::tr("When to use calibration"), |ui| {
+        muted(ui, crate::i18n::tr("Use directional reach when a stick cannot reach full output in some directions. Leave it off if the full range is already available."));
+        muted(ui, crate::i18n::tr("For stick drift near the center, adjust the deadzone instead. Reach changes the outer range, not the center."));
+    });
     if !virtual_on {
         note(ui, crate::i18n::tr("Choose a virtual controller in this profile to use directional reach."), warn_color());
     }

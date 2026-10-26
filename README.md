@@ -85,7 +85,10 @@ does not transmit an effect to the controller.
 
 Assign press, long-press and double-tap gestures to keyboard, mouse or controller
 actions. Combinations and timing are configured in the full editor. An individual
-mapping can suppress its original virtual button.
+mapping can suppress its original virtual button. The Workspace uses the same
+action editor as the complete mapping page, including key capture, modifiers,
+mouse/media buttons, profile changes, program paths and virtual buttons. Opening
+the editor does not create a mapping until an action is changed.
 
 ![Button actions, gestures and vector symbols](.github/screenshots/buttons.png)
 
@@ -226,16 +229,17 @@ chmod +x DualWave-x86_64.AppImage
    **DualWave Microphone** in the recording application.
 
 Normal operation runs as the desktop user. System installation is separate from
-application startup. Automatic system setup currently targets CachyOS.
+application startup. The published alpha.1 setup targets CachyOS; the current source adds experimental
+portable host setup as described below.
 
 ## Distribution
 
 | Format | Status | Scope |
 | --- | --- | --- |
 | AppImage | Published for Linux x86_64 | GUI, audio CLI, userspace libraries and source-only host-support package |
-| Native binary archive | Planned; not published | GUI and CLI with a dependency manifest, checksums and separate host-setup instructions |
+| Native binary archive | Build implemented; local source build and manual release workflow | GUI, CLI, licenses, desktop launcher, dependency manifest and separate host setup payload |
 | Flatpak | Under evaluation; no package or Flatpak repository is provided | Requires validation of HID access, uinput, process discovery, PipeWire and communication with the host USB/IP broker |
-| `curl` download | Available for published release assets | Downloads the AppImage and checksum; installation script is planned separately |
+| `curl` installation | Source installer implemented; requires an explicit release version | Verifies the selected asset before activation, installs as the desktop user, supports dry run and managed uninstall |
 
 Example download for the published 0.4.1 alpha release:
 
@@ -248,20 +252,65 @@ sha256sum -c DualWave-x86_64.AppImage.sha256
 chmod +x DualWave-x86_64.AppImage
 ```
 
-Planned native archives should separate userspace installation from privileged
-host configuration. A future installation script should support an explicit
-version, checksum verification, installation in a user-owned directory and
-removal. It should not silently modify kernel modules or system permissions.
+The source installer requires Python 3.12 or newer, downloads through HTTPS,
+checks the release's SHA-256 manifest and activates the installation atomically.
+It never installs drivers or changes system permissions. Existing settings are
+preserved; unrelated launchers and unmanaged directories are not overwritten.
 
-Flatpak packaging cannot replace host driver or USB/IP support. Before release,
-each feature needs a documented permission model and testing outside the
-sandbox. Features unavailable in that environment must be reported explicitly.
-No installation script or Flatpak package is supplied by this source revision.
+```sh
+curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
+sh install-dualwave.sh --version v0.4.1-alpha.1 --dry-run
+sh install-dualwave.sh --version v0.4.1-alpha.1
+# For a release that includes a native archive:
+sh install-dualwave.sh --version v0.4.1-alpha.1 --format native --dry-run
+# Remove only this installer's files; profiles and settings remain:
+sh install-dualwave.sh --uninstall
+```
+
+The published alpha.1 release contains the AppImage. Native archives and the new
+host setup payload are available from this source revision and must be attached
+to a subsequent release before `--format native` can download them. Build locally:
+
+```sh
+python3 packaging/build-binaries.py
+mkdir -p /tmp/dualwave-native
+tar -xzf target/binaries/DualWave-linux-x86_64.tar.gz -C /tmp/dualwave-native
+/tmp/dualwave-native/bin/dualwave --plan
+```
+
+The [manual native archive workflow](.github/workflows/native-binaries.yml) builds
+on Ubuntu 24.04 and uploads artifacts to an explicitly selected existing release.
+A local build inherits the build host's glibc requirement; `dependencies.json`
+records the libraries and build libc. No cross-distribution binary compatibility
+is implied by the installer detecting a distribution.
+
+### Host setup beyond CachyOS
+
+Source-built AppImages and native archives include a separate, checksummed host
+support payload. `dualwave --plan` prints the distribution, kernel and commands
+without changing the system. `dualwave --setup` explicitly requests administrator
+authorization. Arch derivatives use kernel package metadata for matching headers;
+Debian/Ubuntu use `linux-headers-$(uname -r)`; Fedora uses the matching
+`kernel-devel` package. Package availability and module API compatibility must
+still be established on each target system.
+
+The portable setup builds the bundled module with DKMS before installing the
+host configuration. It does not unload modules, restart desktop audio or replace
+a running controller session. Reboot afterwards. Secure Boot may require key
+enrolment. Outside the existing CachyOS integration, these paths are experimental;
+unit tests of dependency selection are not hardware or distribution certification.
+The DKMS [manual](https://github.com/dkms-project/dkms/blob/main/dkms.8.in)
+describes module build and install operations.
+
+Flatpak packaging remains outside this implementation. It cannot replace host
+kernel support, and its device permissions and broker integration require a
+separate assessment.
 
 ## Compatibility
 
 The current native port targets Linux with PipeWire. CachyOS is the primary
-integration environment; automatic system setup is currently specific to it.
+integration environment. Portable source-based setup for other distributions is
+experimental and has not been certified through installation or hardware tests.
 The following table distinguishes available code from hardware validation.
 
 <details>
@@ -459,6 +508,19 @@ env -u PIPEWIRE_REMOTE XDG_RUNTIME_DIR="$recovery_runtime" \
 This test recreates endpoints after daemon loss and checks that capture stays
 disabled. Physical Bluetooth reconnect, suspend/resume and recording-client
 reselection still require hardware validation.
+
+The Linux lifecycle harness runs profile/process tests and an isolated PipeWire
+daemon restart. It emits a JSON report with separate `PASS`, `FAIL`, `SKIP` and
+`MANUAL_PENDING` results; it never suspends the host, opens a controller or
+launches a game:
+
+```sh
+python3 packaging/validate-linux.py --output /tmp/dualwave-validation.json
+```
+
+Physical Bluetooth reconnect, suspend/resume and named Steam/Proton game sessions
+remain manual validation items. Record controller model, firmware, game and
+runtime versions when performing those checks.
 
 Debug builds support isolated, controller-free UI captures:
 

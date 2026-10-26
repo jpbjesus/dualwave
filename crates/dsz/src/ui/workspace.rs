@@ -96,38 +96,19 @@ fn preset_curve(ui: &egui::Ui, rect: egui::Rect, index: usize, color: egui::Colo
     ui.painter().add(egui::Shape::line(points, Stroke::new(1.6, color)));
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum QuickAction { Original, Enter, Click, Next, Custom }
-
-fn quick_action(mapping: Option<&Mapping>) -> QuickAction {
-    match mapping.map(|m| &m.action) {
-        None | Some(Action::None) => QuickAction::Original,
-        Some(Action::Key { vk: 0x0d, ctrl: false, shift: false, alt: false, win: false }) => QuickAction::Enter,
-        Some(Action::Mouse { button: MouseButton::Left }) => QuickAction::Click,
-        Some(Action::NextProfile) => QuickAction::Next,
-        _ => QuickAction::Custom,
-    }
-}
-
 fn individual_mapping(p: &Profile, button: Button, gesture: Gesture) -> Option<usize> {
     p.mappings.iter().position(|m| m.enabled && m.button == button && m.gesture == gesture && !m.is_combo())
 }
 
-fn apply_quick_action(p: &mut Profile, button: Button, gesture: Gesture, action: QuickAction) {
-    if action == QuickAction::Custom { return; }
+fn apply_action(p: &mut Profile, button: Button, gesture: Gesture, action: Action) {
     let index = individual_mapping(p, button, gesture);
-    if action == QuickAction::Original && index.is_none() { return; }
+    if action == Action::None && index.is_none() { return; }
     let index = index.unwrap_or_else(|| {
         p.mappings.push(Mapping { button, gesture, ..Default::default() });
         p.mappings.len() - 1
     });
-    p.mappings[index].action = match action {
-        QuickAction::Enter => Action::Key { vk: 0x0d, ctrl: false, shift: false, alt: false, win: false },
-        QuickAction::Click => Action::Mouse { button: MouseButton::Left },
-        QuickAction::Next => Action::NextProfile,
-        _ => Action::None,
-    };
-    if action == QuickAction::Original { p.mappings[index].mute = false; }
+    if action == Action::None { p.mappings[index].mute = false; }
+    p.mappings[index].action = action;
 }
 
 pub(super) fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
@@ -379,6 +360,9 @@ impl App {
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui, p: &mut Profile) {
+        if self.part != Part::Buttons {
+            ui.ctx().data_mut(|data| data.remove::<(String, Button, Gesture, Option<usize>)>(ui.id().with("workspace-key-capture")));
+        }
         let title = match self.part { Part::Lighting => "Lighting", Part::Triggers => "Adaptive triggers", Part::Buttons => "Buttons", Part::Motion => "Motion" };
         ui.label(RichText::new(tr(title)).font(heading(20.0)));
         ui.add_space(6.0);
@@ -435,13 +419,32 @@ impl App {
                 ui.label(tr("Gesture"));
                 choice(ui, &mut self.quick_gesture, &[(Gesture::Press, "Press"), (Gesture::LongPress, "Long press"), (Gesture::DoubleTap, "Double tap")]);
                 let index = individual_mapping(p, self.selected_button, self.quick_gesture);
-                let mut action = quick_action(index.map(|i| &p.mappings[i]));
-                let previous = action;
+                let mut edited = index.map(|i| p.mappings[i].clone()).unwrap_or_else(|| Mapping {
+                    button: self.selected_button, gesture: self.quick_gesture, ..Default::default()
+                });
+                let before = edited.action.clone();
+                let capture_id = ui.id().with("workspace-key-capture");
+                let target = (p.name.clone(), self.selected_button, self.quick_gesture, index);
+                let mut recording = ui.ctx().data_mut(|data| data.get_temp::<(String, Button, Gesture, Option<usize>)>(capture_id)) == Some(target.clone());
+                if !matches!(edited.action, Action::Key { .. }) { recording = false; }
+                if recording && super::pages::mappings::capture_action(ui.ctx(), &mut edited.action) { recording = false; }
                 ui.label(tr("Action"));
-                choice(ui, &mut action, &[(QuickAction::Original, "Original"), (QuickAction::Enter, "Enter key"), (QuickAction::Click, "Left click"), (QuickAction::Next, "Next profile")]);
-                if action != previous { apply_quick_action(p, self.selected_button, self.quick_gesture, action); }
-                if action == QuickAction::Custom { widgets::muted(ui, tr("Custom action · use the Buttons tab for all parameters.")); }
-                if let Some(i) = individual_mapping(p, self.selected_button, self.quick_gesture) {
+                let profile_names = self.engine.profiles.names();
+                ui.horizontal_wrapped(|ui| {
+                    if let Some(record) = super::pages::mappings::action_editor(ui, &mut edited, index.unwrap_or(usize::MAX), &profile_names, &p.name,
+                        p.virtual_out.kind != VirtualKind::Off, p.virtual_out.kind == VirtualKind::Xbox360,
+                        self.engine.companion.can_hide(), recording, true) { recording = record; }
+                });
+                if !matches!(edited.action, Action::Key { .. }) { recording = false; }
+                if edited.action != before {
+                    apply_action(p, self.selected_button, self.quick_gesture, edited.action);
+                }
+                let index = individual_mapping(p, self.selected_button, self.quick_gesture);
+                ui.ctx().data_mut(|data| {
+                    data.remove::<(String, Button, Gesture, Option<usize>)>(capture_id);
+                    if recording { data.insert_temp(capture_id, (p.name.clone(), self.selected_button, self.quick_gesture, index)); }
+                });
+                if let Some(i) = index {
                     ui.checkbox(&mut p.mappings[i].mute, tr("Suppress original virtual button"));
                 }
             }
@@ -469,6 +472,24 @@ mod tests {
     use super::*;
     use super::super::Page;
     #[test]
+    fn full_actions_edit_only_the_selected_mapping() {
+        let actions = [Action::Media { key: MediaKey::PlayPause }, Action::Run { path: "/tmp/example app".into() },
+            Action::Profile { name: "Example".into() }, Action::Key { vk: 0x4b, ctrl: true, shift: true, alt: false, win: true },
+            Action::ScrollDown, Action::TurnOffController];
+        for action in actions {
+            let mut p = Profile::default();
+            p.mappings = vec![Mapping { button: Button::Cross, enabled: false, action: Action::NextProfile, ..Default::default() },
+                Mapping { button: Button::Cross, with: vec![Button::L1], action: Action::PreviousProfile, ..Default::default() },
+                Mapping { button: Button::Cross, action: Action::ScrollUp, ..Default::default() }];
+            let other = p.mappings[..2].to_vec();
+            apply_action(&mut p, Button::Cross, Gesture::Press, action.clone());
+            assert_eq!(p.mappings.len(), 3);
+            assert_eq!(p.mappings[..2], other);
+            assert_eq!(p.mappings[2].action, action);
+        }
+    }
+
+    #[test]
     fn desktop_workspace_fits_normal_and_small_windows() {
         let dir = std::env::temp_dir().join(format!("dualwave-viewport-test-{}", std::process::id()));
         let engine = crate::engine::Engine::new(dir.clone());
@@ -494,6 +515,7 @@ mod tests {
                             ui.scope_builder(egui::UiBuilder::new().max_rect(available), |ui| {
                                 if audio { app.page_audio_workspace(ui, &mut profile, None); }
                                 else { app.page_workspace(ui, &mut profile, None); }
+                                assert!(profile.mappings.is_empty(), "opening Workspace must not create mappings");
                                 if pass != 2 { return; }
                                 assert!(ui.min_rect().bottom() <= available.bottom() + 1.0,
                                     "workspace {part:?} audio={audio} extends below {size:?}: bottom={} viewport={}", ui.min_rect().bottom(), available.bottom());
@@ -563,13 +585,13 @@ mod tests {
         let others = p.mappings.clone();
         // Opening an untouched gesture leaves the saved profile unchanged.
         assert_eq!(individual_mapping(&p, Button::Cross, Gesture::Press), None);
-        apply_quick_action(&mut p, Button::Cross, Gesture::Press, QuickAction::Original);
+        apply_action(&mut p, Button::Cross, Gesture::Press, Action::None);
         assert_eq!(p.mappings, others);
-        apply_quick_action(&mut p, Button::Cross, Gesture::Press, QuickAction::Enter);
+        apply_action(&mut p, Button::Cross, Gesture::Press, Action::Key { vk: 0x0d, ctrl: false, shift: false, alt: false, win: false });
         assert_eq!(&p.mappings[..2], &others);
-        assert_eq!(quick_action(p.mappings.last()), QuickAction::Enter);
+        assert!(matches!(p.mappings.last().unwrap().action, Action::Key { vk: 0x0d, .. }));
         p.mappings[2].mute = true;
-        apply_quick_action(&mut p, Button::Cross, Gesture::Press, QuickAction::Original);
+        apply_action(&mut p, Button::Cross, Gesture::Press, Action::None);
         assert!(!p.mappings[2].mute);
         assert_eq!(p.mappings[2].action, Action::None);
         assert_eq!(&p.mappings[..2], &others);

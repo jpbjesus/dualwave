@@ -1,7 +1,7 @@
 mod haptics;
 mod input;
 mod lighting;
-mod mappings;
+pub(super) mod mappings;
 mod overview;
 mod profiles;
 mod settings;

@@ -48,6 +48,30 @@ $(tail -n 30 "$stage/setup.log")"
     rm -rf -- "$stage"
     return "$result"
 }
+portable_setup() {
+    local stage result=0
+    command -v pkexec >/dev/null || { report_error 'Install polkit to authorize host setup.'; return 1; }
+    command -v python3 >/dev/null || { report_error 'Install Python 3 for host setup.'; return 1; }
+    /usr/bin/python3 "$payload/host-setup/setup-host.py" --plan || return
+    stage=$(mktemp -d "${TMPDIR:-/tmp}/dualwave-host.XXXXXXXX")
+    cp -R -- "$payload/host-setup" "$stage/payload" || { rm -rf -- "$stage"; return 1; }
+    pkexec /usr/bin/python3 "$stage/payload/setup-host.py" --install || result=$?
+    rm -rf -- "$stage"
+    if (( result == 0 )); then
+        if command -v kdialog >/dev/null; then kdialog --title DualWave --msgbox 'Host support installed. Reboot before using the controller.' || true; fi
+    elif (( result != 126 )); then
+        report_error 'Host setup failed. Run --plan in a terminal to inspect prerequisites and review the DKMS build log.'
+    fi
+    return "$result"
+}
+host_family=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+if [[ ${1:-} == --setup && $host_family != cachyos ]]; then
+    portable_setup
+    exit
+fi
+if [[ ${1:-} == --plan && $host_family != cachyos ]]; then
+    exec /usr/bin/python3 "$payload/host-setup/setup-host.py" --plan
+fi
 case ${1:-} in
     --setup) setup; exit ;;
     --check|--plan) exec /usr/bin/bash "$payload/setup-driver.sh" "$1" "$payload" ;;

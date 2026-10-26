@@ -900,5 +900,8 @@
   "{missing} directions unmeasured. Apply keeps their current gains.": "{missing} direções sem amostras. Aplicar mantém os ganhos atuais delas.",
   "All directions measured. Apply or discard the preview.": "Todas as direções medidas. Aplique ou descarte a prévia.",
   "Connect a controller to calibrate.": "Conecte um controle para calibrar.",
-  "Calibrate to measure the stick's reach.": "Calibre para medir o alcance do analógico."
+  "Calibrate to measure the stick's reach.": "Calibre para medir o alcance do analógico.",
+  "When to use calibration": "Quando usar a calibração",
+  "Use directional reach when a stick cannot reach full output in some directions. Leave it off if the full range is already available.": "Use o alcance por direção quando o analógico não atinge o máximo em algumas direções. Deixe desativado se ele já atingir todo o alcance.",
+  "For stick drift near the center, adjust the deadzone instead. Reach changes the outer range, not the center.": "Para movimentos involuntários perto do centro, ajuste a zona morta. O alcance altera o limite externo, não o centro."
 }

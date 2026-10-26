@@ -510,6 +510,56 @@ mod tests {
         assert!(implicit_game_process("eldenring.exe"));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn subprocess_game_lifecycle_uses_discovery_priority_and_session_selection() {
+        use std::process::{Child, Command};
+        struct Game(Child);
+        impl Drop for Game {
+            fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+        }
+        let dir = std::env::temp_dir().join(format!("dualwave-subprocess-games-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Copies give /proc/exe distinct names; shell argv aliases would not.
+        for name in ["first.exe", "second.exe"] { std::fs::copy("/bin/sleep", dir.join(name)).unwrap(); }
+        let launch = |name: &str| Game(Command::new(dir.join(name)).arg("120").spawn().unwrap());
+        let first = launch("first.exe");
+        std::thread::sleep(Duration::from_millis(1100));
+        let second = launch("second.exe");
+        let engine = Engine::new(dir.join("settings"));
+        let device = crate::device::Device::for_test(ds_proto::Connection::Bluetooth, "00:11:22:33:44:55");
+        engine.set_device_profile(&device, "Xbox");
+        let scan = |pids: &[u32]| {
+            let running: Vec<_> = crate::platform::process_list().into_iter().filter(|(pid, _)| pids.contains(pid)).collect();
+            assert_eq!(running.len(), pids.len());
+            let mut stack: Vec<_> = running.iter().map(|(_, name)| name.clone()).collect();
+            order_by_start(&mut stack, &running, crate::platform::process_started);
+            let target = pick_target(true, stack.last().map(String::as_str),
+                &[("first.exe", "DualSense"), ("second.exe", "Xbox")], &[], "DualSense", true, &[]);
+            GameObservation { auto: true, manual_revision: engine.manual_profile_revision(), target, running, games: Vec::new() }
+        };
+        apply_observation(&engine, scan(&[first.0.id(), second.0.id()]));
+        assert_eq!(engine.game_status.read().exe.as_deref(), Some("second.exe"));
+        assert_eq!(engine.profile_name_for(&device), "Xbox");
+        drop(second);
+        apply_observation(&engine, scan(&[first.0.id()]));
+        assert_eq!(engine.profile_name_for(&device), "DualSense");
+        engine.set_device_profile(&device, "Xbox");
+        apply_observation(&engine, scan(&[first.0.id()]));
+        assert_eq!(engine.game_status.read().reason, SelectionReason::Manual);
+        let old_pid = first.0.id();
+        drop(first);
+        assert!(!crate::platform::process_list().iter().any(|(pid, _)| *pid == old_pid));
+        apply_observation(&engine, scan(&[]));
+        assert_eq!(engine.profile_name_for(&device), "Xbox");
+        let relaunched = launch("first.exe");
+        apply_observation(&engine, scan(&[relaunched.0.id()]));
+        assert_eq!(engine.profile_name_for(&device), "DualSense");
+        drop(relaunched);
+        drop(engine);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn likely_games_are_store_installs() {
         assert!(is_likely_game(

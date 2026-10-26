@@ -80,6 +80,182 @@ fn key_label(vk: u16) -> String {
     crate::i18n::tr(&key_name(vk)).to_string()
 }
 
+
+/// Shared action controls for the mapping list and the selected Workspace button.
+pub(crate) fn action_editor(
+    ui: &mut egui::Ui, m: &mut Mapping, i: usize, profile_names: &[String],
+    p_name: &str, virtual_on: bool, xbox_on: bool, can_hide: bool,
+    recording: bool, original_label: bool,
+) -> Option<bool> {
+    let mut capture = None;
+    let mut k = akind(&m.action);
+    let before = k;
+    fit(ui, 170.0);
+    egui::ComboBox::from_id_salt(("map-kind", i))
+        .width(170.0)
+        .selected_text(crate::i18n::tr(if original_label && k == AKind::None { "Original" } else { KINDS.iter().find(|x| x.0 == k).map(|x| x.1).unwrap_or("") }))
+        .show_ui(ui, |ui| {
+            for (kk, l) in KINDS {
+                ui.selectable_value(&mut k, kk, crate::i18n::tr(if original_label && kk == AKind::None { "Original" } else { l }));
+            }
+        });
+    if k != before {
+        m.action = match k {
+            AKind::None => Action::None,
+            AKind::Key => Action::Key { vk: 0x20, ctrl: false, shift: false, alt: false, win: false },
+            AKind::Mouse => Action::Mouse { button: MouseButton::Left },
+            AKind::ScrollUp => Action::ScrollUp,
+            AKind::ScrollDown => Action::ScrollDown,
+            AKind::Media => Action::Media { key: MediaKey::PlayPause },
+            AKind::Next => Action::NextProfile,
+            AKind::Prev => Action::PreviousProfile,
+            AKind::Gyro => Action::ToggleGyroMouse,
+            AKind::Touch => Action::ToggleTouchpadMouse,
+            AKind::Run => Action::Run { path: String::new() },
+            AKind::TurnOff => Action::TurnOffController,
+            AKind::Profile => Action::Profile {
+                name: profile_names.iter().find(|n| **n != p_name).cloned().unwrap_or_default(),
+            },
+            AKind::Gamepad => Action::Gamepad { button: m.button.physical() },
+            AKind::Xbox => Action::Xbox {
+                button: XboxPadButton::ALL
+                    .into_iter()
+                    .find(|x| x.pad_button() == m.button)
+                    .unwrap_or(XboxPadButton::Guide),
+            },
+        };
+    }
+    match &mut m.action {
+        Action::Key { vk, ctrl, shift, alt, win } => {
+            fit(ui, 110.0);
+            egui::ComboBox::from_id_salt(("map-key", i))
+                .width(110.0)
+                .selected_text(key_label(*vk))
+                .height(320.0)
+                .show_ui(ui, |ui| {
+                    for c in key_catalog() {
+                        ui.selectable_value(vk, c, key_label(c));
+                    }
+                });
+            let rec = recording;
+            if ui
+                .add(egui::Button::new(if rec { crate::i18n::tr("Press a key…") } else { crate::i18n::tr("Record") }).fill(if rec { accent_color() } else { card_hi_color() }))
+                .clicked()
+            {
+                capture = Some(!rec);
+            }
+            ui.checkbox(ctrl, "Ctrl");
+            ui.checkbox(shift, crate::i18n::tr("Shift"));
+            ui.checkbox(alt, "Alt");
+            ui.checkbox(win, "Win");
+        }
+        Action::Mouse { button } => {
+            fit(ui, 110.0);
+            egui::ComboBox::from_id_salt(("map-mouse", i))
+                .width(110.0)
+                .selected_text(mouse_label(*button))
+                .show_ui(ui, |ui| {
+                    for b in [MouseButton::Left, MouseButton::Right, MouseButton::Middle, MouseButton::Back, MouseButton::Forward] {
+                        ui.selectable_value(button, b, mouse_label(b));
+                    }
+                });
+        }
+        Action::Media { key } => {
+            fit(ui, 150.0);
+            egui::ComboBox::from_id_salt(("map-media", i))
+                .width(150.0)
+                .selected_text(crate::i18n::tr(key.label()))
+                .show_ui(ui, |ui| {
+                    for k in MediaKey::ALL {
+                        ui.selectable_value(key, k, crate::i18n::tr(k.label()));
+                    }
+                });
+        }
+        Action::Profile { name } => {
+            fit(ui, 170.0);
+            egui::ComboBox::from_id_salt(("map-prof", i))
+                .width(170.0)
+                .selected_text(if name.is_empty() { crate::i18n::tr("Choose…") } else { name.as_str() })
+                .show_ui(ui, |ui| {
+                    for n in profile_names {
+                        ui.selectable_value(name, n.clone(), n);
+                    }
+                });
+        }
+        Action::Gamepad { button } => {
+            fit(ui, 130.0);
+            egui::ComboBox::from_id_salt(("map-pad", i))
+                .width(130.0)
+                .selected_text(crate::i18n::tr(button.short_name()))
+                .show_ui(ui, |ui| {
+                    for b in button_choices(false) {
+                        if b.is_touchpad_zone() {
+                            continue;
+                        }
+                        ui.selectable_value(button, b, crate::i18n::tr(b.short_name()));
+                    }
+                });
+            if !virtual_on {
+                ui.label(RichText::new(crate::i18n::tr("needs a virtual controller")).size(12.0).color(warn_color()));
+            }
+        }
+        Action::Xbox { button } => {
+            fit(ui, 130.0);
+            egui::ComboBox::from_id_salt(("map-xbox", i))
+                .width(130.0)
+                .selected_text(crate::i18n::tr(button.label()))
+                .show_ui(ui, |ui| {
+                    for b in XboxPadButton::ALL {
+                        ui.selectable_value(button, b, crate::i18n::tr(b.label()));
+                    }
+                });
+            #[cfg(target_os = "linux")]
+            if !xbox_on && !can_hide {
+                ui.label(RichText::new(crate::i18n::tr("needs a virtual Xbox 360 controller")).size(12.0).color(warn_color()));
+            }
+            #[cfg(windows)]
+            if !xbox_on && can_hide {
+                ui.label(RichText::new(crate::i18n::tr("hidden helper Xbox controller")).size(12.0).color(muted_color()))
+                    .on_hover_text(crate::i18n::tr("This profile has no virtual Xbox controller, so DualWave keeps a helper one plugged in, hidden from games with HidHide. Only Windows (Task View, Game Bar) sees it. Needs usbip-win2."));
+            } else if !xbox_on {
+                ui.label(RichText::new(crate::i18n::tr("games see a helper controller")).size(12.0).color(warn_color()))
+                    .on_hover_text(crate::i18n::tr("Without HidHide, DualWave plugs in a helper Xbox controller for the press, which games can see, and unplugs it 30 seconds after the last press. Windows needs about a second to see it, so the first press arrives late. Install HidHide on the Virtual controller page to hide it."));
+            }
+        }
+        Action::Run { path } => {
+            ui.add(egui::TextEdit::singleline(path).hint_text(if cfg!(target_os = "linux") { "/path/to/program" } else { "C:\\path\\to\\app.exe" }).desired_width(220.0));
+            if button(ui, crate::i18n::tr("Browse…")).clicked() {
+                if let Some(f) = rfd::FileDialog::new().pick_file() {
+                    *path = f.display().to_string();
+                }
+            }
+        }
+        Action::TurnOffController => {
+            ui.label(RichText::new(crate::i18n::tr("powers off over Bluetooth")).size(12.0).color(muted_color()))
+                .on_hover_text(crate::i18n::tr("Drops the Bluetooth link, which turns the controller off. Plugged in over USB, it stays on."));
+        }
+        _ => {}
+    }
+    if recording && !matches!(m.action, Action::Key { .. }) { capture = Some(false); }
+    capture
+}
+
+pub(crate) fn capture_action(ctx: &egui::Context, action: &mut Action) -> bool {
+    let got = ctx.input(|inp| inp.events.iter().find_map(|e| match e {
+        egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+        _ => None,
+    }));
+    if let Some((key, modifiers)) = got {
+        if key != egui::Key::Escape {
+            if let Some(vk) = vk_from_egui(key) {
+                *action = Action::Key { vk, ctrl: modifiers.ctrl, shift: modifiers.shift, alt: modifiers.alt, win: modifiers.mac_cmd };
+            }
+        }
+        return true;
+    }
+    false
+}
+
 impl App {
     pub(crate) fn page_mappings(
         &mut self,
@@ -112,31 +288,10 @@ impl App {
         let can_hide = self.engine.companion.can_hide();
         let profile_names = self.engine.profiles.names();
 
-        // Key capture.
         if let Some(i) = self.capture_key {
-            let got = ctx.input(|inp| {
-                inp.events.iter().find_map(|e| match e {
-                    egui::Event::Key {
-                        key,
-                        pressed: true,
-                        modifiers,
-                        ..
-                    } => Some((*key, *modifiers)),
-                    _ => None,
-                })
-            });
-            if let Some((k, m)) = got {
-                if let (Some(vk), Some(map)) = (vk_from_egui(k), p.mappings.get_mut(i)) {
-                    map.action = Action::Key {
-                        vk,
-                        ctrl: m.ctrl,
-                        shift: m.shift,
-                        alt: m.alt,
-                        win: false,
-                    };
-                }
-                self.capture_key = None;
-            }
+            if let Some(map) = p.mappings.get_mut(i) {
+                if capture_action(ctx, &mut map.action) { self.capture_key = None; }
+            } else { self.capture_key = None; }
         }
 
         let mut remove: Option<usize> = None;
@@ -211,153 +366,8 @@ impl App {
                                 ui.selectable_value(&mut m.gesture, Gesture::DoubleTap, crate::i18n::tr("Double tap"));
                             });
                         ui.label(RichText::new("→").color(muted_color()).size(16.0));
-                        let mut k = akind(&m.action);
-                        let before = k;
-                        fit(ui, 170.0);
-                        egui::ComboBox::from_id_salt(("map-kind", i))
-                            .width(170.0)
-                            .selected_text(crate::i18n::tr(KINDS.iter().find(|x| x.0 == k).map(|x| x.1).unwrap_or("")))
-                            .show_ui(ui, |ui| {
-                                for (kk, l) in KINDS {
-                                    ui.selectable_value(&mut k, kk, crate::i18n::tr(l));
-                                }
-                            });
-                        if k != before {
-                            m.action = match k {
-                                AKind::None => Action::None,
-                                AKind::Key => Action::Key { vk: 0x20, ctrl: false, shift: false, alt: false, win: false },
-                                AKind::Mouse => Action::Mouse { button: MouseButton::Left },
-                                AKind::ScrollUp => Action::ScrollUp,
-                                AKind::ScrollDown => Action::ScrollDown,
-                                AKind::Media => Action::Media { key: MediaKey::PlayPause },
-                                AKind::Next => Action::NextProfile,
-                                AKind::Prev => Action::PreviousProfile,
-                                AKind::Gyro => Action::ToggleGyroMouse,
-                                AKind::Touch => Action::ToggleTouchpadMouse,
-                                AKind::Run => Action::Run { path: String::new() },
-                                AKind::TurnOff => Action::TurnOffController,
-                                AKind::Profile => Action::Profile {
-                                    name: profile_names.iter().find(|n| **n != p_name).cloned().unwrap_or_default(),
-                                },
-                                AKind::Gamepad => Action::Gamepad { button: m.button.physical() },
-                                AKind::Xbox => Action::Xbox {
-                                    button: XboxPadButton::ALL
-                                        .into_iter()
-                                        .find(|x| x.pad_button() == m.button)
-                                        .unwrap_or(XboxPadButton::Guide),
-                                },
-                            };
-                        }
-                        match &mut m.action {
-                            Action::Key { vk, ctrl, shift, alt, win } => {
-                                fit(ui, 110.0);
-                                egui::ComboBox::from_id_salt(("map-key", i))
-                                    .width(110.0)
-                                    .selected_text(key_label(*vk))
-                                    .height(320.0)
-                                    .show_ui(ui, |ui| {
-                                        for c in key_catalog() {
-                                            ui.selectable_value(vk, c, key_label(c));
-                                        }
-                                    });
-                                let rec = self.capture_key == Some(i);
-                                if ui
-                                    .add(egui::Button::new(if rec { crate::i18n::tr("Press a key…") } else { crate::i18n::tr("Record") }).fill(if rec { accent_color() } else { card_hi_color() }))
-                                    .clicked()
-                                {
-                                    capture = Some(if rec { None } else { Some(i) });
-                                }
-                                ui.checkbox(ctrl, "Ctrl");
-                                ui.checkbox(shift, crate::i18n::tr("Shift"));
-                                ui.checkbox(alt, "Alt");
-                                ui.checkbox(win, "Win");
-                            }
-                            Action::Mouse { button } => {
-                                fit(ui, 110.0);
-                                egui::ComboBox::from_id_salt(("map-mouse", i))
-                                    .width(110.0)
-                                    .selected_text(mouse_label(*button))
-                                    .show_ui(ui, |ui| {
-                                        for b in [MouseButton::Left, MouseButton::Right, MouseButton::Middle, MouseButton::Back, MouseButton::Forward] {
-                                            ui.selectable_value(button, b, mouse_label(b));
-                                        }
-                                    });
-                            }
-                            Action::Media { key } => {
-                                fit(ui, 150.0);
-                                egui::ComboBox::from_id_salt(("map-media", i))
-                                    .width(150.0)
-                                    .selected_text(crate::i18n::tr(key.label()))
-                                    .show_ui(ui, |ui| {
-                                        for k in MediaKey::ALL {
-                                            ui.selectable_value(key, k, crate::i18n::tr(k.label()));
-                                        }
-                                    });
-                            }
-                            Action::Profile { name } => {
-                                fit(ui, 170.0);
-                                egui::ComboBox::from_id_salt(("map-prof", i))
-                                    .width(170.0)
-                                    .selected_text(if name.is_empty() { crate::i18n::tr("Choose…") } else { name.as_str() })
-                                    .show_ui(ui, |ui| {
-                                        for n in &profile_names {
-                                            ui.selectable_value(name, n.clone(), n);
-                                        }
-                                    });
-                            }
-                            Action::Gamepad { button } => {
-                                fit(ui, 130.0);
-                                egui::ComboBox::from_id_salt(("map-pad", i))
-                                    .width(130.0)
-                                    .selected_text(crate::i18n::tr(button.short_name()))
-                                    .show_ui(ui, |ui| {
-                                        for b in button_choices(false) {
-                                            if b.is_touchpad_zone() {
-                                                continue;
-                                            }
-                                            ui.selectable_value(button, b, crate::i18n::tr(b.short_name()));
-                                        }
-                                    });
-                                if !virtual_on {
-                                    ui.label(RichText::new(crate::i18n::tr("needs a virtual controller")).size(12.0).color(warn_color()));
-                                }
-                            }
-                            Action::Xbox { button } => {
-                                fit(ui, 130.0);
-                                egui::ComboBox::from_id_salt(("map-xbox", i))
-                                    .width(130.0)
-                                    .selected_text(crate::i18n::tr(button.label()))
-                                    .show_ui(ui, |ui| {
-                                        for b in XboxPadButton::ALL {
-                                            ui.selectable_value(button, b, crate::i18n::tr(b.label()));
-                                        }
-                                    });
-                                #[cfg(target_os = "linux")]
-                                if !xbox_on && !can_hide {
-                                    ui.label(RichText::new(crate::i18n::tr("needs a virtual Xbox 360 controller")).size(12.0).color(warn_color()));
-                                }
-                                #[cfg(windows)]
-                                if !xbox_on && can_hide {
-                                    ui.label(RichText::new(crate::i18n::tr("hidden helper Xbox controller")).size(12.0).color(muted_color()))
-                                        .on_hover_text(crate::i18n::tr("This profile has no virtual Xbox controller, so DualWave keeps a helper one plugged in, hidden from games with HidHide. Only Windows (Task View, Game Bar) sees it. Needs usbip-win2."));
-                                } else if !xbox_on {
-                                    ui.label(RichText::new(crate::i18n::tr("games see a helper controller")).size(12.0).color(warn_color()))
-                                        .on_hover_text(crate::i18n::tr("Without HidHide, DualWave plugs in a helper Xbox controller for the press, which games can see, and unplugs it 30 seconds after the last press. Windows needs about a second to see it, so the first press arrives late. Install HidHide on the Virtual controller page to hide it."));
-                                }
-                            }
-                            Action::Run { path } => {
-                                ui.add(egui::TextEdit::singleline(path).hint_text(if cfg!(target_os = "linux") { "/path/to/program" } else { "C:\\path\\to\\app.exe" }).desired_width(220.0));
-                                if button(ui, crate::i18n::tr("Browse…")).clicked() {
-                                    if let Some(f) = rfd::FileDialog::new().pick_file() {
-                                        *path = f.display().to_string();
-                                    }
-                                }
-                            }
-                            Action::TurnOffController => {
-                                ui.label(RichText::new(crate::i18n::tr("powers off over Bluetooth")).size(12.0).color(muted_color()))
-                                    .on_hover_text(crate::i18n::tr("Drops the Bluetooth link, which turns the controller off. Plugged in over USB, it stays on."));
-                            }
-                            _ => {}
+                        if let Some(record) = action_editor(ui, m, i, &profile_names, &p_name, virtual_on, xbox_on, can_hide, self.capture_key == Some(i), false) {
+                            capture = Some(if record { Some(i) } else { None });
                         }
                     });
                     });

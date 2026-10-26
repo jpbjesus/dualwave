@@ -900,5 +900,8 @@
   "End": "Fim",
   "Updated to DSZ {}": "Atualizado para DSZ {}",
   "Shift": "Shift",
-  "Reset direction": "Repor direção"
+  "Reset direction": "Repor direção",
+  "When to use calibration": "Quando usar a calibração",
+  "Use directional reach when a stick cannot reach full output in some directions. Leave it off if the full range is already available.": "Use o alcance por direção quando o manípulo não atinge o máximo em algumas direções. Deixe-o desativado se já atingir todo o alcance.",
+  "For stick drift near the center, adjust the deadzone instead. Reach changes the outer range, not the center.": "Para movimentos involuntários perto do centro, ajuste a zona morta. O alcance altera o limite exterior, não o centro."
 }
