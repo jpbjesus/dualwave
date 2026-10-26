@@ -280,7 +280,16 @@ fn build(raw: RawLook) -> Look {
     let body = poly(&raw.body);
     let [b0, b1] = &raw.bumpers;
     let [t0, t1] = &raw.triggers;
-    let triggers = [poly(t0), poly(t1)];
+    // The front view exposes more of the trigger cap than the shallow
+    // source silhouette, keeping its outline and label readable at UI size.
+    let trigger = |d: &str, bumper: &str| {
+        let base = poly(d);
+        let shoulder = poly(bumper);
+        let shift = shoulder.center().0 - base.center().0;
+        let cap = flatten("M3 26C1 20 0 13 1 7C2 2 5 0 10 0H20C25 0 28 2 29 7C30 13 29 20 27 26Z", CURVE_STEPS);
+        Poly::new(cap.into_iter().map(|(x, y)| (base.bb[0] + shift + x / 30.0 * (base.bb[2] - base.bb[0]), shoulder.bb[1] - 5.0 - 26.0 + y)).collect())
+    };
+    let triggers = [trigger(t0, b0), trigger(t1, b1)];
     let touchpad = poly(&raw.touchpad);
     let lightbar = panel("light").unwrap_or_else(|| poly(&raw.touchpad));
     let grille_top = raw
@@ -346,6 +355,31 @@ fn looks() -> &'static HashMap<String, Look> {
             serde_json::from_str(PADS).expect("assets/pads.json parses");
         raw.into_iter().map(|(k, v)| (k, build(v))).collect()
     })
+}
+
+pub(super) fn trigger_icon(p: &egui::Painter, rect: Rect, label: &str, color: Color32) {
+    if !matches!(label, "L2" | "R2") { return; }
+    let r = Rect::from_center_size(rect.center(), vec2(rect.width(), rect.height() * 0.78)).shrink(1.0);
+    p.rect_stroke(r, 4.0, Stroke::new(1.4, color), StrokeKind::Inside);
+    p.text(r.center(), egui::Align2::CENTER_CENTER, label, heading(11.0), color);
+}
+
+pub(super) fn playstation_icon(p: &egui::Painter, rect: Rect, color: Color32) {
+    static MARK: OnceLock<Vec<Poly>> = OnceLock::new();
+    let parts = MARK.get_or_init(|| {
+        let svg = include_str!("../../assets/playstation.svg");
+        let d = svg.split(" d=\"").nth(1).unwrap().split('"').next().unwrap();
+        // SVG's second subpath starts relative to the first subpath's origin.
+        d.replace("zm4.656 16.241", "zM13.64 18.837")
+            // After a line, SVG's smooth cubic starts at the current point.
+            .replace("s1.201-.42 2.913-.615", "c0 0 1.201-.42 2.913-.615").split('z')
+            .filter(|d| !d.is_empty()).map(|d| Poly::new(flatten(d, 12))).collect()
+    });
+    let s = rect.width().min(rect.height()) / 24.0;
+    let sp = Space { origin: rect.center(), ox: 12.0, oy: 12.0, s, center: rect.center(), roll: 0.0, squash: vec2(1.0, 1.0) };
+    for part in parts {
+        p.add(Shape::closed_line(part.pts.iter().map(|&(x, y)| sp.p(x, y)).collect(), Stroke::new(0.8, color)));
+    }
 }
 
 /// Ear-clipping triangulation of a simple polygon (either winding).
@@ -490,6 +524,10 @@ fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset:
     if let Some(m) = &g.mic {
         m.fill(&p, &sp, well, dark_rim);
     }
+    for (t, name) in [(&g.triggers[0], "L2"), (&g.triggers[1], "R2")] {
+        let (x, y) = t.center();
+        p.text(sp.p(x, y), egui::Align2::CENTER_CENTER, name, heading(sp.l(7.0).max(7.0)), label);
+    }
     // Speaker grille.
     for &[x, y, r] in &g.dots {
         p.circle_filled(sp.p(x, y), sp.l(r), well);
@@ -613,13 +651,7 @@ fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset:
                     p.circle_filled(c, sp.l(r), if pressed { lit } else { dark_key });
                     p.circle_stroke(c, sp.l(r), thin);
                     if b == Button::Ps {
-                        p.text(
-                            c,
-                            egui::Align2::CENTER_CENTER,
-                            "PS",
-                            heading(sp.l(r * 0.75).max(7.0)),
-                            label,
-                        );
+                        super::icons::control(&p, Rect::from_center_size(c, vec2(sp.l(r * 1.6), sp.l(r * 1.6))), "PS", label);
                     }
                 }
             }
@@ -643,6 +675,17 @@ fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset:
         }
     }
     let mut clicked = None;
+    if interactive {
+        for (poly, button) in [(&g.triggers[0], Button::L2), (&g.triggers[1], Button::R2), (&g.touchpad, Button::Touchpad)] {
+            let bounds = sp.r(poly.bb[0], poly.bb[1], poly.bb[2], poly.bb[3]);
+            let hit = ui.interact(bounds.expand2(vec2(3.0, 7.0)), resp.id.with(button), egui::Sense::click());
+            hit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr(button.short_name())));
+            if selected == Some(button) || hit.hovered() || hit.has_focus() {
+                p.add(Shape::closed_line(poly.pts.iter().map(|&(x, y)| sp.p(x, y)).collect(), Stroke::new(2.0, accent_color())));
+            }
+            if hit.on_hover_text(crate::i18n::tr(if button == Button::Touchpad { "Lighting" } else { button.short_name() })).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() { clicked = Some(button); }
+        }
+    }
     for (button, part) in &g.buttons {
         if !interactive || !matches!(button, Button::Cross | Button::Circle | Button::Square | Button::Triangle | Button::Ps | Button::Mute) { continue; }
         let (center, radius) = match part {
@@ -659,7 +702,7 @@ fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset:
     (resp, clicked)
 }
 
-fn face_symbol(p: &egui::Painter, c: Pos2, k: f32, b: Button, color: Color32) {
+pub(super) fn face_symbol(p: &egui::Painter, c: Pos2, k: f32, b: Button, color: Color32) {
     let st = Stroke::new((k * 0.34).max(1.2), color);
     match b {
         Button::Triangle => {
@@ -687,6 +730,50 @@ fn face_symbol(p: &egui::Painter, c: Pos2, k: f32, b: Button, color: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trigger_caps_are_centered_above_the_shoulders_with_a_gap() {
+        for look in looks().values() {
+            for (trigger, bumper) in look.triggers.iter().zip(&look.bumpers) {
+                assert!(trigger.bb[3] + 4.0 < bumper.bb[1]);
+                assert!((trigger.center().0 - bumper.center().0).abs() < 0.5);
+            }
+        }
+    }
+
+    #[test]
+    fn controller_regions_select_triggers_and_lighting_at_each_pose() {
+        let ctx = egui::Context::default();
+        super::super::theme::install(&ctx, 1.0);
+        let input = InputState::default();
+        let view = View { input: &input, lightbar: [0; 3], player_leds: 0, mute_led: false, model: Model::DualSense, connected: false };
+        let g = &looks()["dualsense"];
+        for pose in [[0.0; 3], [-11.0, 9.0, -7.0]] {
+            for (poly, expected) in [(&g.triggers[0], Button::L2), (&g.triggers[1], Button::R2), (&g.touchpad, Button::Touchpad)] {
+                let mut point = Pos2::ZERO;
+                let mut result = None;
+                for frame in 0..3 {
+                    let events = match frame {
+                        1 | 2 => vec![egui::Event::PointerMoved(point), egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed: frame == 1, modifiers: egui::Modifiers::default() }],
+                        _ => vec![],
+                    };
+                    let _ = ctx.run(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), events, ..Default::default() }, |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            let (response, clicked) = draw_stage(ui, vec2(600.0, 400.0), &view, pose, vec2(3.0, 2.0), None);
+                            let [x0, y0, x1, y1] = g.bounds;
+                            let s = (600.0 / (x1 - x0)).min(400.0 / (y1 - y0)) * if pose == [0.0; 3] { 1.0 } else { 0.87 };
+                            let center = response.rect.center() + vec2(3.0, 2.0);
+                            let sp = Space { origin: center - vec2((x1 - x0) * s, (y1 - y0) * s) * 0.5, ox: x0, oy: y0, s, center, roll: pose[0].to_radians(), squash: vec2(pose[2].to_radians().cos(), pose[1].to_radians().cos()) };
+                            let (x, y) = poly.center();
+                            point = sp.p(x, y);
+                            if clicked.is_some() { result = clicked; }
+                        });
+                    });
+                }
+                assert_eq!(result, Some(expected), "pose {pose:?}");
+            }
+        }
+    }
 
     #[test]
     fn both_looks_load_and_triangulate_fully() {

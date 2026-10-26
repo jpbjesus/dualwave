@@ -79,7 +79,7 @@ def main():
     shutil.copy2(ROOT / 'LICENSE', licenses / 'LICENSE')
     shutil.copy2(ROOT / 'packaging/kernel/COPYING', licenses / 'kernel-COPYING')
     shutil.copy2(ROOT / 'vendor/opus/COPYING', licenses / 'opus-COPYING')
-    for name in ['InstrumentSans-OFL.txt', 'Manrope-OFL.txt', 'OpenController-LICENSE']:
+    for name in ['InstrumentSans-OFL.txt', 'Manrope-OFL.txt', 'OpenController-LICENSE', 'SimpleIcons-LICENSE.md']:
         shutil.copy2(ROOT / 'crates/dsz/assets' / name, licenses / name)
     owners = set()
     for source in bundled_sources:

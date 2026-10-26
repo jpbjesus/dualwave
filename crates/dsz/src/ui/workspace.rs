@@ -147,6 +147,10 @@ pub(super) fn choices<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, opt
                 super::icons::navigation(ui, egui::Rect::from_center_size(egui::pos2(rect.left() + 12., rect.center().y), egui::vec2(18., 18.)), label, color);
                 ui.painter().galley(egui::pos2(rect.left() + 27., rect.center().y - galley.size().y * 0.5), galley, color);
                 response.on_hover_cursor(egui::CursorIcon::PointingHand)
+            } else if matches!(*label, "L2" | "R2" | "PS" | "Mute" | "×" | "○" | "□" | "△") {
+                let response = ui.add(egui::Button::new("").frame(false).min_size(egui::vec2(36.0, 30.0)));
+                super::icons::control(ui.painter(), egui::Rect::from_center_size(response.rect.center(), egui::vec2(25.0, 24.0)), label, color);
+                response.on_hover_text(tr(label))
             } else {
                 ui.add(egui::Button::new(RichText::new(tr(label)).color(color))
                     .frame(false).min_size(egui::vec2(32.0, 30.0)))
@@ -363,13 +367,14 @@ impl App {
         let lightbar = if reduced {
             if p.lighting.mode == LightMode::Off { [0; 3] } else { p.lighting.color.map(|v| (v as u16 * p.lighting.brightness as u16 / 100) as u8) }
         } else { self.preview.lightbar(p, &input, self.engine.audio.loudness(), Instant::now()) };
-        let (_, clicked) = controller_view::draw_stage(ui, egui::vec2(width, h), &View { input: &input, lightbar, player_leds: 0, mute_led: p.microphone.muted, model: dev.map(|d| d.model).unwrap_or(ds_proto::Model::DualSense), connected: true }, pose, offset, (self.part == Part::Buttons).then_some(self.selected_button));
-        if let Some(button) = clicked { self.selected_button = button; self.part = Part::Buttons; }
-        for (part, side, label, x, y) in [(Part::Triggers, Side::Left, "L2", 0.18, 0.12), (Part::Triggers, Side::Right, "R2", 0.78, 0.12), (Part::Lighting, Side::Both, "Lighting", 0.46, 0.39), (Part::Buttons, Side::Both, "Buttons", 0.83, 0.48)] {
-            let r = egui::Rect::from_center_size(stage.min + egui::vec2(width * x, h * y), egui::vec2(if label.len() > 2 { 74.0 } else { 36.0 }, 32.0));
-            let selected = self.part == part && (part != Part::Triggers || self.trigger_side == side || self.trigger_side == Side::Both);
-            let mut hotspot = ui.new_child(egui::UiBuilder::new().max_rect(r));
-            if hotspot.add_sized(r.size(), egui::Button::new(tr(label)).wrap_mode(egui::TextWrapMode::Extend).fill(if selected { accent_soft_color() } else { bg_color() })).clicked() { self.part = part; self.trigger_side = side; }
+        let (_, clicked) = controller_view::draw_stage(ui, egui::vec2(width, h), &View { input: &input, lightbar, player_leds: 0, mute_led: p.microphone.muted, model: dev.map(|d| d.model).unwrap_or(ds_proto::Model::DualSense), connected: true }, pose, offset, match self.part { Part::Buttons => Some(self.selected_button), Part::Triggers => match self.trigger_side { Side::Left => Some(Button::L2), Side::Right => Some(Button::R2), Side::Both => None }, Part::Lighting => Some(Button::Touchpad), _ => None });
+        if let Some(button) = clicked {
+            match button {
+                Button::L2 => { self.part = Part::Triggers; self.trigger_side = Side::Left; }
+                Button::R2 => { self.part = Part::Triggers; self.trigger_side = Side::Right; }
+                Button::Touchpad => self.part = Part::Lighting,
+                _ => { self.selected_button = button; self.part = Part::Buttons; }
+            }
         }
     }
 

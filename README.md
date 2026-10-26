@@ -44,9 +44,9 @@ hardware-validated features are documented under [Compatibility](#compatibility)
 | **Buttons and gestures** | Keyboard, mouse and controller actions; combinations, long press and double tap |
 | **Motion and touch** | Gyro aiming, mouse control, touchpad behaviour and stick modes |
 | **Virtual output** | Xbox 360, DualSense and DualShock 4 controller targets |
-| **Profiles for games** | Detected-game association, start-time priority, visible selection reasons, session-aware manual choices, import/export and automatic game rules |
+| **Profiles for games** | Detected-game association (excluding DualWave itself, including its AppImage), start-time priority, visible selection reasons, session-aware manual choices, import/export and automatic game rules |
 | **Emulator and mod integration** | DSU motion server and local UDP mod API |
-| **A personal workspace** | English, Português (Portugal), Português (Brasil), light/dark/system themes and reduced motion |
+| **A personal workspace** | Direct selection of triggers, lighting and buttons on the controller preview; vector trigger, PlayStation and mute marks in selectors; English, Português (Portugal), Português (Brasil), light/dark/system themes and reduced motion |
 | **Everyday convenience** | Desktop tray, startup preferences, device naming and complete settings backups |
 | **Recovery and diagnostics** | Automatic media-channel retries, audio endpoint recovery, live connection checks and a sanitized diagnostic report |
 
@@ -207,8 +207,8 @@ controller connected. They illustrate configuration, not a live hardware test.
 ### Open the application
 
 Download the AppImage and SHA-256 manifest from
-[Releases](https://github.com/jpbjesus/dualwave/releases). The first release,
-[v0.4.0-alpha.1](https://github.com/jpbjesus/dualwave/releases/tag/v0.4.0-alpha.1),
+[Releases](https://github.com/jpbjesus/dualwave/releases). The latest release,
+[v0.4.0-alpha.2](https://github.com/jpbjesus/dualwave/releases/tag/v0.4.0-alpha.2),
 is an alpha preview. You can also build from source using the
 [instructions below](#building).
 
@@ -467,6 +467,7 @@ DS4Windows contributors and the controller-research community.
 | Patched Linux driver/helper | [GPL-2.0-or-later](packaging/kernel/COPYING) |
 | Instrument Sans interface fonts | [SIL OFL 1.1](crates/dsz/assets/InstrumentSans-OFL.txt), [original project](https://github.com/Instrument/instrument-sans/tree/7fa22308a3d0c94ee2b3cd537a1196b65db34a3e) |
 | Manrope “WAVE” signature | [SIL OFL 1.1](crates/dsz/assets/Manrope-OFL.txt) |
+| PlayStation mark (Simple Icons) | [CC0](crates/dsz/assets/SimpleIcons-LICENSE.md), [source](https://github.com/simple-icons/simple-icons/blob/develop/icons/playstation.svg) |
 | OpenController drawings | [MIT](crates/dsz/assets/OpenController-LICENSE) |
 | libopus | [BSD-3-Clause](vendor/opus/COPYING) |
 | eframe | MIT or Apache-2.0; see `vendor/eframe` |

@@ -102,10 +102,20 @@ pub struct Entry {
 pub struct Detector {
     file: PathBuf,
     cache: Mutex<BTreeMap<String, Entry>>,
+    application_exes: Vec<String>,
 }
 
 impl Detector {
     pub fn new(data_dir: &Path) -> Detector {
+        Self::with_application_exes(data_dir, std::env::current_exe().ok(), std::env::var_os("APPIMAGE").map(PathBuf::from))
+    }
+
+    fn with_application_exes(data_dir: &Path, executable: Option<PathBuf>, appimage: Option<PathBuf>) -> Detector {
+        let application_exes = executable.into_iter().chain(appimage).filter(|p| p.is_absolute())
+            .flat_map(|p| {
+                let canonical = std::fs::canonicalize(&p).ok();
+                std::iter::once(p).chain(canonical).map(|p| p.to_string_lossy().to_ascii_lowercase())
+            }).collect();
         let file = data_dir.join("dualsense-detect.json");
         let cache = std::fs::read_to_string(&file)
             .ok()
@@ -114,6 +124,7 @@ impl Detector {
         Detector {
             file,
             cache: Mutex::new(cache),
+            application_exes,
         }
     }
 
@@ -122,7 +133,7 @@ impl Detector {
     pub fn check(&self, exe: &Path) -> Option<String> {
         let key = exe.to_string_lossy().to_ascii_lowercase();
         let name = exe.file_name()?.to_string_lossy().to_ascii_lowercase();
-        if NOT_GAMES.contains(&name.as_str()) || is_system(&key) || key == *own_exe() {
+        if NOT_GAMES.contains(&name.as_str()) || is_system(&key) || self.application_exes.contains(&key) {
             return None;
         }
         let meta = std::fs::metadata(exe).ok()?;
@@ -170,20 +181,10 @@ impl Detector {
         self.cache
             .lock()
             .iter()
+            .filter(|(k, _)| !self.application_exes.contains(k))
             .filter_map(|(k, e)| e.found.clone().map(|f| (k.clone(), f)))
             .collect()
     }
-}
-
-/// This app's own exe, lower case. It holds the scan's needles, so under
-/// any name but dsz.exe it would count as a DualSense game.
-fn own_exe() -> &'static String {
-    static OWN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    OWN.get_or_init(|| {
-        std::env::current_exe()
-            .map(|p| p.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default()
-    })
 }
 
 fn is_system(path_lower: &str) -> bool {
@@ -323,6 +324,30 @@ fn find_marker(mut r: impl Read) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excludes_renamed_appimage_and_payload_even_with_cached_positive_results() {
+        let dir = std::env::temp_dir().join(format!("dsz-self-detection-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let payload = dir.join("controller-ui");
+        let appimage = dir.join("renamed-controller.AppImage");
+        let game = dir.join("real-game.exe");
+        for path in [&payload, &appimage, &game] { std::fs::write(path, b"AkScePadRumbleSink").unwrap(); }
+        let detector = Detector::with_application_exes(&dir, Some(payload.clone()), Some(appimage.clone()));
+        // Existing installations can already have a positive result cached.
+        for path in [&payload, &appimage] {
+            let meta = std::fs::metadata(path).unwrap();
+            detector.cache.lock().insert(path.to_string_lossy().to_ascii_lowercase(), Entry {
+                size: meta.len(), modified: meta.modified().unwrap().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                found: Some("AkScePad".into()), version: SCAN_VERSION,
+            });
+            assert_eq!(detector.check(path), None);
+        }
+        assert!(detector.detected().is_empty());
+        assert!(detector.check(&game).is_some());
+        assert_eq!(detector.detected().len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn finds_markers_across_chunk_edges() {
