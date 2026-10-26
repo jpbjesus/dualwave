@@ -344,3 +344,60 @@ pub fn two_columns(ui: &mut Ui, mut f: impl FnMut(&mut Ui, usize)) {
         });
     });
 }
+
+/// One microphone surface: click the mic to mute, or power to control capture.
+/// The meter only follows samples from an actual recording session.
+pub fn microphone_control(ui: &mut Ui, enabled: &mut bool, muted: &mut bool, level: Option<f32>) -> (Response, Response) {
+    let (rect, allocation) = ui.allocate_exact_size(egui::vec2(ui.available_width().min(300.0), 32.0), Sense::hover());
+    let power_rect = egui::Rect::from_min_max(egui::pos2(rect.right() - 36.0, rect.top()), rect.right_bottom());
+    let main_rect = egui::Rect::from_min_max(rect.left_top(), power_rect.left_bottom());
+    let mut main = ui.interact(main_rect, allocation.id.with("microphone-main"), Sense::click());
+    let mut power = ui.interact(power_rect, allocation.id.with("microphone-power"), Sense::click());
+    if main.clicked() {
+        if *enabled { *muted = !*muted; } else { *enabled = true; }
+        main.mark_changed();
+    }
+    if power.clicked() { *enabled = !*enabled; power.mark_changed(); }
+    let label = crate::i18n::tr(if !*enabled { "Disabled" } else if *muted { "Muted" } else { "Enabled" });
+    let action = crate::i18n::tr(if !*enabled { "Enable microphone" } else if *muted { "Unmute microphone" } else { "Mute microphone" });
+    let power_action = crate::i18n::tr(if *enabled { "Disable microphone" } else { "Enable microphone" });
+    main.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, action));
+    power.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *enabled, power_action));
+    let active = ui.ctx().animate_bool(main.id.with("active"), *enabled);
+    let color = if !*enabled { muted_color() } else if *muted { warn_color() } else { accent_color() };
+    let fill = mix(field_color(), with_alpha(color, 32), active * 0.3);
+    let p = ui.painter();
+    p.rect_filled(rect, CornerRadius::same(R_CTRL), fill);
+    if main.hovered() { p.rect_filled(main_rect, CornerRadius::same(R_CTRL), with_alpha(color, 20)); }
+    if power.hovered() { p.rect_filled(power_rect, CornerRadius::same(R_CTRL), with_alpha(color, 30)); }
+    p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0 + active, with_alpha(color, if *enabled { 180 } else { 65 })));
+    p.line_segment([power_rect.left_top() + egui::vec2(0.0, 7.0), power_rect.left_bottom() - egui::vec2(0.0, 7.0)], Stroke::new(1.0, border_color()));
+    let c = egui::pos2(rect.left() + 18.0, rect.center().y - 1.0);
+    p.rect_stroke(egui::Rect::from_center_size(c - egui::vec2(0.0, 3.0), egui::vec2(8.0, 13.0)), CornerRadius::same(4), Stroke::new(1.5, color), StrokeKind::Inside);
+    p.add(egui::Shape::line(vec![c + egui::vec2(-7.0, -1.0), c + egui::vec2(-7.0, 3.0), c + egui::vec2(-4.0, 6.0), c + egui::vec2(4.0, 6.0), c + egui::vec2(7.0, 3.0), c + egui::vec2(7.0, -1.0)], Stroke::new(1.5, color)));
+    p.line_segment([c + egui::vec2(0.0, 6.0), c + egui::vec2(0.0, 10.0)], Stroke::new(1.5, color));
+    if *muted {
+        let slash = [c - egui::vec2(10.0, 10.0), c + egui::vec2(10.0, 10.0)];
+        p.line_segment(slash, Stroke::new(4.0, fill));
+        p.line_segment(slash, Stroke::new(1.5, color));
+    }
+    let text_rect = egui::Rect::from_min_max(egui::pos2(rect.left() + 38.0, rect.top()), egui::pos2(main_rect.right() - 28.0, rect.bottom()));
+    p.with_clip_rect(ui.clip_rect().intersect(text_rect)).text(text_rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(13.0), color);
+    if *enabled && !*muted {
+        if let Some(level) = level {
+            for (index, weight) in [0.65, 1.0, 0.8].iter().enumerate() {
+                let h = 2.0 + 16.0 * level.clamp(0.0, 1.0) * weight;
+                let center = egui::pos2(main_rect.right() - 19.0 + index as f32 * 5.0, rect.center().y);
+                p.rect_filled(egui::Rect::from_center_size(center, egui::vec2(2.0, h)), CornerRadius::same(1), color);
+            }
+        }
+    }
+    let c = power_rect.center();
+    p.circle_stroke(c, 6.5, Stroke::new(1.5, color));
+    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(4.0, fill));
+    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(1.5, color));
+    for response in [&main, &power] {
+        if response.has_focus() { p.rect_stroke(response.rect, CornerRadius::same(R_CTRL), Stroke::new(1.5, accent_color()), StrokeKind::Outside); }
+    }
+    (main.on_hover_text(action), power.on_hover_text(power_action))
+}

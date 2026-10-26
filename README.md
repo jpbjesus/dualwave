@@ -12,7 +12,7 @@ renders on Linux; the full integrated application still needs hardware testing.
 
 | Feature | Current status |
 | --- | --- |
-| Controller workspace | Viewport-based controller and audio pages, fixed quick controls, four destinations, a selectable controller drawing, lighting/trigger/button/motion inspectors, six visual trigger presets and quick audio controls; complete editors remain under Advanced |
+| Controller workspace | Viewport-based controller and audio pages, fixed quick controls, four destinations, a selectable controller drawing, lighting/trigger/button/motion inspectors, six visual trigger presets and stateful microphone/audio controls; complete editors remain under Advanced |
 | Preferences | Fixed category navigation for appearance, startup, controllers, integrations, backups, logs and application information; long setup instructions expand on demand |
 | Appearance and accessibility | Manrope typography, flat light/dark/system themes, responsive option groups, aligned setting rows, fixed editor navigation, keyboard controls and finite visual preview motion; Reduce interface motion and startup Windows/KDE/GNOME preferences disable preview animation |
 | Profiles and languages | Fixed profile/game-rule navigation, profile rows with create-from-applied, edit without applying, clone/import/export/delete and game rules; English, Português (Brasil) and Português (Portugal), with English unchanged as the default |

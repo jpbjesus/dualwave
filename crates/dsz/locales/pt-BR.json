@@ -791,5 +791,8 @@
   "Setup instructions": "Instruções de configuração",
   "Manage profiles": "Gerenciar perfis",
   "Mapping help": "Ajuda sobre mapeamentos",
-  "Assign keys, clicks and actions to controller buttons or combinations.": "Atribua teclas, cliques e ações a botões ou combinações do controle."
+  "Assign keys, clicks and actions to controller buttons or combinations.": "Atribua teclas, cliques e ações a botões ou combinações do controle.",
+  "Muted": "Silenciado",
+  "Unmute microphone": "Reativar som do microfone",
+  "Disable microphone": "Desativar microfone"
 }

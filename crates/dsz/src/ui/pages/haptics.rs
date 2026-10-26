@@ -288,12 +288,9 @@ impl App {
             crate::i18n::tr(if cfg!(target_os = "linux") { "Controller or headset microphone as a PipeWire recording source" } else { "Controller or headset microphone as a Windows recording device" }),
             |ui| {
                 let m = &mut p.microphone;
-                toggle_row(
-                    ui,
-                    crate::i18n::tr("Enable microphone"),
-                    crate::i18n::tr(if cfg!(target_os = "linux") { "Requires Bluetooth and working PipeWire audio or an active virtual DualSense controller" } else { "Requires Bluetooth and an active virtual DualSense controller" }),
-                    &mut m.enabled,
-                );
+                let level = dev.filter(|d| d.microphone.recording()).map(|d| d.microphone.peak() as f32 / 255.0);
+                let (control, _) = microphone_control(ui, &mut m.enabled, &mut m.muted, level);
+                control.on_hover_text(crate::i18n::tr(if cfg!(target_os = "linux") { "Requires Bluetooth and working PipeWire audio or an active virtual DualSense controller" } else { "Requires Bluetooth and an active virtual DualSense controller" }));
                 if m.enabled {
                     row(
                         ui,
@@ -310,12 +307,6 @@ impl App {
                                 ],
                             );
                         },
-                    );
-                    toggle_row(
-                        ui,
-                        crate::i18n::tr("Mute microphone"),
-                        crate::i18n::tr("Send silence to recording apps"),
-                        &mut m.muted,
                     );
                     toggle_row(ui, crate::i18n::tr("Mute button"), crate::i18n::tr("The controller's Mute button mutes recording; its LED shows the mute state"), &mut m.mute_button);
                     slider_row(

@@ -276,10 +276,8 @@ impl App {
             cols[0].spacing_mut().slider_width = (cols[0].available_width() - 75.0).clamp(60.0, 200.0);
             cols[0].add(egui::Slider::new(&mut p.haptics.speaker_volume, 0..=100).suffix("%"));
             cols[1].label(RichText::new(tr("Microphone")).strong());
-            cols[1].horizontal(|ui| {
-                ui.checkbox(&mut p.microphone.enabled, tr("Enabled")).on_hover_text(tr("Permission and mute above belong to the edited profile."));
-                ui.checkbox(&mut p.microphone.muted, tr("Mute")).on_hover_text(tr("Mute microphone"));
-            });
+            let level = dev.filter(|d| d.microphone.recording()).map(|d| d.microphone.peak() as f32 / 255.0);
+            widgets::microphone_control(&mut cols[1], &mut p.microphone.enabled, &mut p.microphone.muted, level);
             let status = tr(self.microphone_status(dev));
             cols[1].add(egui::Label::new(RichText::new(status).size(11.0).color(muted_color())).truncate()).on_hover_text(status);
             cols[2].label(RichText::new(tr("Virtual controller")).strong()).on_hover_text(tr("Requested virtual output"));
@@ -327,8 +325,8 @@ impl App {
                 if let Some(d) = dev {
                     if let Some(error) = &*d.native_audio_error.lock() { cols[0].add(egui::Label::new(RichText::new(error).color(muted_color())).truncate()).on_hover_text(error); }
                 }
-                widgets::toggle_row(&mut cols[1], tr("Enable microphone"), "", &mut p.microphone.enabled);
-                widgets::toggle_row(&mut cols[1], tr("Mute"), "", &mut p.microphone.muted);
+                let level = dev.filter(|d| d.microphone.recording()).map(|d| d.microphone.peak() as f32 / 255.0);
+                widgets::microphone_control(&mut cols[1], &mut p.microphone.enabled, &mut p.microphone.muted, level);
                 choice(&mut cols[1], &mut p.microphone.source, &[(MicrophoneSource::Auto, "Auto"), (MicrophoneSource::BuiltIn, "Built-in"), (MicrophoneSource::Headset, "Headset")]);
                 widgets::slider_row(&mut cols[1], tr("Microphone gain"), "", &mut p.microphone.gain_percent, 0..=200, "%");
                 widgets::toggle_row(&mut cols[1], tr("Mute button"), "", &mut p.microphone.mute_button);

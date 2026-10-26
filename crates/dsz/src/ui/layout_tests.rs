@@ -160,7 +160,11 @@ fn audio_columns_align_when_one_heading_wraps() {
         egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr(value) => Some(t), _ => None,
     }).expect("audio text rendered");
     assert!(!text("Controller speaker / headset").galley.job.justify, "audio heading stretches its word spacing");
-    assert!((text("Bluetooth audio stream").pos.y - text("Enable microphone").pos.y).abs() < 1.0, "first audio controls must align below headings of different heights");
+    let stream = text("Bluetooth audio stream");
+    let microphone = text("Disabled");
+    let stream_center = stream.pos.y + stream.galley.size().y * 0.5;
+    let microphone_center = microphone.pos.y + microphone.galley.size().y * 0.5;
+    assert!((stream_center - microphone_center).abs() < 8.0, "first audio controls must align below headings of different heights");
     drop(app);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -189,4 +193,35 @@ fn setting_rows_keep_independent_click_targets() {
         });
     }
     assert_eq!(values, [false, true, false]);
+}
+
+#[test]
+fn microphone_control_keeps_capture_and_mute_independent() {
+    for (initial_enabled, initial_muted) in [(false, false), (false, true), (true, false), (true, true)] {
+        for power in [false, true] {
+            let ctx = egui::Context::default();
+            theme::install(&ctx, 1.0);
+            let (mut enabled, mut muted) = (initial_enabled, initial_muted);
+            let mut target = egui::Pos2::ZERO;
+            for frame in 0..4 {
+                let events = match frame {
+                    2 => vec![egui::Event::PointerMoved(target), egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+                    3 => vec![egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+                    _ => Vec::new(),
+                };
+                let _ = ctx.run(egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(240.0, 120.0))), ..Default::default() }, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let bounds = ui.available_rect_before_wrap();
+                        let (main, toggle) = widgets::microphone_control(ui, &mut enabled, &mut muted, None);
+                        target = if power { toggle.rect.center() } else { main.rect.center() };
+                        assert!(main.rect.right() <= toggle.rect.left(), "microphone click targets overlap");
+                        assert!(toggle.rect.right() <= bounds.right() + 1.0);
+                    });
+                });
+            }
+            let expected = if power { (!initial_enabled, initial_muted) }
+                else if initial_enabled { (true, !initial_muted) } else { (true, initial_muted) };
+            assert_eq!((enabled, muted), expected, "power={power}, initial=({initial_enabled},{initial_muted})");
+        }
+    }
 }
