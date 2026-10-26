@@ -83,8 +83,6 @@ pub struct App {
     engine: Arc<Engine>,
     page: Page,
     detailed: bool,
-    controller_route: (Page, bool),
-    audio_detailed: bool,
     part: workspace::Part,
     trigger_side: workspace::Side,
     selected_button: ds_proto::input::Button,
@@ -189,10 +187,9 @@ impl App {
                     .into_iter()
                     .find(|p| p.key().to_ascii_lowercase().starts_with(&n))
             })
-            .unwrap_or(Page::Lighting);
+            .unwrap_or(Page::Overview);
         let detailed = args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1))
-            .is_none_or(|name| !name.eq_ignore_ascii_case("workspace") && !name.eq_ignore_ascii_case("audio"));
-        let controller_route = if matches!(page, Page::Haptics | Page::Profiles | Page::Settings) { (Page::Lighting, true) } else { (page, detailed) };
+            .is_some_and(|name| !name.eq_ignore_ascii_case("workspace") && !name.eq_ignore_ascii_case("audio"));
         let edit_pin = args
             .iter()
             .position(|a| a == "--edit")
@@ -211,8 +208,6 @@ impl App {
             engine,
             page,
             detailed,
-            controller_route,
-            audio_detailed: page == Page::Haptics && detailed,
             part,
             trigger_side: workspace::Side::Both,
             selected_button: ds_proto::input::Button::Cross,

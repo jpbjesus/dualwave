@@ -16,8 +16,6 @@ fn mark(ui: &mut egui::Ui) {
 impl App {
     pub(super) fn workspace_navigation(&mut self, ui: &mut egui::Ui) {
         let current = match self.page { Page::Haptics => 1, Page::Profiles => 2, Page::Settings => 3, _ => 0 };
-        if current == 0 { self.controller_route = (self.page, self.detailed); }
-        if current == 1 { self.audio_detailed = self.detailed; }
         ui.horizontal_wrapped(|ui| {
             mark(ui);
             ui.label(RichText::new("DualWave").font(heading(24.0)).color(text_color()));
@@ -25,8 +23,8 @@ impl App {
             let mut destination = current;
             if choice(ui, &mut destination, &[(0, "Controller"), (1, "Audio"), (2, "Profiles"), (3, "Preferences")]) {
                 let (page, detailed) = match destination {
-                    0 => self.controller_route,
-                    1 => (Page::Haptics, self.audio_detailed),
+                    0 => (Page::Overview, false),
+                    1 => (Page::Haptics, false),
                     2 => (Page::Profiles, false),
                     _ => (Page::Settings, false),
                 };
@@ -44,9 +42,10 @@ impl App {
             &[((Page::Haptics, false), "Playback & microphone"), ((Page::Haptics, true), "Haptics & audio")]
         } else {
             &[
+                ((Page::Overview, false), "Visual workspace"),
                 ((Page::Lighting, true), "Lighting"), ((Page::Triggers, true), "Triggers"),
                 ((Page::Input, true), "Motion"), ((Page::Mappings, true), "Buttons"),
-                ((Page::Virtual, true), "Virtual controller"), ((Page::Overview, false), "Preview"),
+                ((Page::Virtual, true), "Virtual controller"),
                 ((Page::Overview, true), "Device status"),
             ]
         };

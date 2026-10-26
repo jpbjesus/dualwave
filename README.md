@@ -76,11 +76,13 @@ when enabled in the profile.
 
 The main navigation groups related tasks into **Controller**, **Audio**,
 **Profiles** and **Preferences**. Complete configuration pages are accessible
-through visible tabs, without an Advanced menu. Controller opens directly in
-Lighting; triggers, motion, mappings and virtual output sit alongside it. Preview
-retains the controller drawing and quick controls; Device status contains live
-information. Audio separates Playback & microphone from Haptics & audio. Each
-work area remembers its last view for the current application session.
+through visible tabs, without an Advanced menu. Controller opens in the visual
+workspace, with the controller drawing, contextual inspectors and quick controls.
+Lighting, triggers, motion, mappings and virtual output remain directly
+accessible. Click Controller or Visual workspace to return to the visual view
+from any editor. Device status contains live information. Audio separates
+Playback & microphone from Haptics & audio; clicking Audio returns to playback
+and microphone controls.
 
 | Controller and lighting | Audio and microphone |
 | --- | --- |

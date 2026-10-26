@@ -230,7 +230,7 @@ fn microphone_control_keeps_capture_and_mute_independent() {
 fn controller_editors_are_visible_without_an_advanced_menu() {
     let dir = std::env::temp_dir().join(format!("dualwave-navigation-layout-{}", std::process::id()));
     let mut app = App::new(Engine::new(dir.clone()));
-    assert_eq!(app.page, Page::Lighting, "the main controller view should open a complete editor");
+    assert_eq!((app.page, app.detailed), (Page::Overview, false), "startup must show the visual controller workspace");
     let ctx = egui::Context::default();
     theme::install(&ctx, 1.0);
     let output = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 520.0))), ..Default::default() }, |ctx| {
@@ -245,7 +245,7 @@ fn controller_editors_are_visible_without_an_advanced_menu() {
 }
 
 #[test]
-fn work_areas_remember_the_last_configuration_view() {
+fn main_navigation_returns_to_the_visual_workspaces() {
     fn render(app: &mut App, ctx: &egui::Context, events: Vec<egui::Event>) -> egui::FullOutput {
         ctx.run(egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 520.0))), ..Default::default() }, |ctx| {
             egui::TopBottomPanel::top("navigation").show(ctx, |ui| app.workspace_navigation(ui));
@@ -272,9 +272,12 @@ fn work_areas_remember_the_last_configuration_view() {
     click(&mut app, &ctx, "Haptics & audio");
     assert_eq!((app.page, app.detailed), (Page::Haptics, true));
     click(&mut app, &ctx, "Controller");
-    assert_eq!((app.page, app.detailed), (Page::Input, true));
+    assert_eq!((app.page, app.detailed), (Page::Overview, false));
+    click(&mut app, &ctx, "Motion");
+    click(&mut app, &ctx, "Visual workspace");
+    assert_eq!((app.page, app.detailed), (Page::Overview, false));
     click(&mut app, &ctx, "Audio");
-    assert_eq!((app.page, app.detailed), (Page::Haptics, true));
+    assert_eq!((app.page, app.detailed), (Page::Haptics, false));
     drop(app);
     let _ = std::fs::remove_dir_all(dir);
 }

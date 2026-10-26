@@ -133,8 +133,8 @@ impl App {
             }
             if button(ui, crate::i18n::tr("Edit")).clicked() {
                 self.edit_pin = Some(prof.name.clone());
-                self.page = crate::ui::Page::Lighting;
-                self.detailed = true;
+                self.page = crate::ui::Page::Overview;
+                self.detailed = false;
             }
             ui.menu_button(crate::i18n::tr("More ▾"), |ui| {
                 if ui.button(crate::i18n::tr("Duplicate")).clicked() {
@@ -236,8 +236,8 @@ impl App {
                 let n = engine.profiles.copy_as(&active, name);
                 self.new_profile.clear();
                 self.edit_pin = Some(n);
-                self.page = crate::ui::Page::Lighting;
-                self.detailed = true;
+                self.page = crate::ui::Page::Overview;
+                self.detailed = false;
             }
             ui.menu_button(crate::i18n::tr("Manage profiles"), |ui| {
                 if button(ui, crate::i18n::tr("Import profile…")).clicked() {
