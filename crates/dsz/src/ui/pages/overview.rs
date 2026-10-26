@@ -50,8 +50,7 @@ impl App {
         page_header(
             ui,
             &name,
-            &crate::localized_format!(
-                "{} over {}  ·  profile \"{}\"", "{} por {}  ·  perfil \"{}\""; "{} por {}  ·  perfil \"{}\"",
+            &crate::localized_format!("{} over {}  ·  profile \"{}\"", "{} por {}  ·  perfil \"{}\"", "{} por {}  ·  perfil \"{}\""; "{} por {}  ·  perfil \"{}\"",
                 d.model.name(),
                 if d.is_bluetooth() { "Bluetooth" } else { "USB" },
                 self.engine.profile_name_for(d)
@@ -180,7 +179,7 @@ impl App {
                     stat(
                         ui,
                         crate::i18n::tr("Haptic stream"),
-                        crate::localized_format!("{} packets/s", "{} pacotes/s"; "{} pacotes/s", s.stream_hz.load(Ordering::Relaxed)),
+                        crate::localized_format!("{} packets/s", "{} pacotes/s", "{} paquetes/s"; "{} pacotes/s", s.stream_hz.load(Ordering::Relaxed)),
                     );
                 }
                 stat(
@@ -196,8 +195,7 @@ impl App {
                 stat(
                     ui,
                     crate::i18n::tr("Recovered errors"),
-                    RichText::new(crate::localized_format!(
-                        "{} write · {} CRC", "{} envios · {} CRC"; "{} envios · {} CRC",
+                    RichText::new(crate::localized_format!("{} write · {} CRC", "{} envios · {} CRC", "{} envío · {} CRC"; "{} envios · {} CRC",
                         s.write_errors.load(Ordering::Relaxed),
                         s.crc_errors.load(Ordering::Relaxed)
                     ))

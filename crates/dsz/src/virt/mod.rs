@@ -611,8 +611,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
                         match engine.pads.create(want, &mac, Some(device)) {
                             Ok(p) => {
                                 attach(device, &p);
-                                engine.toast(crate::localized_format!(
-                                    "Virtual {} controller connected ({})", "Controle virtual {} conectado ({})"; "Comando virtual {} ligado ({})",
+                                engine.toast(crate::localized_format!("Virtual {} controller connected ({})", "Controle virtual {} conectado ({})", "Mando virtual {} conectado ({})"; "Comando virtual {} ligado ({})",
                                     p.kind().label(),
                                     p.target.backend()
                                 ));

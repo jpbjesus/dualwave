@@ -270,7 +270,7 @@ impl Engine {
         let n = names.len() as i32;
         let next = names[((i + delta).rem_euclid(n)) as usize].clone();
         self.set_device_profile(device, &next);
-        self.toast(crate::localized_format!("Profile: {next}", "Perfil: {next}"; "Perfil: {next}"));
+        self.toast(crate::localized_format!("Profile: {next}", "Perfil: {next}", "Perfil: {next}"; "Perfil: {next}"));
         device.identify_light();
     }
 
@@ -300,8 +300,7 @@ impl Engine {
             self.settings_dirty.store(true, Ordering::Release);
         }
         self.devices.write().push(d.clone());
-        self.toast(crate::localized_format!(
-            "{} connected ({})", "{} conectado ({})"; "{} ligado ({})",
+        self.toast(crate::localized_format!("{} connected ({})", "{} conectado ({})", "{} conectado ({})"; "{} ligado ({})",
             d.model.name(),
             if d.is_bluetooth() { "Bluetooth" } else { "USB" }
         ));
@@ -312,7 +311,7 @@ impl Engine {
         if let Some(i) = v.iter().position(|d| d.id == id) {
             let d = v.remove(i);
             drop(v);
-            self.toast(crate::localized_format!("{} disconnected", "{} desconectado"; "{} desligado", d.model.name()));
+            self.toast(crate::localized_format!("{} disconnected", "{} desconectado", "{} desconectado"; "{} desligado", d.model.name()));
         }
     }
 
@@ -326,8 +325,7 @@ impl Engine {
         entry.0 = Instant::now();
         entry.1 += 1;
         if entry.1 == 1 {
-            self.warn_toast(crate::localized_format!(
-                "Couldn't open a controller ({e}). Another controller app or Steam Input may be holding it.", "Não foi possível abrir o controle ({e}). Outro aplicativo ou o Steam Input pode estar usando-o."; "Não foi possível abrir o comando ({e}). Outra aplicação ou o Steam Input pode estar a utilizá-lo."
+            self.warn_toast(crate::localized_format!("Couldn't open a controller ({e}). Another controller app or Steam Input may be holding it.", "Não foi possível abrir o controle ({e}). Outro aplicativo ou o Steam Input pode estar usando-o.", "No se pudo abrir el mando ({e}). Puede que otra aplicación o Steam Input lo esté usando."; "Não foi possível abrir o comando ({e}). Outra aplicação ou o Steam Input pode estar a utilizá-lo."
             ));
         }
     }

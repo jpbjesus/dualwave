@@ -13,14 +13,14 @@ fn presets() -> Vec<(&'static str, TriggerEffect)> {
     vec![
         (crate::i18n::tr("Off"), TriggerEffect::Off),
         (
-            crate::i18n::tr("Light"),
+            crate::i18n::tr("Gentle"),
             TriggerEffect::Feedback {
                 position: 1,
                 strength: 2,
             },
         ),
         (
-            crate::i18n::tr("Heavy"),
+            crate::i18n::tr("Strong"),
             TriggerEffect::Feedback {
                 position: 0,
                 strength: 7,

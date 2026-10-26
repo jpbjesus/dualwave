@@ -3,237 +3,266 @@
 </p>
 
 <h1 align="center">DualWave</h1>
-<p align="center">Your DualSense. Your controls. Your sound.</p>
+<p align="center">Native Linux configuration and Bluetooth audio for DualSense controllers</p>
 <p align="center">
-  Bluetooth headset audio · Microphone · Adaptive triggers · Controller profiles
-</p>
-<p align="center">
-  <a href="#getting-started">Getting started</a> ·
-  <a href="#inside-the-app">Screenshots</a> ·
+  <a href="#getting-started">Installation</a> ·
   <a href="#features">Features</a> ·
+  <a href="#inside-the-app">Screenshots</a> ·
+  <a href="#distribution">Distribution</a> ·
   <a href="#building">Build</a> ·
-  <a href="https://github.com/jpbjesus/dualwave/issues">Report an issue</a>
+  <a href="https://github.com/jpbjesus/dualwave/issues">Issues</a>
 </p>
 
 ![DualWave controller workspace](.github/screenshots/controller.png)
 
-DualWave puts your DualSense at the centre of your setup. Shape its lighting,
-feel the resistance of adaptive triggers, map controls to the way you play, and
-bring headphone audio and microphone capture to the controller's 3.5 mm jack
-over Bluetooth. Keep separate profiles for games and switch between them in one
-native desktop application.
+DualWave is a native desktop application for configuring DualSense and DualSense
+Edge controllers on Linux. It provides adaptive trigger effects, lightbar
+configuration, input mappings, motion controls, virtual controllers and profiles.
+For a standard DualSense connected over Bluetooth, it also provides headphone
+playback and microphone capture through PipeWire.
 
-**Explore visually, fine-tune when needed.** Select a region of the controller
-for quick adjustments, or open a dedicated editor for the full set of controls.
-Playback, microphone and virtual output stay within reach in the workspace.
+The project is an independent fork of [DSZ](https://github.com/MaximumFreak/dsz).
+The current source integrates the DSZ 0.4.1 additions: directional stick reach,
+touchpad-zone activation for the gyroscope and Spanish translations. DualWave
+retains its Linux backends, interface and European Portuguese translations.
 
-An independent fork of [DSZ](https://github.com/MaximumFreak/dsz), with a new
-identity and native Linux integration. This is a **development preview**;
-platform requirements and the distinction between implemented and
-hardware-validated features are documented under [Compatibility](#compatibility).
+**Status:** alpha. Availability in the interface does not imply validation on
+every controller, firmware, Bluetooth adapter or game. See
+[Compatibility](#compatibility) for the tested paths and current limitations.
+The latest published package may precede changes shown in this source README;
+consult its release notes before downloading.
 
 ## Features
 
-| Make it yours | What you can configure |
+| Feature | Configuration |
 | --- | --- |
-| **Light and colour** | Lightbar effects, custom colours, brightness, player indicators and mute LED behaviour |
-| **Adaptive triggers** | Independent L2/R2 effects, resistance presets, firing points, vibration and per-zone settings |
-| **Headphone audio** | Bluetooth stereo playback through the 3.5 mm jack, output routing and volume |
-| **Microphone** | Automatic, built-in or headset source; gain, capture permission, mute and the physical Mute button |
-| **Haptics** | Audio-driven feedback, system audio, button clicks, trigger texture and rumble conversion |
-| **Buttons and gestures** | Keyboard, mouse and controller actions; combinations, long press and double tap |
-| **Motion and touch** | Gyro aiming, mouse control, touchpad behaviour and stick modes |
-| **Virtual output** | Xbox 360, DualSense and DualShock 4 controller targets |
-| **Profiles for games** | Detected-game association (excluding DualWave itself, including its AppImage), start-time priority, visible selection reasons, session-aware manual choices, import/export and automatic game rules |
-| **Emulator and mod integration** | DSU motion server and local UDP mod API |
-| **A personal workspace** | Direct selection of triggers, lighting and buttons on the controller preview; vector trigger, PlayStation and mute marks in selectors; English, Português (Portugal), Português (Brasil), light/dark/system themes and reduced motion |
-| **Everyday convenience** | Desktop tray, startup preferences, device naming and complete settings backups |
-| **Recovery and diagnostics** | Automatic media-channel retries, audio endpoint recovery, live connection checks and a sanitized diagnostic report |
+| Lighting | Static and animated lightbar effects, audio response, brightness, player LEDs and mute indicator |
+| Adaptive triggers | Independent L2/R2 resistance, release points, vibration and per-zone effects |
+| Headphone audio | Bluetooth stereo playback through the 3.5 mm jack, routing and volume |
+| Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
+| Haptics | Game and system audio, button feedback, trigger texture and rumble conversion |
+| Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons |
+| Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third |
+| Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
+| Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP |
+| Profiles and games | Executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
+| Integrations | Local DSU motion server and UDP mod API |
+| Interface | Direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
+| Desktop integration | Tray, startup preferences and device naming |
+| Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report |
 
 ## Inside the app
 
-### The controller workspace
+### Controller workspace
 
-The controller drawing is interactive: select lighting, a trigger or a button to
-open its contextual controls. The adjacent selector also gives direct access to
-motion. Quick controls keep playback volume, microphone state and virtual output
-available below the preview.
+Select a trigger, touchpad or face button in the preview to open its controls.
+L2/R2 are separated from the shoulder buttons; the PlayStation symbol is drawn
+as an outline. The adjacent tabs provide lighting, trigger, button and motion
+controls. Playback volume, microphone state and virtual output are below the
+preview.
 
-Icon-labelled navigation keeps **Controller**, **Audio**, **Profiles** and
-**Preferences** recognisable alongside their text labels. **Controller** always
-returns to **Workspace**. Dedicated
-**Lighting**, **Triggers**, **Motion**, **Buttons**, **Virtual controller** and
-**Device status** tabs give access to complete editors without a hidden advanced
-mode.
+The main navigation contains **Controller**, **Audio**, **Profiles** and
+**Preferences**. Controller tabs provide access to the complete editors and
+connection diagnostics.
 
-### Lighting, from a colour to a complete effect
+### Lighting
 
-Choose a static colour, breathing or rainbow animation, or turn the lightbar off.
-The full editor adds effects such as strobe, battery and audio response, together
-with player LED and mute indicator settings. The preview reflects the edited
-profile's lightbar settings.
+The workspace provides static, breathing and rainbow effects. The full editor
+adds strobe, battery and audio response, player LEDs and mute indicator settings.
+The preview reflects the profile being edited.
 
 ![Lighting effects and LED configuration](.github/screenshots/lighting.png)
 
-### Triggers with a distinct feel
+### Adaptive triggers
 
-Start with visual resistance presets, apply an effect to one trigger or both,
-and fine-tune firing points and force in the full editor. A visual simulation
-lets you inspect the preview without sending a test effect to the controller.
+Configure one trigger or both using resistance presets, firing points, vibration
+and per-zone parameters. The workspace simulation changes the preview only; it
+does not transmit an effect to the controller.
 
-![Independent adaptive trigger effect editors](.github/screenshots/triggers.png)
+![Independent adaptive trigger editors](.github/screenshots/triggers.png)
 
-### Buttons, motion and touch
+### Button mappings
 
-Map a press, long press or double tap to keyboard, mouse or controller actions.
-Use combinations for additional controls, choose whether to suppress the original
-virtual button, and keep custom actions in the profile.
+Assign press, long-press and double-tap gestures to keyboard, mouse or controller
+actions. Combinations and timing are configured in the full editor. An individual
+mapping can suppress its original virtual button.
 
-![Button mappings and gesture configuration](.github/screenshots/buttons.png)
+![Button actions, gestures and vector symbols](.github/screenshots/buttons.png)
 
-Configure gyro behaviour, touchpad interaction and stick modes in the motion
-editor. Quick mouse and game controls are also available beside the visual
-controller preview.
+### Motion and touchpad activation
 
-![Gyro, touchpad and stick configuration](.github/screenshots/motion.png)
+Configure gyro aiming, touchpad interaction and stick modes in **Motion**.
+Gyroscope activation supports a held button, an unheld button, a toggle, or touch
+within the left, centre or right third of the touchpad. **While touching** requires
+finger contact only; it does not require pressing the touchpad.
 
-### Playback and microphone, together
+![Gyroscope activation and touchpad configuration](.github/screenshots/motion.png)
 
-**Audio** opens the playback and microphone workspace. Set output volume, select
-a microphone source and adjust gain. The microphone control combines capture
-permission, mute state and an actual recording level in one place. Its separate
-power control disables capture without discarding the saved mute state.
+### Directional stick reach
 
-Recording is disabled by default. Enabling capture allows a recording application
-to use it; it does not save a recording. The level indicator follows actual
-samples only while an application is recording. The physical Mute button can
-control recording when enabled in the profile.
+The **Sticks** section of **Motion** provides a separate 16-direction reach curve
+for each stick. Calibration measures the outer range during three complete
+rotations and presents a proposal for review. Apply accepts it; Discard retains
+the existing configuration. Missing measurements retain their existing gains.
 
-Open **Haptics & audio** for the full audio and feedback editor. Clicking **Audio**
-returns to playback and microphone controls.
+Reach adjustment is disabled by default. When enabled, it applies after axis
+inversion and before the existing deadzone processing, only to passthrough stick
+input sent to a virtual controller. Mouse, scroll and keyboard stick modes retain
+their existing behaviour. An offline preview displays the editor but cannot
+measure a physical controller.
 
-![Playback volume, microphone source and capture controls](.github/screenshots/audio.png)
+![Directional stick reach editor without a connected controller](.github/screenshots/stick-reach.png)
 
-### Audio you can feel
+### Playback and microphone
 
-Use audio as haptic feedback, adjust rumble conversion, and configure button
-clicks and trigger texture. The full editor brings playback routing and haptic
-sources together with the feedback controls.
+**Audio** opens playback and microphone controls. Select a microphone source,
+adjust gain and manage capture permission separately from mute. Disabling
+capture preserves the saved mute state.
 
-![Haptic sources and full audio configuration](.github/screenshots/haptics.png)
+Capture is disabled by default. Enabling it makes the source available to a
+recording application; DualWave does not save recordings. The level indicator
+uses microphone samples only while an application is recording. The physical
+Mute button can control recording when enabled in the profile.
 
-### Profiles that follow the game
+![Playback and microphone configuration](.github/screenshots/audio.png)
 
-Keep a different configuration for each game or play style. Create profiles from
-existing ones, duplicate them, rename them, or exchange them through import and
-export. Game rules can select a profile automatically, including process
-discovery for Wine/Proton games.
+### Haptic feedback
 
-Choosing a profile to edit does not silently apply it to a connected controller.
-Edits are saved automatically; profile names remain independent of the interface
-language. **Backup & restore** exports application settings and profiles together.
+**Haptics & audio** provides playback routing, audio-derived haptics, rumble
+conversion, button feedback and trigger texture settings.
 
-![Profile management and access to game rules](.github/screenshots/profiles.png)
+![Haptic sources and audio routing](.github/screenshots/haptics.png)
 
-### Associate a game, understand the active profile
+### Virtual controllers
 
-Open **Profiles → Game profiles** to see detected games and select a profile
-beside each executable. Steam installations and resolved Wine/Proton game
-executables use the existing native process discovery. You can also add any
-running application or browse for a program. Associating an existing executable
-updates and enables its rule without creating duplicate rules.
+Select an Xbox 360, DualSense or DualShock 4 target in **Virtual controller**.
+Mappings and stick calibration apply to virtual output. The page reports the
+requested target separately from the active device and provides host-support
+configuration. Game and host-attachment validation remains pending.
 
-Detection on this page works with **Switch automatically** turned off; configuring
-a rule does not enable switching. When automatic selection is enabled, the most
-recently started matched game takes priority. Closing it returns to the next
-eligible running game, or to the controller's assigned profile.
+![Virtual controller configuration without an attached controller](.github/screenshots/virtual.png)
 
-The Workspace heading shows the profile and selection reason: a game rule,
-native DualSense support, fallback controller, manual choice or assigned profile.
-Click this indicator to open game profiles directly.
+### Profiles and automatic selection
 
-A manual profile choice takes priority for that game session, including when its
-first detection is still in progress. Separate manual choices remain respected
-when several games run. Closing those process instances clears the pause;
-launching the game again permits automatic selection again. A rule pointing to a
-missing profile is not applied.
+Create, duplicate, rename, import and export profiles. Selecting a profile for
+editing does not apply it to a connected controller; edits are saved
+automatically. **Backup & restore** exports settings and profiles together.
+Profile names and saved identifiers are independent of the interface language.
 
-![Example executable-to-profile rules with no games running](.github/screenshots/game-profiles.png)
+![Profile management](.github/screenshots/profiles.png)
 
-These example associations illustrate configuration; they do not claim live
-Steam/Proton or individual game validation. Real games and multiple-game sessions
-still need broader end-to-end testing.
+**Profiles → Game profiles** lists detected games and executable associations,
+including resolved Wine/Proton executables. Add a running application or browse
+for an executable to configure a rule. Association does not enable automatic
+switching by itself.
 
-### Connection diagnostics and recovery
+When automatic switching is enabled, the most recently started eligible game
+takes priority. Closing it returns to the next eligible game or the assigned
+profile. A manual profile choice takes priority for the affected game session,
+including detection already in progress. Closing those process instances clears
+the manual override. Rules targeting missing profiles are not applied.
 
-Open **Controller → Device status** to inspect the physical connection,
-Bluetooth audio support, playback and microphone endpoints, virtual output and
-applied profile. States distinguish availability from active use; an offline
-controller does not produce a successful system check.
+DualWave excludes its own executable and AppImage from native DualSense-game
+detection, including previously cached positive results. Selection reasons are
+available in the profile header.
 
-**Reconnect audio** queues endpoint recreation on the existing audio worker.
-It does not enable microphone capture or remove mute. **Copy diagnostic report**
-exports a short technical summary to the clipboard, excluding device addresses,
-paths, profile names, raw error messages and audio samples. Audio and virtual
-controller settings are accessible directly from this page.
+![Executable-to-profile associations with no games running](.github/screenshots/game-profiles.png)
 
-Discovery retires a stale controller session after two consecutive missing-node
-checks, so a returning controller can be opened again with its assigned profile.
-The isolated media channel is retried locally if it disappears or its permissions
-arrive late. PipeWire endpoint recovery also runs automatically when the audio
-server disconnects. A recreated endpoint may need to be selected again in an
-audio application; recovery does not pair or power on a controller.
+### Connection diagnostics
 
-If the required media driver is unavailable, diagnostics offers the AppImage's
-explicit system setup action. A reboot remains necessary after driver setup.
-Detailed controller statistics and pairing help remain available in an expandable
-section below the diagnostics.
+**Controller → Device status** displays physical connection, Bluetooth media
+support, playback and microphone endpoints, virtual output and applied profile.
+Availability and active use are reported separately.
 
-![Connection diagnostics with no controller connected](.github/screenshots/diagnostics.png)
+**Reconnect audio** requests endpoint recreation without enabling microphone
+capture or changing mute. Automatic recovery handles stale controller sessions,
+media-channel loss and PipeWire server disconnection. Audio applications may
+need to select a recreated endpoint again. Recovery does not pair or power on a
+controller.
 
-### Preferences with a place for everything
+**Copy diagnostic report** copies a technical summary without device addresses,
+paths, profile names, raw error messages or audio samples. If media support is
+missing, the AppImage's system setup remains an explicit action; a reboot is
+required after installing the driver.
 
-Appearance, language, startup behaviour, controller settings, integrations and
-backups have their own categories. Choose a theme, adjust interface size or
-reduce motion without changing your controller profiles.
+![Connection diagnostics without a connected controller](.github/screenshots/diagnostics.png)
+
+### Preferences and languages
+
+Preferences groups appearance, language, startup, controller settings,
+integrations, backups and logs. English, Portuguese (Portugal), Portuguese
+(Brazil) and Spanish are available. Changing language does not rename profiles
+or change saved controller settings.
 
 ![Appearance and language preferences](.github/screenshots/preferences.png)
 
-Screenshots show the native application with isolated example profiles and no
-controller connected. They illustrate configuration, not a live hardware test.
+![Controller workspace in Spanish](.github/screenshots/spanish.png)
+
+These captures are generated from the native debug application with isolated
+example settings and no controller connected. They document the interface and
+are not evidence of hardware validation. Calibration cannot be performed from
+an offline preview.
 
 ## Getting started
 
-### Open the application
+Download the AppImage and its SHA-256 manifest from
+[Releases](https://github.com/jpbjesus/dualwave/releases). Verify the checksum,
+make the file executable and run it:
 
-Download the AppImage and SHA-256 manifest from
-[Releases](https://github.com/jpbjesus/dualwave/releases). The latest release,
-[v0.4.0-alpha.2](https://github.com/jpbjesus/dualwave/releases/tag/v0.4.0-alpha.2),
-is an alpha preview. You can also build from source using the
-[instructions below](#building).
+```sh
+sha256sum -c DualWave-x86_64.AppImage.sha256
+chmod +x DualWave-x86_64.AppImage
+./DualWave-x86_64.AppImage
+```
 
-1. On a supported Linux system, make `DualWave-x86_64.AppImage` executable and open it.
-2. On CachyOS, accept the first-run system configuration if requested. One administrator
-   authorization installs the bundled DKMS/device support and missing kernel
-   headers. The desktop needs `kdialog` and `polkit` for this setup.
-3. Reboot once after system configuration, reconnect the controller over
-   Bluetooth, and open DualWave again.
-4. Plug in the headset **before starting playback**, open **Audio**, and choose
-   **DualWave Headphones** as the output in your desktop or application's sound
-   settings.
-5. To record, explicitly enable the microphone in DualWave and select
+1. On CachyOS, complete the first-run system setup when requested. Administrator
+   authorization installs the bundled DKMS/device support and matching kernel
+   headers. This step requires `kdialog` and `polkit`.
+2. Reboot after installing system support, then reconnect the controller over
+   Bluetooth and open DualWave.
+3. Connect headphones before starting playback. Select **DualWave Headphones**
+   in the desktop or application's audio output settings.
+4. To record, enable microphone capture in DualWave and select
    **DualWave Microphone** in the recording application.
 
-Everyday use runs as your normal user. System configuration is separate from
-launching the application; DKMS handles rebuilds when the kernel changes.
-Automatic first-run configuration currently targets CachyOS.
+Normal operation runs as the desktop user. System installation is separate from
+application startup. Automatic system setup currently targets CachyOS.
+
+## Distribution
+
+| Format | Status | Scope |
+| --- | --- | --- |
+| AppImage | Published for Linux x86_64 | GUI, audio CLI, userspace libraries and source-only host-support package |
+| Native binary archive | Planned; not published | GUI and CLI with a dependency manifest, checksums and separate host-setup instructions |
+| Flatpak | Under evaluation; no package or Flatpak repository is provided | Requires validation of HID access, uinput, process discovery, PipeWire and communication with the host USB/IP broker |
+| `curl` download | Available for published release assets | Downloads the AppImage and checksum; installation script is planned separately |
+
+Example download for the published alpha.2 release:
+
+```sh
+release=v0.4.0-alpha.2
+release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
+curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
+curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
+sha256sum -c DualWave-x86_64.AppImage.sha256
+chmod +x DualWave-x86_64.AppImage
+```
+
+Planned native archives should separate userspace installation from privileged
+host configuration. A future installation script should support an explicit
+version, checksum verification, installation in a user-owned directory and
+removal. It should not silently modify kernel modules or system permissions.
+
+Flatpak packaging cannot replace host driver or USB/IP support. Before release,
+each feature needs a documented permission model and testing outside the
+sandbox. Features unavailable in that environment must be reported explicitly.
+No installation script or Flatpak package is supplied by this source revision.
 
 ## Compatibility
 
 The current native port targets Linux with PipeWire. CachyOS is the primary
 integration environment; automatic system setup is currently specific to it.
-The presentation above describes the application, while the details below record
-which paths have actually been tested.
+The following table distinguishes available code from hardware validation.
 
 <details>
 <summary>Implementation and hardware validation by feature</summary>
@@ -250,7 +279,8 @@ controller, Bluetooth adapter or game has been tested.
 | Bluetooth headphone audio | Stereo through the jack, speaker/headset routing, hardware volume and PipeWire playback endpoint | Earlier CLI/filter confirmed on standard DualSense, firmware 6.30; current GUI/isolation path needs validation |
 | Bluetooth microphone | Built-in/headset/automatic source, gain, mute, physical Mute button and PipeWire recording endpoint | Earlier CLI/filter confirmed; current integrated path needs validation |
 | Haptics | Game audio, system audio, button clicks, trigger texture and rumble conversion | Original encoder/core retained; Linux integration needs hardware checks |
-| Mappings and motion | Keys, mouse, controller buttons, combinations, long press, double tap, gyro, touchpad and stick modes | Native uinput backend implemented; hardware validation pending |
+| Mappings and motion | Keys, mouse, controller buttons, gestures, gyro activation by touchpad zone, touchpad and stick modes | Native uinput backend implemented; hardware validation pending |
+| Directional stick reach | Independent 16-direction gains, guided calibration and virtual-output preview; disabled by default | Exhaustive neutral-position checks, saved-profile round trips and unchanged-report fixture; physical calibration validation pending |
 | Virtual controllers | Xbox 360, DualSense and DualShock 4 over native Linux USB/IP, with scoped privileged broker | Host attachment and game compatibility validation pending |
 | Exclusive physical input | Scoped evdev grabs and kernel raw-state redirection; device nodes remain visible | Routing/build tests; hardware validation pending |
 | Profiles and games | Detected-game association, per-game rules, start-time priority, manual session priority, selection reasons and Wine/Proton process discovery | Selection lifecycle, relaunch, duplicate-rule, pointer interaction and layout tests; real game sessions pending |
@@ -308,7 +338,7 @@ python3 packaging/appimage/build.py --appimagetool /path/to/appimagetool
 ```
 
 Output: `target/appimage/DualWave-x86_64.AppImage`, with a SHA-256 manifest and
-bundled source-only `dualwave-hid-dkms` package. Useful AppImage commands:
+bundled source-only `dualwave-hid-dkms` package. Package verification commands:
 
 ```sh
 ./DualWave-x86_64.AppImage --check       # Verify the bundled driver payload

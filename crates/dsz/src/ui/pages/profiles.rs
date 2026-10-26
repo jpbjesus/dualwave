@@ -246,7 +246,7 @@ impl App {
                         .pick_file()
                     {
                         match engine.profiles.import(&f) {
-                            Ok(n) => engine.toast(crate::localized_format!("Imported \"{n}\"", "\"{n}\" importado"; "\"{n}\" importado")),
+                            Ok(n) => engine.toast(crate::localized_format!("Imported \"{n}\"", "\"{n}\" importado", "\"{n}\" importado"; "\"{n}\" importado")),
                             Err(e) => engine.warn_toast(e),
                         }
                     }
@@ -339,8 +339,7 @@ impl App {
                         if n > 0 {
                             pill(
                                 ui,
-                                &crate::localized_format!(
-                                    "{n} game{}", "{n} jogo{}"; "{n} jogo{}",
+                                &crate::localized_format!("{n} game{}", "{n} jogo{}", "{n} juego{}"; "{n} jogo{}",
                                     if n == 1 { "" } else { "s" }
                                 ),
                                 violet_color(),
@@ -437,7 +436,7 @@ impl App {
                 let mut changed = false;
                 changed |= toggle_row(ui, crate::i18n::tr("Switch automatically"), "", &mut s.auto_profiles);
                 if let Some((p, exe)) = &*engine.game_override.read() {
-                    note(ui, &crate::localized_format!("{exe} is running → \"{p}\"", "{exe} em execução → \"{p}\""; "{exe} em execução → \"{p}\""), violet_color());
+                    note(ui, &crate::localized_format!("{exe} is running → \"{p}\"", "{exe} em execução → \"{p}\"", "{exe} en ejecución → \"{p}\""; "{exe} em execução → \"{p}\""), violet_color());
                 }
                 if let Some(exe) = &status.exe {
                     muted(ui, &format!("{} · {}", exe, crate::i18n::tr(status.reason.label())));

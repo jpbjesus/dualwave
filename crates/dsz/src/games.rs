@@ -131,16 +131,16 @@ fn apply_observation(engine: &Engine, scan: GameObservation) {
     match &target {
         Some(GameTarget::Profile { profile, exe }) => {
             log::info!("{exe}: switching to profile \"{profile}\" ({reason:?})");
-            engine.toast(crate::localized_format!("{exe} detected — profile \"{profile}\"", "{exe} detectado — perfil \"{profile}\""; "{exe} detetado — perfil \"{profile}\""));
+            engine.toast(crate::localized_format!("{exe} detected — profile \"{profile}\"", "{exe} detectado — perfil \"{profile}\"", "{exe} detectado — perfil \"{profile}\""; "{exe} detetado — perfil \"{profile}\""));
         }
         Some(GameTarget::Fallback { exe }) => {
             let fallback = engine.settings.read().fallback_pad;
-            engine.toast(crate::localized_format!("{exe} — virtual {}", "{exe} — virtual {}"; "{exe} — virtual {}", fallback.label()));
+            engine.toast(crate::localized_format!("{exe} — virtual {}", "{exe} — virtual {}", "{exe} — mando virtual {}"; "{exe} — virtual {}", fallback.label()));
         }
         None => {
             let back = engine.device_list().first().map(|d| engine.assigned_profile(d))
                 .unwrap_or_else(|| engine.settings.read().default_profile.clone());
-            engine.toast(crate::localized_format!("Automatic profile ended — back to \"{back}\"", "Perfil automático encerrado — voltando para \"{back}\""; "Perfil automático terminado — a regressar a \"{back}\""));
+            engine.toast(crate::localized_format!("Automatic profile ended — back to \"{back}\"", "Perfil automático encerrado — voltando para \"{back}\"", "Finalizó el perfil automático — se vuelve a \"{back}\""; "Perfil automático terminado — a regressar a \"{back}\""));
         }
     }
     *engine.game_override.write() = next_override;

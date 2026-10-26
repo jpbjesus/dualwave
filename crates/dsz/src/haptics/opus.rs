@@ -169,7 +169,7 @@ mod tests {
 
     fn tone(phase: &mut f32, hz: f32, amp: f32) -> Pcm {
         let mut pcm = [0i16; OPUS_SAMPLES * 2];
-        for f in pcm.chunks_exact_mut(2) {
+        for f in pcm.as_chunks_mut::<2>().0 {
             let v = (phase.sin() * amp * 32767.0) as i16;
             f[0] = v;
             f[1] = v;

@@ -268,7 +268,7 @@ pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSour
             fitted.clear();
             squeeze.run(&input, &mut fitted);
             if fitted.len() != 960 { return Err(io::Error::other("Resampler produced an invalid frame count")); }
-            for (chunk, frame) in fitted.chunks_exact(OPUS_SAMPLES).zip(&mut opus) {
+            for (chunk, frame) in fitted.as_chunks::<OPUS_SAMPLES>().0.iter().zip(&mut opus) {
                 for (i, sample) in chunk.iter().flatten().enumerate() {
                     pcm[i] = (dsp::soft_clip(*sample) * 32767.0).round() as i16;
                 }
@@ -289,7 +289,7 @@ pub fn run(path: &Path, mode: Mode, seconds: Option<u64>, source: MicrophoneSour
 }
 
 fn deliver(bridge: &mut Option<Bridge>, pcm: &[i16], peak: &mut f32) {
-    let frames: Vec<[f32; 2]> = pcm.chunks_exact(2).map(|f| {
+    let frames: Vec<[f32; 2]> = pcm.as_chunks::<2>().0.iter().map(|f| {
         // Controller microphone is exposed as mono duplicated to both channels.
         let v = (f[0] as f32 + f[1] as f32) / 65536.0;
         *peak = peak.max(v.abs());

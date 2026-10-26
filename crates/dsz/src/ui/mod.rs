@@ -188,7 +188,8 @@ impl App {
                 if n == "workspace" { return Some(Page::Overview); }
                 Page::ALL
                     .into_iter()
-                    .find(|p| p.key().to_ascii_lowercase().starts_with(&n))
+                    .find(|p| p.key().to_ascii_lowercase().starts_with(&n)
+                        || (*p == Page::Input && n == "input"))
             })
             .unwrap_or(Page::Overview);
         let detailed = args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1))
@@ -281,7 +282,7 @@ impl App {
                 let conn = if d.is_bluetooth() { "BT" } else { "USB" };
                 let mut text = format!("{name}  ·  {conn}  ·  {}%", live.battery_percent);
                 if let Some(k) = d.virt.active() {
-                    text.push_str(&crate::localized_format!("  ·  as {}", "  ·  como {}"; "  ·  como {}", k.label()));
+                    text.push_str(&crate::localized_format!("  ·  as {}", "  ·  como {}", "  ·  como {}"; "  ·  como {}", k.label()));
                 }
                 let font = egui::FontId::proportional(13.0);
                 let w = ui.fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), text_color()).size().x);
@@ -377,7 +378,7 @@ impl App {
             ui.horizontal(|ui| {
                 widgets::pill(
                     ui,
-                    &crate::localized_format!("Editing \"{editing}\" — not active on this controller", "Editando \"{editing}\" — inativo neste controle"; "A editar \"{editing}\" — inativo neste comando"),
+                    &crate::localized_format!("Editing \"{editing}\" — not active on this controller", "Editando \"{editing}\" — inativo neste controle", "Editando \"{editing}\" — no está activo en este mando"; "A editar \"{editing}\" — inativo neste comando"),
                     warn_color(),
                 );
                 if widgets::button(ui, crate::i18n::tr("Edit active profile")).clicked() {

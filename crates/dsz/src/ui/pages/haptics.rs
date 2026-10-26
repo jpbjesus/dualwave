@@ -58,7 +58,7 @@ impl App {
         }
         #[cfg(target_os = "linux")]
         if let Some(error) = dev.and_then(|device| device.native_audio_error.lock().clone()) {
-            note(ui, &crate::localized_format!("Controller audio is unavailable: {error}", "O áudio do controle está indisponível: {error}"; "O áudio do comando está indisponível: {error}"), warn_color());
+            note(ui, &crate::localized_format!("Controller audio is unavailable: {error}", "O áudio do controle está indisponível: {error}", "El audio del mando no está disponible: {error}"; "O áudio do comando está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
         let devices = self.audio_device_list();
@@ -94,7 +94,7 @@ impl App {
                                     let (t, c) = if !h.enabled || !bt {
                                         (crate::i18n::tr("off").to_string(), faint_color())
                                     } else if streaming > 0 {
-                                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s"; "{streaming} pac/s"), good_color())
+                                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s", "{streaming} paq/s"; "{streaming} pac/s"), good_color())
                                     } else if d.pcm_mode.load(Ordering::Relaxed) {
                                         (crate::i18n::tr("idle").to_string(), muted_color())
                                     } else {
@@ -108,7 +108,7 @@ impl App {
                         if under > 0 {
                             muted(
                                 ui,
-                                &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
+                                &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão", "{under} corte(s) de audio suavizado(s) desde la conexión"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
                             );
                         }
                     }
@@ -158,8 +158,7 @@ impl App {
                             meter(ui, peak, violet_color(), 160.0);
                             if capture.running {
                                 ui.label(
-                                    RichText::new(crate::localized_format!(
-                                        "{} · {} Hz · {} ch", "{} · {} Hz · {} canais"; "{} · {} Hz · {} canais",
+                                    RichText::new(crate::localized_format!("{} · {} Hz · {} ch", "{} · {} Hz · {} canais", "{} · {} Hz · {} canales"; "{} · {} Hz · {} canais",
                                         capture.device, capture.rate, capture.channels
                                     ))
                                     .size(12.0)
@@ -376,7 +375,7 @@ impl App {
                             }
                             slider_row(
                                 ui,
-                                crate::i18n::tr("Pitch"),
+                                crate::i18n::tr("Tone"),
                                 "",
                                 &mut h.buttons.frequency,
                                 60.0..=400.0,
@@ -415,7 +414,7 @@ impl App {
                             }
                             slider_row(
                                 ui,
-                                crate::i18n::tr("Pitch"),
+                                crate::i18n::tr("Tone"),
                                 "",
                                 &mut h.triggers.frequency,
                                 20.0..=300.0,
