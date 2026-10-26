@@ -220,6 +220,10 @@ pub struct Device {
     #[cfg(target_os = "linux")]
     pub native_audio_error: Mutex<Option<String>>,
     #[cfg(target_os = "linux")]
+    native_audio_retry: AtomicBool,
+    #[cfg(target_os = "linux")]
+    pub native_audio_attempts: AtomicU32,
+    #[cfg(target_os = "linux")]
     microphone_sinks: Arc<crate::haptics::pipewire_linux::MicrophoneSinks>,
     #[cfg(target_os = "linux")]
     isolated_media_ready: AtomicBool,
@@ -275,9 +279,23 @@ impl Device {
         !current
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn request_native_audio_retry(&self) {
+        self.native_audio_retry.store(true, Ordering::Release);
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn native_audio_retry_pending(&self) -> bool {
+        self.native_audio_retry.load(Ordering::Acquire)
+    }
+
     /// Runs outside the Bluetooth clock: daemon connection/retry can block.
     #[cfg(target_os = "linux")]
     pub fn maintain_native_audio(&self) {
+        if self.stop.load(Ordering::Acquire) { return; }
+        if self.native_audio_retry.swap(false, Ordering::AcqRel) {
+            self.microphone_sinks.set_native(None);
+        }
         if !self.media_transport_ready() {
             self.microphone_sinks.set_native(None);
             let error = "The isolated microphone driver is not active. Complete initial setup and reboot.";
@@ -290,6 +308,7 @@ impl Device {
         self.microphone_sinks.set_native(None);
         let mac = self.mac.lock().clone();
         let identity = if mac.is_empty() { &self.info.serial } else { &mac };
+        self.native_audio_attempts.fetch_add(1, Ordering::Relaxed);
         match crate::haptics::pipewire_linux::ControllerAudio::new(identity) {
             Ok(audio) => {
                 self.microphone_sinks.set_native(Some(audio));
@@ -753,6 +772,10 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
         #[cfg(target_os = "linux")]
         native_audio_error: Mutex::new(None),
         #[cfg(target_os = "linux")]
+        native_audio_retry: AtomicBool::new(false),
+        #[cfg(target_os = "linux")]
+        native_audio_attempts: AtomicU32::new(0),
+        #[cfg(target_os = "linux")]
         microphone_sinks: Arc::new(crate::haptics::pipewire_linux::MicrophoneSinks::default()),
         #[cfg(target_os = "linux")]
         isolated_media_ready: AtomicBool::new(false),
@@ -861,6 +884,7 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
         Err(e) => {
             log::warn!("reader setup failed: {e}");
             *device.link.lock() = Link::Error(format!("Can't read input: {e}"));
+            device.stop.store(true, Ordering::Release);
             device.dead.store(true, Ordering::Release);
             return;
         }
@@ -1409,6 +1433,10 @@ impl Device {
             #[cfg(target_os = "linux")]
             native_audio_error: Mutex::new(None),
             #[cfg(target_os = "linux")]
+            native_audio_retry: AtomicBool::new(false),
+            #[cfg(target_os = "linux")]
+            native_audio_attempts: AtomicU32::new(0),
+            #[cfg(target_os = "linux")]
             microphone_sinks: Arc::new(crate::haptics::pipewire_linux::MicrophoneSinks::default()),
             #[cfg(target_os = "linux")]
             isolated_media_ready: AtomicBool::new(true),
@@ -1432,6 +1460,81 @@ impl Device {
 mod microphone_tests {
     use super::*;
     use ds_proto::output::{Microphone, MicrophoneSource};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires a dedicated isolated PipeWire runtime directory"]
+    fn isolated_pipewire_recovery_recreates_endpoints_after_daemon_restart() {
+        use std::process::{Child, Command, Stdio};
+        struct Daemon(Child);
+        impl Drop for Daemon {
+            fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+        }
+        let runtime = std::env::var_os("PIPEWIRE_RUNTIME_DIR").expect("isolated PipeWire runtime required");
+        let runtime = std::path::PathBuf::from(runtime);
+        assert!(runtime.file_name().unwrap().to_string_lossy().starts_with("dualwave-pipewire-recovery-"));
+        assert_eq!(std::env::var_os("XDG_RUNTIME_DIR"), Some(runtime.clone().into_os_string()));
+        assert!(std::env::var_os("PIPEWIRE_REMOTE").is_none());
+        let start = || {
+            let daemon = Daemon(Command::new("pipewire").stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while std::os::unix::net::UnixStream::connect(runtime.join("pipewire-0")).is_err() {
+                assert!(Instant::now() < deadline, "isolated daemon did not start");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            daemon
+        };
+        let daemon = start();
+        let d = Device::for_test(Connection::Bluetooth, "00:11:22:33:44:55");
+        d.maintain_native_audio();
+        assert!(d.native_audio().unwrap().healthy());
+        assert_eq!(d.native_audio_attempts.load(Ordering::Relaxed), 1);
+        drop(daemon);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while d.native_audio().unwrap().healthy() {
+            assert!(Instant::now() < deadline, "dead daemon still appears healthy");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        d.maintain_native_audio();
+        assert!(d.native_audio().is_none());
+        assert!(d.native_audio_error.lock().is_some());
+        // SIGKILL can leave the socket path; the server removes its stale file.
+        let daemon = start();
+        d.maintain_native_audio();
+        assert!(d.native_audio().unwrap().healthy());
+        assert!(d.native_audio_error.lock().is_none());
+        assert!(!d.microphone.enabled());
+        assert!(d.stream_rx.is_empty());
+        d.request_native_audio_retry();
+        d.maintain_native_audio();
+        assert!(d.native_audio().unwrap().healthy());
+        assert!(!d.native_audio_retry_pending());
+        assert!(!d.microphone.enabled());
+        d.microphone_sinks.set_native(None);
+        drop(daemon);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn requested_audio_recovery_is_queued_without_capture_or_radio_side_effects() {
+        let d = Device::for_test(Connection::Bluetooth, "00:11:22:33:44:55");
+        d.isolated_media_ready.store(false, Ordering::Release);
+        d.request_native_audio_retry();
+        d.request_native_audio_retry();
+        assert!(d.native_audio_retry_pending());
+        assert!(d.native_audio().is_none());
+        assert!(!d.microphone.enabled());
+        assert!(d.stream_rx.is_empty());
+        d.maintain_native_audio();
+        assert!(!d.native_audio_retry_pending());
+        assert_eq!(d.native_audio_attempts.load(Ordering::Relaxed), 0);
+        assert!(!d.microphone.enabled());
+        assert!(d.stream_rx.is_empty());
+        d.isolated_media_ready.store(true, Ordering::Release);
+        d.stop.store(true, Ordering::Release);
+        d.maintain_native_audio();
+        assert_eq!(d.native_audio_attempts.load(Ordering::Relaxed), 0, "stopping devices must not reconnect");
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

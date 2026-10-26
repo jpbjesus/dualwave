@@ -48,6 +48,7 @@ hardware-validated features are documented under [Compatibility](#compatibility)
 | **Emulator and mod integration** | DSU motion server and local UDP mod API |
 | **A personal workspace** | English, Português (Portugal), Português (Brasil), light/dark/system themes and reduced motion |
 | **Everyday convenience** | Desktop tray, startup preferences, device naming and complete settings backups |
+| **Recovery and diagnostics** | Automatic media-channel retries, audio endpoint recovery, live connection checks and a sanitized diagnostic report |
 
 ## Inside the app
 
@@ -134,6 +135,33 @@ language. **Backup & restore** exports application settings and profiles togethe
 
 ![Profile management and access to game rules](.github/screenshots/profiles.png)
 
+### Connection diagnostics and recovery
+
+Open **Controller → Device status** to inspect the physical connection,
+Bluetooth audio support, playback and microphone endpoints, virtual output and
+applied profile. States distinguish availability from active use; an offline
+controller does not produce a successful system check.
+
+**Reconnect audio** queues endpoint recreation on the existing audio worker.
+It does not enable microphone capture or remove mute. **Copy diagnostic report**
+exports a short technical summary to the clipboard, excluding device addresses,
+paths, profile names, raw error messages and audio samples. Audio and virtual
+controller settings are accessible directly from this page.
+
+Discovery retires a stale controller session after two consecutive missing-node
+checks, so a returning controller can be opened again with its assigned profile.
+The isolated media channel is retried locally if it disappears or its permissions
+arrive late. PipeWire endpoint recovery also runs automatically when the audio
+server disconnects. A recreated endpoint may need to be selected again in an
+audio application; recovery does not pair or power on a controller.
+
+If the required media driver is unavailable, diagnostics offers the AppImage's
+explicit system setup action. A reboot remains necessary after driver setup.
+Detailed controller statistics and pairing help remain available in an expandable
+section below the diagnostics.
+
+![Connection diagnostics with no controller connected](.github/screenshots/diagnostics.png)
+
 ### Preferences with a place for everything
 
 Appearance, language, startup behaviour, controller settings, integrations and
@@ -187,6 +215,7 @@ controller, Bluetooth adapter or game has been tested.
 | Feature | Available controls | Validation |
 | --- | --- | --- |
 | Controller workspace | Native controller preview, contextual configuration, quick volume/microphone/output controls and actual device status | Native rendering and layout tests |
+| Recovery and diagnostics | Media-channel reattachment, stale-session retirement, queued audio retry and sanitized clipboard report | Unit/UI checks and isolated PipeWire daemon restart test; Bluetooth/suspend hardware scenarios pending |
 | Lighting | Static, rainbow, breathing, strobe, battery/audio response, player LEDs and mute LED | Original core retained; integrated Linux hardware checks pending |
 | Adaptive triggers | Visual presets and full resistance, weapon, vibration and per-zone editors for L2/R2 | Original protocol retained; integrated hardware checks pending |
 | Bluetooth headphone audio | Stereo through the jack, speaker/headset routing, hardware volume and PipeWire playback endpoint | Earlier CLI/filter confirmed on standard DualSense, firmware 6.30; current GUI/isolation path needs validation |
@@ -357,6 +386,20 @@ cc -std=c11 -Wall -Wextra -Werror packaging/kernel/test-routing.c -o /tmp/dualwa
 Linux CI also runs the concurrent PipeWire ring-buffer tests with address and
 undefined-behavior sanitizers. Upstream Windows/MSVC integrations require their
 own checks; a Linux build does not validate them.
+
+The PipeWire restart integration test is opt-in and starts its own server. Run
+it in a dedicated runtime directory to avoid affecting your desktop audio:
+
+```sh
+recovery_runtime=$(mktemp -d /tmp/dualwave-pipewire-recovery-XXXXXX)
+env -u PIPEWIRE_REMOTE XDG_RUNTIME_DIR="$recovery_runtime" \
+  PIPEWIRE_RUNTIME_DIR="$recovery_runtime" \
+  cargo test -p dsz --locked isolated_pipewire_recovery -- --ignored
+```
+
+This test recreates endpoints after daemon loss and checks that capture stays
+disabled. Physical Bluetooth reconnect, suspend/resume and recording-client
+reselection still require hardware validation.
 
 Debug builds support isolated, controller-free UI captures:
 

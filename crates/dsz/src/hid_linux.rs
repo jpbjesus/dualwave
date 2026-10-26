@@ -429,6 +429,7 @@ pub struct Reader<'a> {
     media: Option<File>,
     buf: Vec<u8>,
     next: usize,
+    media_retry_at: Instant,
 }
 
 fn read_kernel_mute(path: &Path) -> io::Result<Option<bool>> {
@@ -448,7 +449,22 @@ impl<'a> Reader<'a> {
     pub fn has_isolated_media(&self) -> bool { self.media.is_some() }
 
     fn new(dev: &'a HidDevice) -> io::Result<Self> {
-        Ok(Self { dev, media: open_media(dev)?, buf: vec![0; dev.reports.max_input().max(78) + 1], next: 0 })
+        let media = match open_media(dev) {
+            Ok(media) => media,
+            Err(error) => { log::warn!("microphone transport unavailable; input remains active: {error}"); None }
+        };
+        Ok(Self { dev, media, buf: vec![0; dev.reports.max_input().max(78) + 1], next: 0, media_retry_at: Instant::now() + Duration::from_secs(2) })
+    }
+
+    fn refresh_media(&mut self, now: Instant, open: impl FnOnce(&HidDevice) -> io::Result<Option<File>>) {
+        if self.media.is_some() || now < self.media_retry_at { return; }
+        self.media_retry_at = now + Duration::from_secs(2);
+        // A late udev permission or a recreated child must not require the
+        // physical controller to disconnect. open_media revalidates ancestry.
+        match open(self.dev) {
+            Ok(media) => self.media = media,
+            Err(error) => log::debug!("microphone transport not ready: {error}"),
+        }
     }
 
     /// Alternate ready sources so continuous audio cannot starve pad state.
@@ -456,6 +472,7 @@ impl<'a> Reader<'a> {
     /// Physical reports retain their original bytes and protocol validation
     /// remains in device.rs before any input injection.
     pub fn read(&mut self, timeout_ms: u32) -> io::Result<Option<&[u8]>> {
+        self.refresh_media(Instant::now(), open_media);
         let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
         loop {
             let mut fds = [pollfd(self.dev.io.as_raw_fd(), libc::POLLIN),
@@ -730,11 +747,52 @@ mod tests {
     }
 
     #[test]
+    fn initial_media_open_failure_does_not_strand_the_physical_reader() {
+        let (physical, mut state_tx) = pipe();
+        let fixture = Fixture::new();
+        let mut dev = fake_device(physical);
+        dev.physical = fixture.0.join("not-yet-created");
+        assert!(open_media(&dev).is_err());
+        let mut reader = Reader::new(&dev).expect("optional media setup must not prevent input");
+        assert!(!reader.has_isolated_media());
+        state_tx.write_all(&[1, 2, 3]).unwrap();
+        assert_eq!(reader.read(0).unwrap().unwrap(), &[1, 2, 3]);
+        let (media, mut media_tx) = pipe();
+        reader.refresh_media(Instant::now() + Duration::from_secs(3), |_| Ok(Some(media)));
+        assert!(reader.has_isolated_media());
+        media_tx.write_all(&mic_packet()).unwrap();
+        assert_eq!(reader.read(0).unwrap().unwrap(), &mic_packet());
+    }
+
+    #[test]
+    fn missing_media_retries_are_bounded_and_reattach_without_reopening_physical_input() {
+        let (physical, mut state_tx) = pipe();
+        let fixture = Fixture::new();
+        let mut dev = fake_device(physical);
+        dev.physical = fixture.0.clone();
+        let mut reader = Reader::new(&dev).unwrap();
+        let now = Instant::now() + Duration::from_secs(3);
+        let mut attempts = 0;
+        reader.refresh_media(now, |_| { attempts += 1; Err(io::Error::from(io::ErrorKind::PermissionDenied)) });
+        reader.refresh_media(now + Duration::from_millis(100), |_| { attempts += 1; Ok(None) });
+        assert_eq!(attempts, 1, "failed opens must not spin on the input clock");
+        let (media, mut media_tx) = pipe();
+        reader.refresh_media(now + Duration::from_secs(2), |_| { attempts += 1; Ok(Some(media)) });
+        assert!(reader.has_isolated_media());
+        assert_eq!(attempts, 2);
+        reader.refresh_media(now + Duration::from_secs(5), |_| panic!("healthy child must not reopen"));
+        media_tx.write_all(&mic_packet()).unwrap();
+        state_tx.write_all(&[1, 2, 3]).unwrap();
+        assert_eq!(reader.read(0).unwrap().unwrap(), &[1, 2, 3]);
+        assert_eq!(reader.read(0).unwrap().unwrap(), &mic_packet());
+    }
+
+    #[test]
     fn reader_alternates_ready_sources_and_preserves_physical_reports() {
         let (physical, mut state_tx) = pipe();
         let (media, mut media_tx) = pipe();
         let dev = fake_device(physical);
-        let mut reader = Reader { dev: &dev, media: Some(media), buf: vec![0; 79], next: 0 };
+        let mut reader = Reader { dev: &dev, media: Some(media), buf: vec![0; 79], next: 0, media_retry_at: Instant::now() + Duration::from_secs(2) };
         let physical_packet = [0x31, 1, 99, 3];
         state_tx.write_all(&physical_packet).unwrap();
         media_tx.write_all(&mic_packet()).unwrap();
@@ -773,7 +831,7 @@ mod tests {
         let (physical, mut state_tx) = pipe();
         let (media, mut media_tx) = pipe();
         let dev = fake_device(physical);
-        let mut reader = Reader { dev: &dev, media: Some(media), buf: vec![0; 79], next: 1 };
+        let mut reader = Reader { dev: &dev, media: Some(media), buf: vec![0; 79], next: 1, media_retry_at: Instant::now() + Duration::from_secs(2) };
         media_tx.write_all(&[0xff; 78]).unwrap();
         state_tx.write_all(&[1, 2, 3]).unwrap();
         assert_eq!(reader.read(10).unwrap().unwrap(), &[1, 2, 3]);

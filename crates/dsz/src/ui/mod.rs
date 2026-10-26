@@ -7,6 +7,8 @@
 mod controller_view;
 mod navigation;
 mod icons;
+#[cfg(target_os = "linux")]
+mod diagnostics;
 mod pages;
 #[cfg(debug_assertions)]
 mod snapshot;

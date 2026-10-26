@@ -22,7 +22,18 @@ fn stat(ui: &mut egui::Ui, k: &str, v: impl Into<RichText>) {
 }
 
 impl App {
-    pub(crate) fn page_overview(
+    pub(crate) fn page_overview(&mut self, ui: &mut egui::Ui, p: &mut Profile, dev: Option<&Arc<Device>>) {
+        #[cfg(target_os = "linux")]
+        {
+            self.connection_diagnostics(ui, dev);
+            ui.add_space(12.0);
+            ui.collapsing(crate::i18n::tr("Live device details and pairing help"), |ui| self.page_device_details(ui, p, dev));
+        }
+        #[cfg(not(target_os = "linux"))]
+        self.page_device_details(ui, p, dev);
+    }
+
+    fn page_device_details(
         &mut self,
         ui: &mut egui::Ui,
         p: &mut Profile,

@@ -384,12 +384,33 @@ impl Engine {
             .unwrap();
     }
 
+    #[cfg(target_os = "linux")]
+    fn reconcile_presence(&self, present: &[crate::hid::DeviceInfo], missing: &mut HashMap<u64, u8>) {
+        let devices = self.device_list();
+        missing.retain(|id, _| devices.iter().any(|d| d.id == *id));
+        for d in devices {
+            let found = present.iter().any(|info| info.path == d.info.path
+                && info.vid == d.info.vid && info.pid == d.info.pid && info.serial == d.info.serial);
+            if found { missing.remove(&d.id); continue; }
+            let misses = missing.entry(d.id).or_default();
+            *misses = misses.saturating_add(1);
+            if *misses == 2 {
+                log::info!("controller node disappeared; retiring stale session");
+                d.stop.store(true, Ordering::Release);
+            }
+        }
+    }
+
     fn hotplug_loop(self: Arc<Self>) {
         let mut running: HashMap<String, std::thread::JoinHandle<()>> = HashMap::new();
+        #[cfg(target_os = "linux")]
+        let mut missing = HashMap::new();
         // Before any controller: the virtual pad takes the first free slot.
         self.pads.startup(&self);
         while !self.shutdown.load(Ordering::Acquire) {
             let present = crate::hid::enumerate();
+            #[cfg(target_os = "linux")]
+            self.reconcile_presence(&present, &mut missing);
             running.retain(|_, h| !h.is_finished());
             for info in present {
                 if running.contains_key(&info.path) || self.open_backoff(&info.path) {
@@ -462,5 +483,45 @@ impl Device {
     pub fn identify_light(&self) {
         self.feedback.lock().identify_until = Some(Instant::now() + Duration::from_millis(300));
         self.kick();
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn transient_enumeration_misses_do_not_disconnect_but_departed_nodes_are_retired() {
+        let dir = std::env::temp_dir().join(format!("dualwave-presence-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let d = Device::for_test(ds_proto::Connection::Bluetooth, "00:11:22:33:44:55");
+        engine.add_device(d.clone());
+        let mut missing = HashMap::new();
+        engine.reconcile_presence(&[], &mut missing);
+        assert!(!d.stop.load(Ordering::Acquire));
+        engine.reconcile_presence(&[d.info.clone()], &mut missing);
+        engine.reconcile_presence(&[], &mut missing);
+        assert!(!d.stop.load(Ordering::Acquire));
+        engine.reconcile_presence(&[], &mut missing);
+        assert!(d.stop.load(Ordering::Acquire));
+        assert!(d.stream_tx.is_empty(), "presence checks must not send radio reports");
+        engine.remove_device(d.id);
+        engine.reconcile_presence(&[], &mut missing);
+        assert!(missing.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn applied_profile_survives_reconnection_with_a_new_device_instance() {
+        let dir = std::env::temp_dir().join(format!("dualwave-profile-reconnect-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let first = Device::for_test(ds_proto::Connection::Bluetooth, "00:11:22:33:44:55");
+        engine.set_device_profile(&first, "Xbox");
+        engine.add_device(first.clone());
+        engine.remove_device(first.id);
+        let next = Device::for_test(ds_proto::Connection::Bluetooth, "00:11:22:33:44:55");
+        engine.add_device(next.clone());
+        assert_eq!(engine.profile_name_for(&next), "Xbox");
+        assert!(!engine.profile_for_mac("00:11:22:33:44:55").microphone.enabled);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
