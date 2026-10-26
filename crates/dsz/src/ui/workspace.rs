@@ -5,7 +5,7 @@ use eframe::egui::{self, RichText, Stroke};
 use ds_proto::{input::Button, TriggerEffect};
 use crate::{device::{Device, Link}, profile::*};
 use crate::i18n::tr;
-use super::{App, Page, controller_view::{self, View}, theme::*, widgets};
+use super::{App, controller_view::{self, View}, theme::*, widgets};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Part { Lighting, Triggers, Buttons, Motion }
@@ -130,7 +130,7 @@ fn apply_quick_action(p: &mut Profile, button: Button, gesture: Gesture, action:
     if action == QuickAction::Original { p.mappings[index].mute = false; }
 }
 
-fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
+pub(super) fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
     let mut clicked = false;
     ui.horizontal_wrapped(|ui| {
         for (candidate, label) in options {
@@ -151,62 +151,9 @@ fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, 
     clicked
 }
 
-fn mark(ui: &mut egui::Ui) {
-    let (r, _) = ui.allocate_exact_size(egui::vec2(40.0, 30.0), egui::Sense::hover());
-    for (offset, alpha, width) in [(0.0, 255, 2.8), (-5.0, 90, 1.8)] {
-        let points = (0..100).map(|i| {
-            let x = i as f32 / 99.0;
-            r.min + egui::vec2(x * 40.0, 14.0 + offset - (x * std::f32::consts::TAU * 2.0).cos() * 9.0)
-        }).collect();
-        ui.painter().add(egui::Shape::line(points, Stroke::new(width, with_alpha(accent_color(), alpha))));
-    }
-}
-
 impl App {
-    pub(super) fn workspace_navigation(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            mark(ui);
-            ui.label(RichText::new("DualWave").font(heading(24.0)).color(text_color()));
-            ui.add_space(if ui.available_width() > 900.0 { ui.available_width() * 0.24 } else { 24.0 });
-            let mut destination = match self.page { Page::Haptics => 1, Page::Profiles => 2, Page::Settings => 3, _ => 0 };
-            let clicked = choice(ui, &mut destination, &[(0, "Controller"), (1, "Audio"), (2, "Profiles"), (3, "Preferences")]);
-            if clicked {
-                self.page = [Page::Overview, Page::Haptics, Page::Profiles, Page::Settings][destination];
-                self.advanced = false;
-                self.capture_key = None;
-            }
-        });
-    }
-
-    pub(super) fn advanced_navigation(&mut self, ui: &mut egui::Ui) {
-        if matches!(self.page, Page::Profiles | Page::Settings) { return; }
-        ui.horizontal_wrapped(|ui| {
-            if ui.selectable_label(self.page == Page::Overview && !self.advanced, tr("Workspace")).clicked() {
-                self.page = Page::Overview;
-                self.advanced = false;
-            }
-            ui.label(RichText::new("/").color(muted_color()));
-            ui.label(RichText::new(self.page.label()).color(muted_color()));
-            ui.menu_button(tr("Advanced"), |ui| {
-                for page in [Page::Overview, Page::Lighting, Page::Triggers, Page::Input, Page::Mappings, Page::Virtual, Page::Haptics] {
-                    if ui.button(page.label()).clicked() { self.page = page; self.advanced = true; ui.close(); }
-                }
-            });
-        });
-        ui.add_space(4.0);
-    }
-
     fn workspace_heading(&mut self, ui: &mut egui::Ui, title: &str) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(tr(title)).font(heading(23.0)).color(text_color()));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(tr("Advanced"), |ui| {
-                    for page in [Page::Overview, Page::Lighting, Page::Triggers, Page::Input, Page::Mappings, Page::Virtual, Page::Haptics] {
-                        if ui.button(page.label()).clicked() { self.page = page; self.advanced = true; ui.close(); }
-                    }
-                });
-            });
-        });
+        ui.label(RichText::new(tr(title)).font(heading(23.0)).color(text_color()));
         ui.add_space(6.0);
     }
 
@@ -228,7 +175,7 @@ impl App {
         ui.painter().line_segment([inspector.left_top() - egui::vec2(gap * 0.5, 0.0), inspector.left_bottom() - egui::vec2(gap * 0.5, 0.0)], Stroke::new(1.0, border_color()));
         ui.scope_builder(egui::UiBuilder::new().max_rect(inspector), |ui| {
             egui::ScrollArea::vertical().id_salt("controller-inspector").max_height(inspector.height()).auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_width(inspector.width() - 8.0);
+                ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 5.0;
                 ui.spacing_mut().button_padding = egui::vec2(7.0, 4.0);
                 ui.spacing_mut().slider_width = (inspector.width() - 170.0).clamp(70.0, 160.0);
@@ -429,7 +376,7 @@ impl App {
                     }
                 });
                 if !both_match { widgets::muted(ui, tr("Left and right use different effects.")); }
-                else if selected_preset.is_none() { widgets::muted(ui, tr("Custom effect · open Advanced to edit its parameters.")); }
+                else if selected_preset.is_none() { widgets::muted(ui, tr("Custom effect · use the Triggers tab for all parameters.")); }
                 let effect = if self.trigger_side == Side::Right { &p.triggers.right } else { &p.triggers.left };
                 if let Some(mut value) = intensity(effect) {
                     if ui.add(egui::Slider::new(&mut value, 1..=7).text(tr("Intensity")).suffix(" / 7")).changed() { adjust_intensity(p, self.trigger_side, value); }
@@ -446,7 +393,7 @@ impl App {
                 ui.label(tr("Action"));
                 choice(ui, &mut action, &[(QuickAction::Original, "Original"), (QuickAction::Enter, "Enter key"), (QuickAction::Click, "Left click"), (QuickAction::Next, "Next profile")]);
                 if action != previous { apply_quick_action(p, self.selected_button, self.quick_gesture, action); }
-                if action == QuickAction::Custom { widgets::muted(ui, tr("Custom action · open Advanced to edit its parameters.")); }
+                if action == QuickAction::Custom { widgets::muted(ui, tr("Custom action · use the Buttons tab for all parameters.")); }
                 if let Some(i) = individual_mapping(p, self.selected_button, self.quick_gesture) {
                     ui.checkbox(&mut p.mappings[i].mute, tr("Suppress original virtual button"));
                 }
@@ -473,6 +420,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::Page;
     #[test]
     fn desktop_workspace_fits_normal_and_small_windows() {
         let dir = std::env::temp_dir().join(format!("dualwave-viewport-test-{}", std::process::id()));
@@ -484,6 +432,7 @@ mod tests {
             for (part, audio) in [(Part::Lighting, false), (Part::Triggers, false), (Part::Buttons, false), (Part::Motion, false), (Part::Lighting, true)] {
                 app.part = part;
                 app.page = if audio { Page::Haptics } else { Page::Overview };
+                app.detailed = false;
                 let mut profile = Profile::default();
                 profile.triggers.left = preset_effect(2);
                 profile.triggers.right = preset_effect(2);
@@ -493,6 +442,7 @@ mod tests {
                         egui::CentralPanel::default().frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 8))).show(ctx, |ui| {
                             app.top_bar(ui, None);
                             ui.add_space(6.0);
+                            app.section_navigation(ui);
                             let available = ui.available_rect_before_wrap();
                             ui.scope_builder(egui::UiBuilder::new().max_rect(available), |ui| {
                                 if audio { app.page_audio_workspace(ui, &mut profile, None); }

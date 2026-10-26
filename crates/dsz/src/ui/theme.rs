@@ -98,14 +98,18 @@ pub fn install(ctx: &egui::Context, scale: f32) {
             .insert(0, "consolas".into());
     }
     for (name, bytes) in [
-        ("manrope", include_bytes!("../../assets/Manrope-Regular.ttf").as_slice()),
-        ("manrope_sb", include_bytes!("../../assets/Manrope-SemiBold.ttf").as_slice()),
+        ("instrument", include_bytes!("../../assets/InstrumentSans-Regular.ttf").as_slice()),
+        ("instrument_medium", include_bytes!("../../assets/InstrumentSans-Medium.ttf").as_slice()),
+        ("instrument_sb", include_bytes!("../../assets/InstrumentSans-SemiBold.ttf").as_slice()),
         ("manrope_heavy", include_bytes!("../../assets/Manrope-ExtraBold.ttf").as_slice()),
     ] {
         fonts.font_data.insert(name.into(), Arc::new(FontData::from_static(bytes)));
     }
-    fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "manrope".into());
-    sb.insert(0, "manrope_sb".into());
+    fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "instrument".into());
+    sb.insert(0, "instrument_sb".into());
+    let mut controls = vec!["instrument_medium".into()];
+    controls.extend(fonts.families.get(&FontFamily::Proportional).unwrap().iter().cloned());
+    fonts.families.insert(FontFamily::Name("medium".into()), controls);
     fonts.families.insert(FontFamily::Name("signature".into()), vec!["manrope_heavy".into()]);
     sb.extend(fallback_prop);
     fonts.families.insert(semibold(), sb);
@@ -127,7 +131,7 @@ pub fn install(ctx: &egui::Context, scale: f32) {
             (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
             (
                 TextStyle::Button,
-                FontId::new(14.0, FontFamily::Proportional),
+                FontId::new(14.0, FontFamily::Name("medium".into())),
             ),
             (TextStyle::Heading, FontId::new(22.0, semibold())),
             (

@@ -121,7 +121,7 @@ impl App {
                         &mut s.default_on_start,
                     );
                     changed |=
-                        toggle_row(ui, crate::i18n::tr("Show tips"), crate::i18n::tr("On the Overview page"), &mut s.show_tips);
+                        toggle_row(ui, crate::i18n::tr("Show tips"), crate::i18n::tr("On the device status page"), &mut s.show_tips);
                     let mut scale = s.ui_scale;
                     let moved = row(ui, crate::i18n::tr("Interface size"), crate::i18n::tr(if cfg!(target_os = "linux") { "On top of the desktop display scale" } else { "On top of the Windows display scale" }), |ui| {
                         ui.add(

@@ -225,3 +225,56 @@ fn microphone_control_keeps_capture_and_mute_independent() {
         }
     }
 }
+
+#[test]
+fn controller_editors_are_visible_without_an_advanced_menu() {
+    let dir = std::env::temp_dir().join(format!("dualwave-navigation-layout-{}", std::process::id()));
+    let mut app = App::new(Engine::new(dir.clone()));
+    assert_eq!(app.page, Page::Lighting, "the main controller view should open a complete editor");
+    let ctx = egui::Context::default();
+    theme::install(&ctx, 1.0);
+    let output = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 520.0))), ..Default::default() }, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.section_navigation(ui));
+    });
+    for label in ["Lighting", "Triggers", "Motion", "Buttons", "Virtual controller"] {
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr(label))), "{label} must be directly visible in controller navigation");
+    }
+    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr("Advanced"))), "configuration must not be hidden in an Advanced menu");
+    drop(app);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn work_areas_remember_the_last_configuration_view() {
+    fn render(app: &mut App, ctx: &egui::Context, events: Vec<egui::Event>) -> egui::FullOutput {
+        ctx.run(egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 520.0))), ..Default::default() }, |ctx| {
+            egui::TopBottomPanel::top("navigation").show(ctx, |ui| app.workspace_navigation(ui));
+            egui::CentralPanel::default().show(ctx, |ui| app.section_navigation(ui));
+        })
+    }
+    fn click(app: &mut App, ctx: &egui::Context, label: &str) {
+        let output = render(app, ctx, Vec::new());
+        let target = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr(label) => Some(t.pos + t.galley.rect.center().to_vec2()), _ => None,
+        }).expect("navigation destination is directly visible");
+        for pressed in [true, false] {
+            let _ = render(app, ctx, vec![egui::Event::PointerMoved(target), egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+        }
+    }
+    let dir = std::env::temp_dir().join(format!("dualwave-navigation-memory-{}", std::process::id()));
+    let mut app = App::new(Engine::new(dir.clone()));
+    let ctx = egui::Context::default();
+    theme::install(&ctx, 1.0);
+    click(&mut app, &ctx, "Motion");
+    assert_eq!((app.page, app.detailed), (Page::Input, true));
+    click(&mut app, &ctx, "Audio");
+    assert_eq!((app.page, app.detailed), (Page::Haptics, false));
+    click(&mut app, &ctx, "Haptics & audio");
+    assert_eq!((app.page, app.detailed), (Page::Haptics, true));
+    click(&mut app, &ctx, "Controller");
+    assert_eq!((app.page, app.detailed), (Page::Input, true));
+    click(&mut app, &ctx, "Audio");
+    assert_eq!((app.page, app.detailed), (Page::Haptics, true));
+    drop(app);
+    let _ = std::fs::remove_dir_all(dir);
+}

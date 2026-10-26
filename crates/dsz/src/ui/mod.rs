@@ -5,6 +5,7 @@
 //! change up on their next tick, so every edit is live and autosaved.
 
 mod controller_view;
+mod navigation;
 mod pages;
 #[cfg(debug_assertions)]
 mod snapshot;
@@ -65,7 +66,6 @@ impl Page {
             Page::Settings => "Settings",
         }
     }
-    fn label(self) -> &'static str { crate::i18n::tr(self.key()) }
     fn live(self) -> bool {
         matches!(
             self,
@@ -82,7 +82,9 @@ impl Page {
 pub struct App {
     engine: Arc<Engine>,
     page: Page,
-    advanced: bool,
+    detailed: bool,
+    controller_route: (Page, bool),
+    audio_detailed: bool,
     part: workspace::Part,
     trigger_side: workspace::Side,
     selected_button: ds_proto::input::Button,
@@ -182,11 +184,15 @@ impl App {
             .and_then(|name| {
                 let n = name.to_ascii_lowercase();
                 if n == "audio" { return Some(Page::Haptics); }
+                if n == "workspace" { return Some(Page::Overview); }
                 Page::ALL
                     .into_iter()
                     .find(|p| p.key().to_ascii_lowercase().starts_with(&n))
             })
-            .unwrap_or(Page::Overview);
+            .unwrap_or(Page::Lighting);
+        let detailed = args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1))
+            .is_none_or(|name| !name.eq_ignore_ascii_case("workspace") && !name.eq_ignore_ascii_case("audio"));
+        let controller_route = if matches!(page, Page::Haptics | Page::Profiles | Page::Settings) { (Page::Lighting, true) } else { (page, detailed) };
         let edit_pin = args
             .iter()
             .position(|a| a == "--edit")
@@ -204,7 +210,9 @@ impl App {
         App {
             engine,
             page,
-            advanced: args.iter().position(|a| a == "--page").and_then(|i| args.get(i + 1)).is_some_and(|name| !name.eq_ignore_ascii_case("workspace") && !name.eq_ignore_ascii_case("audio")),
+            detailed,
+            controller_route,
+            audio_detailed: page == Page::Haptics && detailed,
             part,
             trigger_side: workspace::Side::Both,
             selected_button: ds_proto::input::Button::Cross,
@@ -586,7 +594,8 @@ impl eframe::App for App {
                     centered(ui, CONTENT, |ui| self.top_bar(ui, dev.as_ref()));
                 }
                 ui.add_space(6.0);
-                if !self.advanced && matches!(self.page, Page::Overview | Page::Haptics) {
+                centered(ui, CONTENT, |ui| self.section_navigation(ui));
+                if !self.detailed && matches!(self.page, Page::Overview | Page::Haptics) {
                     centered(ui, CONTENT, |ui| {
                         self.editing_banner(ui, dev.as_ref(), &profile.name);
                         if self.page == Page::Overview { self.page_workspace(ui, &mut profile, dev.as_ref()); }
@@ -597,7 +606,6 @@ impl eframe::App for App {
                 } else if self.page == Page::Profiles {
                     centered(ui, CONTENT, |ui| self.page_profiles(ui, &mut profile, dev.as_ref()));
                 } else {
-                    centered(ui, CONTENT, |ui| self.advanced_navigation(ui));
                     let scroll = egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .id_salt(format!("{:?}", self.page));

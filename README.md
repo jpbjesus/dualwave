@@ -1,64 +1,183 @@
-# DualWave
+<p align="center">
+  <img src="packaging/appimage/dualwave.svg" width="76" alt="DualWave icon">
+</p>
 
-Native Linux port of [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz),
-rebranded as DualWave. The controller workspace has a native visual interface;
-existing profiles and the controller protocol are retained, with Linux backends
-for HID, PipeWire, input injection, tray and virtual controllers. Upstream history and third-party licenses are preserved.
+<h1 align="center">DualWave</h1>
+<p align="center">A native Linux companion for your DualSense.</p>
+<p align="center">
+  Bluetooth headset audio · Microphone · Adaptive triggers · Controller profiles
+</p>
+<p align="center">
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#inside-the-app">Screenshots</a> ·
+  <a href="#features-and-validation">Features</a> ·
+  <a href="#building">Build</a> ·
+  <a href="https://github.com/jpbjesus/dualwave/issues">Report an issue</a>
+</p>
 
-## Status
+![DualWave controller workspace](.github/screenshots/controller.png)
 
-Experimental on CachyOS / Arch Linux with PipeWire. The native GUI builds and
-renders on Linux; the full integrated application still needs hardware testing.
+DualWave brings the DualSense's controls and Bluetooth audio into one native
+Linux application. Configure lighting, trigger effects, button mappings and
+motion, switch profiles for games, and use headphones and a microphone through
+the controller's 3.5 mm jack.
 
-| Feature | Current status |
+It is an independent fork of [MaximumFreak/DSZ](https://github.com/MaximumFreak/dsz).
+The original controller protocol and profile format are retained; Linux backends
+provide HID access, PipeWire audio, keyboard/mouse input, a desktop tray and
+virtual controllers.
+
+**Development preview.** CachyOS is the primary integration target. Bluetooth
+stereo playback, headset recording and the physical Mute button were confirmed
+on a standard DualSense with firmware 6.30 using the earlier CLI/kernel filter.
+The complete GUI integration, current media-isolation driver and virtual
+controller paths still need broader hardware validation. See the
+[validation table](#features-and-validation) before relying on a particular path.
+
+## Getting started
+
+### AppImage on CachyOS
+
+There is no published release yet. The AppImage can be built from this repository
+using the [instructions below](#building); release artifacts will appear in
+[Releases](https://github.com/jpbjesus/dualwave/releases).
+
+1. Make `DualWave-x86_64.AppImage` executable and open it.
+2. Accept the first-run system configuration if requested. One administrator
+   authorization installs the bundled DKMS/device support and missing kernel
+   headers. The desktop needs `kdialog` and `polkit` for this setup.
+3. Reboot once after system configuration, reconnect the controller over
+   Bluetooth, and open DualWave again.
+4. Plug in the headset **before starting playback**, open **Audio**, and choose
+   **DualWave Headphones** as the output in your desktop or application's sound
+   settings.
+5. To record, explicitly enable the microphone in DualWave and select
+   **DualWave Microphone** in the recording application.
+
+Everyday use runs as your normal user. System configuration is separate from
+launching the application; DKMS handles rebuilds when the kernel changes.
+Automatic first-run configuration currently targets CachyOS.
+
+### Microphone controls
+
+The microphone control combines its icon, state and recording level:
+
+- Click the microphone to enable capture, or to mute/unmute it when enabled.
+- Use its power button to disable capture independently of the saved mute state.
+- The level indicator follows actual samples only while a recording application
+  is using the microphone.
+
+Recording is disabled by default. Enabling it allows capture; it does not start
+recording by itself. DualWave does not save microphone recordings during normal
+operation or diagnostic probes. The physical Mute button can control recording
+when enabled in the profile.
+
+## Inside the app
+
+The main navigation groups related tasks into **Controller**, **Audio**,
+**Profiles** and **Preferences**. Complete configuration pages are accessible
+through visible tabs, without an Advanced menu. Controller opens directly in
+Lighting; triggers, motion, mappings and virtual output sit alongside it. Preview
+retains the controller drawing and quick controls; Device status contains live
+information. Audio separates Playback & microphone from Haptics & audio. Each
+work area remembers its last view for the current application session.
+
+| Controller and lighting | Audio and microphone |
 | --- | --- |
-| Controller workspace | Viewport-based controller and audio pages, fixed quick controls, four destinations, a selectable controller drawing, lighting/trigger/button/motion inspectors, six visual trigger presets and stateful microphone/audio controls; complete editors remain under Advanced |
-| Preferences | Fixed category navigation for appearance, startup, controllers, integrations, backups, logs and application information; long setup instructions expand on demand |
-| Appearance and accessibility | Manrope typography, flat light/dark/system themes, responsive option groups, aligned setting rows, fixed editor navigation, keyboard controls and finite visual preview motion; Reduce interface motion and startup Windows/KDE/GNOME preferences disable preview animation |
-| Profiles and languages | Fixed profile/game-rule navigation, profile rows with create-from-applied, edit without applying, clone/import/export/delete and game rules; English, Português (Brasil) and Português (Portugal), with English unchanged as the default |
-| Bluetooth headphone playback, headset mic, physical Mute | Confirmed by the user with the earlier CLI and first kernel filter, standard DualSense firmware 6.30 |
-| GUI Bluetooth audio | Native PipeWire endpoints and original audio encoder integrated; hardware validation pending |
-| Lighting, adaptive triggers, haptics, mappings, motion and touch | Original core retained; Linux HID/uinput backends implemented, integrated hardware validation pending |
-| Virtual Xbox 360 / DualSense / DualShock 4 | Original USB/IP devices retained; native Linux host adapter and scoped privileged broker implemented; attachment validation pending |
-| Exclusive physical input | Scoped evdev grabs and kernel raw-state redirection implemented; module builds/tests pass, hardware validation pending |
-| Per-game profiles | Native process discovery, Wine/Proton paths and original profile logic integrated |
-| Tray and autostart | Native StatusNotifier and XDG desktop entry support |
-| Persistent system support | DKMS package and AppImage first-launch setup prepared; installation/reboot validation pending |
-| Windows-only integrations | Game Bar and Windows audio endpoint role management have no Linux counterpart; PipeWire session policy is preserved |
+| ![DualWave lighting controls](.github/screenshots/lighting.png) | ![DualWave audio and microphone controls](.github/screenshots/audio.png) |
+| Lighting, triggers, mappings, motion and virtual output. | Headphone playback, microphone source, gain and mute. |
 
-Stereo output, headset voice and the physical Mute button were confirmed by
-the user on the standard DualSense, firmware 6.30, with the first kernel filter.
-The new dedicated microphone interface is a further change: until hardware
-validation is complete, do not treat simultaneous Steam/game use as verified.
+| Profiles and games | Preferences |
+| --- | --- |
+| ![DualWave profiles](.github/screenshots/profiles.png) | ![DualWave appearance preferences](.github/screenshots/preferences.png) |
+| Separate profile management and automatic game rules. | Appearance, startup, device settings, integrations and backups. |
 
-Headphones must be plugged in before starting playback. Audio stops being sent
-when the jack is unplugged; automatic selection of a newly plugged headset mic
-and controller reconnection still need work. USB audio uses the controller's
-existing USB audio device and is outside this Bluetooth bridge.
+These are captures of the native Linux UI, rendered with isolated example
+profiles and no controller connected. They show the application itself, rather
+than a web prototype. The interface supports English, Português (Portugal) and
+Português (Brasil), light/dark/system appearance and reduced motion.
 
-## Use the AppImage on CachyOS
+## Features and validation
 
-Open `DualWave-x86_64.AppImage`, accept the initial system configuration and
-enter the administrator password when prompted. Reboot once, reconnect the
-controller and open the AppImage again. The application itself runs as your
-normal user; kernel updates are handled through DKMS.
+“Implemented” describes the code available in this fork; it does not imply every
+controller, Bluetooth adapter or game has been tested.
 
-The build output is `target/appimage/DualWave-x86_64.AppImage`. In **Haptics &
-audio**, enable the microphone explicitly when you want to record. Choose
-**DualWave Headphones** and **DualWave Microphone** in your desktop or app's
-sound settings. Recording remains disabled by default.
+| Feature | Available controls | Validation |
+| --- | --- | --- |
+| Controller workspace | Native controller preview, contextual configuration, quick volume/microphone/output controls and actual device status | Native rendering and layout tests |
+| Lighting | Static, rainbow, breathing, strobe, battery/audio response, player LEDs and mute LED | Original core retained; integrated Linux hardware checks pending |
+| Adaptive triggers | Visual presets and full resistance, weapon, vibration and per-zone editors for L2/R2 | Original protocol retained; integrated hardware checks pending |
+| Bluetooth headphone audio | Stereo through the jack, speaker/headset routing, hardware volume and PipeWire playback endpoint | Earlier CLI/filter confirmed on standard DualSense, firmware 6.30; current GUI/isolation path needs validation |
+| Bluetooth microphone | Built-in/headset/automatic source, gain, mute, physical Mute button and PipeWire recording endpoint | Earlier CLI/filter confirmed; current integrated path needs validation |
+| Haptics | Game audio, system audio, button clicks, trigger texture and rumble conversion | Original encoder/core retained; Linux integration needs hardware checks |
+| Mappings and motion | Keys, mouse, controller buttons, combinations, long press, double tap, gyro, touchpad and stick modes | Native uinput backend implemented; hardware validation pending |
+| Virtual controllers | Xbox 360, DualSense and DualShock 4 over native Linux USB/IP, with scoped privileged broker | Host attachment and game compatibility validation pending |
+| Exclusive physical input | Scoped evdev grabs and kernel raw-state redirection; device nodes remain visible | Routing/build tests; hardware validation pending |
+| Profiles and games | Create, rename, duplicate, import/export, backups and automatic per-game rules, including Wine/Proton process discovery | Native implementation and layout tests |
+| Integrations | Local UDP mod API and DSU motion server for supported emulators | Implemented; game/emulator integration checks pending |
+| Desktop integration | StatusNotifier tray, XDG autostart, bundled fonts, themes and motion preferences | Native implementation; desktop-dependent tray behavior |
+| System support | Source-only DKMS package, device permissions and AppImage first-run setup | Package/build checks; first-install/reboot flow needs end-to-end validation |
 
-## Build on CachyOS / Arch
+### Compatibility and current limits
 
-Install the development dependencies, then build as your normal user:
+- **Primary audio target:** standard DualSense over Bluetooth (`054c:0ce6`).
+  Do not assume Bluetooth audio support for Edge, DualShock 4 or clone devices
+  from their controller-input support alone.
+- Headphones must be connected before playback starts. Headset microphone
+  selection after reinsertion, reconnect behavior and simultaneous Steam/game
+  use need further validation.
+- USB audio uses the controller's existing USB audio device, outside this
+  Bluetooth bridge.
+- AppImages are built against the build host's glibc/graphics stack. Compatibility
+  with older distributions is not claimed. Other PipeWire Linux systems can
+  build from source, but automatic system configuration is CachyOS-specific.
+- Windows Game Bar and Windows default-audio-role management have no Linux
+  counterpart. DualWave preserves PipeWire session policy.
+
+## Building
+
+On CachyOS/Arch, install the development dependencies and build as a normal user:
 
 ```sh
 sudo pacman -S --needed base-devel rust pipewire libpipewire opus
-cargo build --release -p dsz -p dualwave --locked
+cargo build --release --locked -p dsz -p dualwave
 ```
 
-Run `target/release/dsz` for the full GUI. The `dualwave` executable remains
-available for audio diagnostics. Native builds use system libraries.
+- `target/release/dsz` — native GUI.
+- `target/release/dualwave` — audio diagnostic CLI.
+
+Build an AppImage with an official
+[appimagetool](https://github.com/AppImage/appimagetool) executable:
+
+```sh
+python3 packaging/appimage/build.py --appimagetool /path/to/appimagetool
+```
+
+Output: `target/appimage/DualWave-x86_64.AppImage`, with a SHA-256 manifest and
+bundled source-only `dualwave-hid-dkms` package. Useful AppImage commands:
+
+```sh
+./DualWave-x86_64.AppImage --check       # Verify the bundled driver payload
+./DualWave-x86_64.AppImage --plan        # Inspect setup without installing
+./DualWave-x86_64.AppImage --cli list    # Read-only controller discovery
+```
+
+### Settings and profiles
+
+Normal Linux settings live under `$XDG_CONFIG_HOME/dualwave`, or
+`~/.config/dualwave` when `XDG_CONFIG_HOME` is unset. Profiles are in its
+`profiles` subdirectory. **Preferences → Backup & restore** exports or restores
+all profiles and application settings together; a restore first saves the
+previous configuration.
+
+Selecting a profile to edit does not silently apply it to a connected controller.
+Changes to the edited profile are saved automatically. Profile names and saved
+identifiers remain independent of the interface language.
+
+### Diagnostics and system support
+
+<details>
+<summary>Audio CLI and controller isolation</summary>
 
 ```sh
 cargo run -p dualwave -- list
@@ -68,315 +187,130 @@ cargo run -p dualwave -- mic-probe --source headset --seconds 10
 cargo run -p dualwave -- run --source auto --volume 60
 ```
 
-For `run`, select **DualWave Headphones** for playback and **DualWave Microphone**
-for recording in your desktop or application's sound settings. Recording is
-admitted only while an application uses the PipeWire microphone and it is not
-muted. The source choices are `auto`, `builtin`, and `headset`; `auto` lets the
-controller choose. `--volume` accepts 0–100 and controls the headphone hardware
-volume. Ctrl+C/SIGTERM stops the stream and disables microphone admission.
-`--seconds N` bounds any test or session. Neither normal operation nor probes
-save microphone audio.
+`list` reads sysfs; `probe` reads status and a CRC-checked firmware feature report.
+`pipewire-probe --seconds 10` exposes endpoints without opening or writing to a
+controller. `tone`, `mic-probe` and `run` explicitly start their corresponding
+sessions. Source choices are `auto`, `builtin` and `headset`; `--seconds N` bounds
+a session. Ctrl+C/SIGTERM stops streaming and disables microphone admission.
 
-`list` reads sysfs only. `probe` reads status and a CRC-checked firmware feature
-report. `pipewire-probe --seconds 10` exposes the two endpoints without opening
-or writing to any controller. No audio is sent unless you explicitly start
-`tone`, `mic-probe`, or `run`.
+The current driver exposes a receive-only **DualWave Microphone Transport** HID
+child. It validates the Bluetooth CRC, keeps state reports on the gamepad and
+routes microphone reports to that child before HID core publishes them to raw
+controller readers. The child identity and ancestry are checked before use.
 
-### Input permissions for experimental audio mode
+Without the child, legacy audio mode requires Steam to be closed and temporarily
+grabs the controller's evdev devices. It is unsuitable for gameplay during audio.
+The first tested state-parser filter alone does not isolate microphone packets
+from raw-HID game clients. Close other controller tools before audio probes.
 
-Upstream's `AGENTS.md` requires Steam to be closed or the physical media stream
-hidden from it before speaker/microphone probes. DualWave now checks for a
-receive-only vendor HID child named **DualWave Microphone Transport** below the
-selected controller. In this mode the patched driver validates the Bluetooth
-CRC, keeps state reports on the original gamepad and routes microphone reports
-unchanged to the child. It stops those reports before HID core publishes them
-on the physical hidraw node, so raw-HID game clients do not receive microphone
-bytes. The original evdev input remains available and is not grabbed.
+No controller firmware is flashed, and the driver does not start an audio stream
+on its own. Source provenance and the patch are under `packaging/kernel/`.
+`dualwave_audio` defaults to off in the module; the DKMS package opts in. Its
+read-only `dualwave_mic_muted` attribute preserves physical-mute synchronization.
+Long-running clock drift, adapter compatibility and forced-crash cleanup still
+need production validation; reconnect after forcibly terminating a session.
 
-Without that child, DualWave retains legacy mode: Steam must be closed and the
-controller's evdev devices are grabbed temporarily. Legacy mode cannot be used
-for gameplay during audio. Merely loading the first state-parser filter does
-not provide Steam isolation: audio still reaches physical hidraw readers.
+</details>
 
-Access is limited to Sony's Bluetooth standard DualSense (`054c:0ce6`). To give
-the active desktop user access to its hidraw and input nodes, install the
-provided rule, reload udev and reconnect the controller:
-
-```sh
-sudo install -m 644 packaging/70-dualwave.rules /etc/udev/rules.d/70-dualwave.rules
-sudo udevadm control --reload-rules
-```
-
-Reconnect the controller after these commands. Do not run DualWave as root or
-add your user to the global `input` group. The rule grants access only on the
-active local seat. Removing the rule and reconnecting restores the prior
-permissions. A second DualWave process cannot claim the same controller.
-
-### Kernel media-packet filter (experimental)
-
-[`packaging/kernel/0001-ignore-dualsense-media-as-input.patch`](packaging/kernel/0001-ignore-dualsense-media-as-input.patch)
-adds a type check after the existing Bluetooth CRC check in `hid-playstation`.
-State types 0/1 keep their existing path. With media isolation enabled,
-microphone packets go only to the dedicated vendor HID child; other non-state
-types are discarded. With isolation disabled, non-state packets remain on
-physical hidraw but bypass controller-state parsing, as in the first tested
-filter. This targets false input, battery and hardware mute updates without
-starting audio on its own.
-
-The full patched driver, the vendor HID helper and source provenance are
-shipped in `packaging/kernel/`. They retain **GPL-2.0-or-later**; the userspace
-bridge remains MIT. `source/upstream.json` records hashes of the original Linux
-source files. No controller packets are changed, no controller firmware is
-flashed, and the driver itself does not start any radio audio stream.
-
-The module parameter `dualwave_audio` defaults to off. The DKMS package opts in
-through `options hid_playstation dualwave_audio=1`. The child is not a Sony
-controller and has no gamepad descriptor or output reports. Its HID identity,
-name and ancestry are checked before DualWave uses it. The read-only
-`dualwave_mic_muted` sysfs attribute keeps the app's mute state aligned with the
-driver's button handling, including when the app restarts while muted.
-
-### Persistent driver on CachyOS / Arch
-
-Build the source-only package without root (the builder requires `makepkg`):
+<details>
+<summary>DKMS packaging, device access and removal</summary>
 
 ```sh
 python3 packaging/build-kernel-package.py
 ```
 
-It stages checksummed sources in `target/packages/dualwave-hid-dkms/`.
-The AppImage includes that local package: its first-launch setup requests one
-administrator authorization, installs matching missing kernel headers and system
-support, and enables the virtual-controller socket for the next boot. Reboot
-once afterwards. Normal application use runs without administrator privileges.
-Automatic setup currently targets CachyOS. No system installation has yet been
-performed or hardware-validated by the agent.
+The source-only package is staged in `target/packages/dualwave-hid-dkms/` and
+includes scoped udev rules, a `dualwave` group for uinput/USB-IP broker access,
+and systemd socket units. The AppImage's setup installs missing matching headers,
+runs package hooks and enables the broker for the next boot. It does not replace
+a loaded controller module during an active session.
 
-The package includes the source-only DKMS module, narrowly scoped udev rules,
-a `dualwave` group for uinput and the USB/IP broker, and systemd socket units.
-The active module is never replaced during a running session. Arch package
-hooks rebuild DKMS and initramfs and reload udev rules. Future kernel API
-compatibility still depends on successful DKMS builds and matching headers.
-The sources compiled against `7.2.9-2-cachyos` and `6.18.55-2-cachyos-lts`.
+The sources have compiled against `7.2.9-2-cachyos` and
+`6.18.55-2-cachyos-lts`; future kernel compatibility still depends on a successful
+DKMS build and matching headers. The USB/IP broker tracks local ownership and
+releases imported virtual ports when clients exit. After a broker restart,
+restart the application's virtual controller rather than adopting a busy port.
 
-The broker accepts only a local imported TCP socket from an authorized local
-process, tracks ownership and releases matching virtual ports when clients exit.
-It cannot adopt existing busy ports after a broker restart; restart the app's
-virtual controller after such a restart.
+The manual development udev rule is `packaging/70-dualwave.rules`. Reconnect after
+installing/reloading it. Do not run DualWave as root or add the user to the global
+`input` group; access is scoped to the active local seat and supported device.
 
-Build the AppImage on CachyOS with an official `appimagetool` executable:
-
-```sh
-python3 packaging/appimage/build.py --appimagetool /path/to/appimagetool
-```
-
-Output: `target/appimage/DualWave-x86_64.AppImage`. This build uses the host's
-glibc and graphics stack; compatibility with older distributions is not claimed.
-Use `--check` to verify its bundled driver payload, `--plan` to inspect setup
-without installing, or `--cli list` for read-only controller discovery.
-
-To remove the packaged override and return to the stock module:
+To return to the stock controller module:
 
 ```sh
 sudo pacman -R dualwave-hid-dkms
 sudo mkinitcpio -P
 ```
 
-Reboot afterwards. Any manually installed `/etc/udev/rules.d/70-dualwave.rules`
-is independent of the package's `/usr/lib/udev/rules.d/70-dualwave.rules`; remove
-the manual copy as well if you want to undo that access rule.
+Reboot afterwards. A manually installed
+`/etc/udev/rules.d/70-dualwave.rules` is separate from the packaged rule under
+`/usr/lib/udev/rules.d/`; remove that manual copy too if undoing device access.
 
-References: [Linux driver](https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/refs/heads/master/drivers/hid/hid-playstation.c),
-[Arch DKMS package guidelines](https://wiki.archlinux.org/title/DKMS_package_guidelines).
+</details>
 
-## Validation
+## Development and verification
 
 ```sh
-cc -std=c11 -Wall -Wextra -Werror packaging/kernel/test-routing.c -o /tmp/dualwave-routing-test
-/tmp/dualwave-routing-test
 cargo test --workspace --locked
 cargo clippy -p dualwave --all-targets --locked -- -D warnings
+python3 -m unittest discover -s packaging/tests -v
+cc -std=c11 -Wall -Wextra -Werror packaging/kernel/test-routing.c -o /tmp/dualwave-routing-test
+/tmp/dualwave-routing-test
 ```
 
-The C SPSC ring can also be exercised with address/undefined-behavior sanitizers
-(the flags below use the Arch header paths):
+Linux CI also runs the concurrent PipeWire ring-buffer tests with address and
+undefined-behavior sanitizers. Upstream Windows/MSVC integrations require their
+own checks; a Linux build does not validate them.
+
+Debug builds support isolated, controller-free UI captures:
 
 ```sh
-cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -I/usr/include/pipewire-0.3 -I/usr/include/spa-0.2 \
-  crates/dualwave/tests/pipewire_ring.c -lpipewire-0.3 -lpthread -lm \
-  -o /tmp/dualwave-ring-test
-/tmp/dualwave-ring-test
+DSZ_DATA_DIR=/tmp/dualwave-preview \
+DSZ_SNAPSHOT=/tmp/dualwave-controller.bmp \
+DSZ_SNAPSHOT_SIZE=1240x800 \
+  target/debug/dsz --page workspace
 ```
 
-The ring test transfers 500,000 stereo frames concurrently and crosses index
-wraparound. Strict Clippy on `ds-proto --all-targets` additionally reports two
-pre-existing upstream test lints (`identity_op`, `useless_vec`); the port's own
-strict Clippy check passes without changing those upstream tests.
+`DSZ_SNAPSHOT_PART` chooses `lighting`, `triggers`, `buttons` or `motion`.
+`DSZ_SNAPSHOT_SECTION` selects a Preferences/Profile subpage, and
+`DSZ_SNAPSHOT_BOTTOM=1` captures the end of a long editor. These switches are
+for debug snapshots only; they do not open controllers or start the audio engine.
 
-The upstream Windows app still needs its own Windows/MSVC workspace checks.
-A Linux build does not validate its Windows integrations. The Linux port reuses
-upstream CRC/report builders, Opus settings and the measured 16:15 audio
-resampler; audio-only control reports leave triggers, rumble and lighting flags
-invalid. Playback buffering and microphone loss concealment are bounded, but
-long-running clock drift, adapter compatibility and crash cleanup are not yet
-production-validated. SIGKILL cannot run microphone cleanup; reconnect the
-controller after a forced termination.
+| Path | Responsibility |
+| --- | --- |
+| `crates/ds-proto` | Controller protocol, CRCs, reports and trigger effects |
+| `crates/dsz` | Native application, profiles, device workers and Linux backends |
+| `crates/dsz/src/ui` | Native egui views, navigation, widgets and theme |
+| `crates/dualwave` | Standalone PipeWire/audio diagnostics |
+| `packaging` | AppImage, DKMS sources, permissions, broker and system setup |
+| `vendor` | Patched eframe and bundled libopus sources |
+| `.github/screenshots` | Reproducible captures of the native UI |
 
-## Attribution
+## Credits and licenses
 
-DualWave is an independent Linux fork, not an official Sony product. DSZ's
-original MIT notice remains in [LICENSE](LICENSE); libopus, eframe and the
-OpenController drawings retain their original licenses. Protocol references
-are listed in the upstream documentation below. The native PipeWire bridge
-uses the official [stream API](https://docs.pipewire.org/group__pw__stream.html)
-and [audio stream tutorial](https://docs.pipewire.org/page_tutorial4.html).
+DualWave preserves DSZ's original history and MIT notice. Thanks to
+[MaximumFreak](https://github.com/MaximumFreak/dsz),
+[OpenController / Brunovncs](https://github.com/Brunovncs/OpenController), the
+DS4Windows contributors and the controller-research community.
 
-## Upstream documentation: DSZ - DualSense Zen
+| Component | License |
+| --- | --- |
+| DualWave userspace and original DSZ | [MIT](LICENSE) |
+| Patched Linux driver/helper | [GPL-2.0-or-later](packaging/kernel/COPYING) |
+| Instrument Sans interface fonts | [SIL OFL 1.1](crates/dsz/assets/InstrumentSans-OFL.txt), [original project](https://github.com/Instrument/instrument-sans/tree/7fa22308a3d0c94ee2b3cd537a1196b65db34a3e) |
+| Manrope “WAVE” signature | [SIL OFL 1.1](crates/dsz/assets/Manrope-OFL.txt) |
+| OpenController drawings | [MIT](crates/dsz/assets/OpenController-LICENSE) |
+| libopus | [BSD-3-Clause](vendor/opus/COPYING) |
+| eframe | MIT or Apache-2.0; see `vendor/eframe` |
 
-**DSZ - DualSense Zen** is a fast, native Windows companion for the PlayStation DualSense, DualSense Edge, and DualShock 4 controllers, written in Rust: lighting, adaptive triggers, Bluetooth haptics and speaker audio, gyro and touchpad mouse, button mapping, virtual Xbox 360 / DualSense / DualShock 4 controllers, and per-game profiles.
+The interface bundles Instrument Sans Regular, Medium and SemiBold unchanged
+from upstream revision `7fa22308a3d0c94ee2b3cd537a1196b65db34a3e`; the existing Manrope
+ExtraBold signature is retained. Font licenses are included in the AppImage.
 
-## Why use it
-
-- **Game haptics and adaptive triggers over Bluetooth.** Games with native DualSense support normally only do this over a USB cable.
-- **Automatic DualSense mode.** When you launch a game, DSZ detects whether it supports the DualSense natively. If it does, DSZ switches to a virtual DualSense, so the game's own haptics and adaptive triggers work. For a Steam, GOG, or Xbox app game that doesn't, you choose the virtual controller: DualShock 4, Xbox 360, or the profile's own. It switches back when the game closes. ([How it works](#automatic-dualsense-switching))
-- **The rest of the controller:** lighting, adaptive triggers in any game, system audio as haptics, touchpad and gyro mouse, button mapping, and per-game profiles.
-- **Extremely fast and lightweight:** a single `.exe` with nothing to install. It starts in about 0.2 s and uses under 1% CPU in the tray. ([Performance](#performance))
-- **Free and open source**, with no account or license check.
-
-### What to know first
-
-- **Windows 10 or 11 only**, for the DualSense, DualSense Edge, and DualShock 4 (an official pad, Sony's USB adapter, or a common pad that speaks the DualShock 4 reports). A DualShock 4 gets buttons, sticks, gyro, the touchpad, the lightbar, and classic rumble. Adaptive triggers, the Bluetooth haptic stream, and the speaker are DualSense only.
-- **Virtual controllers need two free, open-source drivers:** usbip-win2 (the app installs 0.9.8.1, the current release; an already-installed 0.9.7.7 or 0.9.8.0 attaches too) and HidHide. The app installs either in one click (see [Drivers](#drivers)). Without them it still does lighting, triggers, haptics from system audio, mouse modes, and mappings, but games see the real controller.
-- **Close other controller apps while it runs.** Only one app can drive the controller at a time. If buttons double up or lights flicker in a Steam game, turn Steam Input off for that game.
-- **This is an early release (0.3)**, tested on one PC with a DualSense Edge over Bluetooth. DualShock 4 support has not been tried on a real DualShock 4 yet. Expect rough edges, and please report them.
-
-## Performance
-
-Measured on one PC with a DualSense Edge over Bluetooth (about 670 input reports a second), launched cold with no game running, next to another popular DualSense app with the same setup. Figures are rounded; results on other PCs will differ.
-
-| | DSZ | Another DualSense app |
-|---|---|---|
-| **Startup** | | |
-| Window visible after launch | about 0.2 s | a few seconds |
-| Virtual controller ready | about 0.2 s | several seconds |
-| **Input lag** (controller to virtual controller) | | |
-| Typical | a few hundredths of a ms | about the same |
-| Worst case | under 1 ms | occasional hitches of tens of ms |
-| **Game trigger feedback** (game sends an effect, until the trigger motor moves) | | |
-| Typical | about 30 ms | about 40 ms |
-| **Window open, controller in use** | | |
-| CPU (% of one core) | about 7% | about 3× more |
-| Memory | about 100 MB | about 4× more |
-| **In the tray, game rumble playing** | | |
-| CPU (% of one core) | under 1% | about 2× more |
-| Memory | about 100 MB | about 4× more |
-
-Trigger feedback includes both Bluetooth trips and the trigger motor starting, so most of it is the controller itself.
-
-Part of the low overhead is that every virtual controller is served inside the app itself, built from the USB/IP and USB Audio Class specifications. No separate USB/IP server such as VIIPER is used, so there is no extra process and no IPC hop. And because the app contains no VIIPER code (VIIPER is GPL-3.0), it stays MIT.
-
-## Download and run
-
-Download `dsz.exe` from the [Releases](../../releases) page and run it; there is nothing to install. The exe isn't code-signed, so the first time you run it Windows SmartScreen may say "Windows protected your PC": choose **More info**, then **Run anyway**.
-
-DSZ asks GitHub once a day whether a newer release is out (Settings → Updates, where the check can be turned off). It says so in the window, in the sidebar, and with a tray notification, but installs nothing by itself, since a restart reconnects the virtual controllers. DSZ never downloads a program itself (an app that fetches an exe and starts it looks like a "downloader" to antivirus heuristics, which is why Kaspersky flagged 0.3.8). **Download** has your browser download the release's `dsz.exe`, so it is scanned like any download. DSZ finds it in the Downloads folder (or **I saved it somewhere else…** points to it), checks it against the SHA-256 GitHub publishes for it, and offers **Install and restart**: that renames the running exe to `dsz.exe.old`, copies the new one into its place, and starts it; the new version deletes the old file. If DSZ can't write to its folder, it says so; replace `dsz.exe` there by hand.
-
-### Portable
-
-Settings, profiles, and the log live in `%APPDATA%\DSZ\`, unless a folder named `dsz-data` sits next to `dsz.exe`: then they live there, and nothing goes in `%APPDATA%`. Settings → Backup & restore → **Keep settings beside dsz.exe** makes that folder and moves everything into it (or back), then restarts DSZ; making an empty `dsz-data` folder by hand also works, starting from fresh settings. Start with Windows is a registry entry and is not carried by the folder.
-
-### Build from source
-
-On Windows with the Rust toolchain (MSVC):
-
-```powershell
-cargo run --release -p dsz
-```
-
-The release build is a single file, `target\release\dsz.exe`. Settings, profiles, and the log live in `%APPDATA%\DSZ\` (or `dsz-data` beside the exe, see [Portable](#portable)). Settings → Backup & restore saves every profile and setting to one file and restores it (the current setup is saved to `backups\` first); "Open settings folder" there opens the folder in use.
-
-Flags: `--minimized` starts in the tray (the window isn't shown until the tray opens it); `--page <name>` opens a page (`workspace`, `audio`, `lighting`, `adaptive`, `haptics`, `motion`, `button`, `virtual`, `profiles`, `settings`; existing prefixes still open the full editors); `--edit <profile>` opens a profile for editing without activating it; `--probe-virtual <hidhide|usbip-x360|usbip-ds4|usbip-ds|install-check|game-output|tone|default-audio|speaker|speaker-ab|mic-listen>` checks one virtual-device driver from a console (`usbip-x360` attaches a virtual Xbox 360 pad and checks XInput and rumble; `usbip-ds4` reads a virtual DualShock 4 back through HID; `usbip-ds` attaches a virtual DualSense, reads it back through HID, and plays a 4-channel tone into it; `install-check <file|url>` shows what the driver-install check sees; `game-output` and `tone` act like a game against the running app's virtual DualSense). `DSZ_PERF=1` logs UI frame rate. `DSZ_DATA_DIR=<folder>` runs with a separate settings folder, for testing. In debug builds, `DSZ_SNAPSHOT=<file.bmp>` renders the window once, saves it, and exits (it doesn't open controllers, so it runs beside the real app), `DSZ_SNAPSHOT_SIZE=<W>x<H>` sets the window size in points, and `DSZ_SNAPSHOT_PART=<lighting|triggers|buttons|motion>` chooses the workspace inspector; `DSZ_DEMO=1` shows the no-controller drawing with a few inputs live.
-
-A fresh install starts with two profiles, from `crates\dsz\defaults\`: **Xbox** (a virtual Xbox 360 controller, touchpad as mouse, a dim red lightbar) and **DualSense** (a virtual DualSense with game haptics, PS works as the Xbox button: hold it for Task View). A long press on Mute switches between them, and games with native DualSense support switch to DualSense on their own.
-
-## What it does
-
-| Area | Features |
-|---|---|
-| Workspace | Four destinations (Controller, Audio, Profiles, Preferences), selectable OpenController vector regions and physical face buttons, and contextual Lighting/Triggers/Buttons/Motion inspectors. Quick volume, microphone permission/mute and requested virtual output stay beside truthful actual output/capture status. Off/Light/Heavy/Pistol/Rifle/Bow trigger presets have curves and side-specific strength. Simulation and pointer perspective are visual only. Full editors remain under Advanced. Flat light/dark/system themes, bundled Manrope (OFL), finite transitions and reduced motion are supported; desktop motion preferences are read once at startup on Windows, KDE and GNOME, with the explicit preference available on other desktops. |
-| Connection | Bluetooth and USB; DualSense, Edge, and DualShock 4 (official pads, Sony's USB adapter, and common DS4-shaped gamepads), hot-plug in under a second. Read timeouts never drop the device and write errors back off and retry; a controller goes away only when Windows removes its node. Bluetooth input CRCs are checked, and a DualShock 4 clone whose CRC never matches is still read |
-| Lighting | Static, rainbow, breathing, strobe, battery gradient, off, and system-audio loudness (green, yellow, red, with thresholds); brightness and speed; player LEDs (player 1–5, custom, battery gauge); mute LED (off, on, pulse, toggle with button); low-battery warning (a double blink every 2.5 s, 15 % by default) |
-| Adaptive triggers | Resistance, weapon, vibration, slope, per-zone resistance and vibration (drag to paint), bow, galloping, machine, and named presets (Very soft to Rigid, GameCube click, Choppy, Vibrate pulse) built from those effects; live zone preview with the current pull |
-| Wireless haptics | PCM haptics over Bluetooth (report `0x32`, one every 32/3000 s), from system audio (WASAPI loopback, any output device) with high-pass and low-pass filtering, stereo, and gain; button clicks placed under the grip you pressed; trigger texture. The stream takes the actuators only while something needs it (system audio, clicks, trigger texture, game haptics, a test pulse); the rest of the time rumble goes to the controller's own rumble emulation (power and "improved rumble" apply). While streaming, or with "Rumble as haptics" on, rumble plays through a rumble-to-haptics conversion: heavy motor 34–50 Hz on the left, light motor 85–110 Hz on the right, weak rumble lifted, smoothed. The `0x31` control report keeps flowing alongside, and changes from a game or mod are sent at once instead of on the next 8 ms tick. Game actuator channels from a virtual DualSense mix into the same stream (see Virtual controller) |
-| Controller speaker | Speaker sound over Bluetooth (report `0x39`): a game's own speaker channels from a virtual DualSense, and optionally PC audio, which is separate from the haptics source: PC sound can play on the speaker or headset while the haptics come from the game, or also drive the haptics ("Audio to vibration"). While there is speaker sound the stream sends a report every 21.3 ms (two haptic blocks at 3 kHz) with two Opus frames (libopus, built in: 160 kbit/s CBR). The controller plays both frames over that one tick, as its own microphone shows (a 440 Hz tone sent as plain 48 kHz comes back at 412.5 Hz), so each report carries 21.3 ms of audio squeezed 16:15 with a windowed-sinc resampler. A stream starts with three silent reports as a cushion against radio jitter, and returns to `0x32` five seconds after the sound stops. `--probe-virtual speaker` and `speaker-ab` check all of this on a controller without injecting input. Some Bluetooth adapters pause the link for about 25 ms a couple of times a second (seen as late input reports even with nothing streaming); each pause can leave a short gap in the speaker sound, in any app. `--probe-virtual mic-listen --full` measures those pauses without writing to the controller. The speaker plays a mono mix; with "Headset when plugged in" a headset in the controller's jack gets stereo instead (Opus packet `0x16`, the headphone volume set from the speaker volume, the speaker muted), switching both ways as the plug goes in and out. The game's clock is followed with a small read-rate correction instead of dropped frames, and sound fades in and out at gaps, so the speaker doesn't click. Volume, a level meter and a test sound are on the Haptics page |
-| Bluetooth microphone | Experimental and off by default (Haptics page, per profile). The controller's built-in microphone, or a headset microphone in its jack, becomes the virtual DualSense's Windows recording device ("Wireless Controller"), so Discord or a game can use it over Bluetooth. Source (auto, built-in, headset), mute, gain, the Mute button as a real mute (its LED shows the state), and a level meter. The controller's microphone runs only while an app records from it (and Windows hasn't muted it), so the rest of the time the radio and idle power-off are as before. Packets (`0x31` type 2) are checked by CRC and decoded on their own thread (Opus, with loss concealment for short gaps), through bounded queues, and speech left in a buffer is dropped on mute, source change and disconnect. Windows' microphone level starts at the controller's own level; lower is quieter. Until the microphone has been turned on for a connection, the speaker and haptics reports are byte for byte what they were before; after that their microphone bit follows recording. Needs Bluetooth and a virtual DualSense; over USB, use the controller's own Windows microphone |
-| Motion & touch | Gyro mouse (always, hold, unless held, toggle; turn, lean, or both; soft deadzone, tiered smoothing, acceleration, auto and manual calibration), touchpad mouse (one-finger tap left click, two-finger tap right click, press to click and drag, optional right-half right click, two-finger scroll; movement waits 60 ms after a finger lands so taps and presses don't nudge the cursor), sticks as mouse, scroll, WASD, or arrows |
-| Mappings | Any button or button combo, including Edge paddles and Fn, to keys and key combos, mouse buttons, scroll, media keys, a PlayStation or Xbox controller button, switching to a named profile or next/previous, toggling gyro or touch mouse, launching a program, or turning a Bluetooth controller off. Touchpad Left, Center, and Right are the touchpad click in each third of the pad, next to the whole-pad Touchpad. Press, long press, double tap; hold, tap, turbo, toggle. "Hide from game" removes the button (or the combo's buttons while it is held) from the virtual controller. An Xbox button on a profile without a virtual Xbox controller goes to a helper Xbox 360 pad, because Windows takes the Xbox button only from an Xbox controller (PS on a virtual DualSense or DualShock 4 does nothing). With HidHide the helper is hidden before Windows sees it, from everything but explorer.exe (which opens Task View on a Guide hold) and Game Bar, and stays plugged in while a profile uses it; the nodes Windows makes below it are hidden as they appear and remembered for next time. Without HidHide the helper is plugged in for the press (games can see it; Windows needs about a second to notice it, so the first press is replayed late) and unplugged 30 seconds later |
-| Virtual controller | Per profile: off (native), Xbox 360, DualSense, or DualShock 4. Every virtual pad is a wired USB controller the app serves itself over USB/IP to usbip-win2, so that is the only virtual-controller driver needed. The Xbox 360 pad presents the real controller's USB identity and vendor interface, so Windows' built-in Xbox 360 driver (`xusb22`) loads and XInput sees it; rumble and the ring LED (which gives its XInput slot) come back on its OUT endpoint. SDL games find it through raw input, which lists a device only at the moment it arrives, so a pad plugged in for later is hidden only after raw input has listed it, and the pad in use is checked every 5 seconds and plugged in again if raw input has lost it. A pad hidden while parked is plugged in again when it comes back into use only if something may have looked for controllers while it was hidden (it was hidden when Windows first saw it, or a game started meanwhile is still running), since showing a device again makes no arrival; otherwise the switch back makes no reconnect. Game Bar no longer reads DualSense pads (Windows updates of October 2026), so while its overlay is open (found by hit-testing the screen, since it never takes the foreground) the parked pad gets the whole mapped pad and the game's virtual pad sends idle input; Game Bar is let through the parked pad's hiding. The DualShock 4 is a plain HID device with the controller's report layout, carrying the DualSense's motion and touch, for games that show PlayStation prompts only for one; its rumble and lightbar come back. The virtual pad is plugged in when the app starts, before any controller, so it takes the first free XInput slot, and it stays connected (idle, with the real controller still hidden) while the controller sleeps or drops out; the controller takes the same pad back when it reconnects. "Stay connected while the controller is off" on the Virtual controller page turns this off. Games get the mapped and muted pad with per-stick deadzones (radial, axial, or a curve with inner and outer zones, a response curve, and an optional lift), axis inversion, and trigger ranges. Game rumble comes back and plays as haptics over Bluetooth. The physical controller is hidden with HidHide while the virtual one is up, this app is whitelisted, every change is undone on exit, and crash leftovers are undone at the next start. DualSense mode is a wired DualSense the app serves itself over USB/IP to usbip-win2: games get its HID interface and its 4-channel 48 kHz audio endpoint, and the app relays output reports (rumble, adaptive triggers, LEDs) and game audio (actuators to haptics over Bluetooth, or classic rumble when PCM is off; speaker channels to the controller speaker over Bluetooth). Windows' habit of making a new USB audio device the default is undone, so system sound and the default microphone stay where they were; if you pick the virtual DualSense as the default yourself, that choice is kept, also the next time it is plugged in. See below |
-| Profiles | Create, duplicate, rename, delete, import and export single profiles as JSON (back up or restore everything at once in Settings); per-controller assignment, or every controller on the default profile at startup; per-game automatic switching (most recently started game wins, restored on exit). Games with native DualSense support switch to a chosen DualSense profile without a rule: each new program's folder and exe are checked once for Sony's pad library (`libScePad`, `scePad*` calls), Wwise's DualSense haptics sink (`AkScePad`), DualSenseWindows (`ds5w`), DualSense controller names, a DirectInput button mapping for the DualSense or Edge (`0CE6054C-0000-0000-0000…`), a UTF-16 "DualSense" together with `hid.dll` (a game with its own HID code, or Unreal's WinDualShock plugin), SDL with its PS5 driver (`SDL_JOYSTICK_HIDAPI_PS5`, built into the exe, or in an `SDL2.dll`/`SDL3.dll` beside it that the exe opens gamepads through), or Rewired's DualSense driver (`DualSenseExtension` in `<game>_Data\Managed\Rewired_Core.dll`), and the answer is cached in `dualsense-detect.json`. A cached "no" from an older version of the check is checked again. On the reference PC this flags Alan Wake 2, Baldur's Gate 3, Elden Ring, Final Fantasy XIV, Animal Well, Oddsparks and RPCS3, and not Creed: Rise to Glory, Chrome, Edge, Discord, VS Code, the Epic launcher, Rocket League, Octopath Traveler II, or any of 512 other programs installed there. `--probe-virtual dsdetect [--path <exe>]` runs the check by hand |
-| Mod API | UDP server on `127.0.0.1:6969` speaking the protocol existing DualSense game mods use (see [Mod compatibility](#mod-compatibility)): `TriggerUpdate` with trigger modes 0–26 (custom trigger values Off through PulseAB), `RGBUpdate`, `PlayerLED`, `PlayerLEDNewRevision`, `TriggerThreshold`, `MicLED`, `ResetToUserSettings`, and `GetDSXStatus`, with the status reply mods read. Extensions: `HapticPulse` `[index, left%, right%, Hz, ms]` and `Rumble` `[index, heavy, light, ms]` |
-| Emulator motion | Off by default. Settings → Emulator motion turns on a DSU (cemuhook protocol) server on `127.0.0.1:26760`, which gives Dolphin (Wii Remote motion and pointing), Cemu (Wii U GamePad), and Ryujinx and yuzu-family Switch emulators each controller's gyro and accelerometer, plus its own buttons, sticks, touch, and battery, in slots 0–3 by connection order. Motion is sent the way DSU clients expect from a DualShock 4 (accelerometer in g, gyro in deg/s with DSZ's bias correction). Dolphin doesn't map the motion inputs itself on Windows: each Accelerometer and Gyroscope box in the Wii Remote's Motion Input tab needs its DSU input, such as `` `DSUClient/0/DSZ:Gyro Pitch Up` `` for a server named DSZ, and the card says how. The profile's gyro mouse should be off while playing |
-| Battery | The haptic stream runs only while something needs it. Animated lighting sends at most 40 control reports a second (34/s measured on an Edge, down from 100), while trigger, rumble, and LED changes still go out at once. Idle power-off for Bluetooth is in Settings. The output report's power-save bits were tested and do not switch the motion sensors off over Bluetooth, so they stay unused |
-| App | Tray icon with profile switching and battery tooltip, close-to-tray, start with Windows, Bluetooth power-off and idle shutoff, live log viewer. The interface is in English, Português (Brasil), or Português (Portugal) (Preferences → Language; English unless you pick another). Translations live in `crates/dsz/locales/pt-BR.json` and `pt-PT.json`, keyed by the English text; missing strings fall back to English. Profile names, saved data, CLI page names and logs remain untranslated |
-
-### Automatic DualSense switching
-
-The first time a game runs, the app checks its files once for signs of native DualSense support: Sony's PC pad library, Wwise's DualSense haptics, DualSenseWindows, DualSense controller names, a DirectInput mapping for the DualSense (as in Final Fantasy XIV), its own HID code that names the DualSense (as in Animal Well), SDL with its PS5 driver (as in Astral Ascent and Blood: Refreshed Supply), or Rewired with its DualSense driver (as in Death Squared). SDL and Rewired games read the DualSense natively, so they show PlayStation prompts and use rumble and the lights, though most don't use the haptics or adaptive triggers. While a game that has them is running, the controller switches to your DualSense profile, which presents a virtual DualSense, so the game's own haptics and trigger effects reach the controller. When the game closes, it switches back.
-
-Steam, GOG, and Xbox app games without that support can present a virtual DualShock 4 or Xbox 360 instead (Profiles & games, Other games). Until you choose one, they keep the profile's own virtual controller. Store apps that aren't games and often run in the background (Wallpaper Engine, Lossless Scaling, SteamVR, redistributable installers) don't count. A per-game rule overrides the check, and a long press on Mute switches by hand.
-
-### Mod compatibility
-
-Game mods that drive adaptive triggers and lights send JSON over UDP to port 6969. DSZ's side of that protocol follows what these public mods send and read: instruction types, trigger modes and the order of their parameters, LED values, and the status reply. Trigger modes 19–26 follow [Nielk1's trigger effect generator](https://gist.github.com/Nielk1/6d54cc2c00d2201ccb8c2720ad7538db) (MIT), whose parameter order the mods that use them match. The named presets (Very soft to Rigid, GameCube, Choppy, Vibrate pulse) are DSZ's own effects, since mods send only the name. Custom trigger values support Off, Rigid, and Pulse (plain, A, B, and A+B), with the mode bytes pydualsense documents.
-
-`udp.rs` has one test per mod that replays packets as that mod builds them (number or string parameters, booleans, missing parameter lists) and checks what DSZ does with each.
-
-| Mod | Game | License |
-|---|---|---|
-| [dvize/TarkovDSX](https://github.com/dvize/TarkovDSX) | Escape from Tarkov | MIT |
-| [dvize/DSXFallout4](https://github.com/dvize/DSXFallout4) | Fallout 4 | MIT |
-| [dvize/DSXSkyrim-NG](https://github.com/dvize/DSXSkyrim-NG) | Skyrim | GPL-3.0 |
-| [tommargar/DualSense4Rockstar](https://github.com/tommargar/DualSense4Rockstar) | GTA V, Red Dead Redemption 2 | none stated |
-| [SYSTEMATI0N/WF2_DSX](https://github.com/SYSTEMATI0N/WF2_DSX) | Wreckfest 2 | MIT |
-| [cosmii02/ForzaDSXlegacy](https://github.com/cosmii02/ForzaDSXlegacy) | Forza Horizon 4 and 5, Forza Motorsport 7 | none stated |
-| [aaronfang/RBR_Adaptive_Trigger](https://github.com/aaronfang/RBR_Adaptive_Trigger) | Richard Burns Rally, Assetto Corsa | none stated |
-| [RiddleTime/Race-Element](https://github.com/RiddleTime/Race-Element) | Sim racing (ACC and others) | GPL-3.0 |
-| [tpetsas/DSXpp](https://github.com/tpetsas/DSXpp) | C++ client library for mods | MIT |
-| [Tio-Henry/DualSenseX-Support](https://github.com/Tio-Henry/DualSenseX-Support) | Godot engine add-on | MIT |
-
-
-### Drivers
-
-Nothing is bundled. The Virtual controller page shows what is installed and installs a missing driver in one click: it downloads the pinned release from the project's GitHub page, checks it (usbip-win2 against its published SHA-256, HidHide by its author's Authenticode signature, since that release publishes no hash), and opens its installer, which asks for admin. `install.rs` has the URLs.
-
-| Driver | Used for | On the reference PC |
-|---|---|---|
-| [usbip-win2 **0.9.8.1**](https://github.com/vadimgrn/usbip-win2/releases/tag/v.0.9.8.1) (free, BSD-2, Microsoft attestation-signed) | Every virtual controller: Xbox 360, DualShock 4, and DualSense with game haptics | Works: Xbox 360, the hidden helper pad, and the virtual DualSense with its game audio endpoint. On [0.9.7.7](https://github.com/vadimgrn/usbip-win2/releases/tag/v.0.9.7.7), the release the timings were taken on: Xbox 360 in XInput slot 0 within 0.19 s with rumble and LED back; DualShock 4 read back through HID; DualSense input at the physical report rate, with output reports and the 4-channel audio endpoint at 48 kHz. **Not 0.9.7.8**, which winget installs by default: its author warns it corrupts memory, it blue-screened the reference PC twice, and the app refuses it. 0.9.7.7 and [0.9.8.0](https://github.com/vadimgrn/usbip-win2/releases/tag/v.0.9.8.0) attach too, if they are already installed: each release changed the attach request (0.9.8.0 made it larger, and on 0.9.8.1 the bus id, service, and host sit four bytes later), which is why the app pins a release it knows rather than the newest one. Upgrading from 0.9.7.7 took two restarts on the reference PC, and the first try hung in 0.9.7.7's uninstaller until a restart |
-| [HidHide **1.5.230**](https://github.com/nefarius/HidHide/releases/tag/v1.5.230.0) (free, open source, signed) | Hiding the physical controller from games while a virtual one is up | Works |
-
-The virtual DualSense is the app's own code (`virt\usbip\`): a USB/IP server on 127.0.0.1 that answers every URB, attached through usbip-win2's `PLUGIN_HARDWARE_ONCE` IOCTL. Isochronous audio URBs complete at the end of their real-time window, so the Windows audio engine runs at 48 kHz, and PCM reaches the haptics streamer as soon as a URB arrives. Its USB serial number (served in its own device descriptor) starts with `DSZV`, which is how the app skips its own virtual pad when it looks for physical controllers. The virtual DualShock 4's serial is 12 hex digits instead, because Steam only treats a pad as a DualShock 4 when it is: `0244535A` (a locally administered address, then "DSZ") and the last two bytes of the physical controller's address, so Steam keeps each controller's name, lightbar color, and settings apart (the pad slot when the address is unknown, or when another virtual DualShock 4 already has that serial). A DualShock 4 driving a virtual DualSense gives it that same address for pairing, for the same reason. A DualShock 4 that another app makes in software (DS4Windows through ViGEm, for example) is skipped too: its device hangs straight off a root-enumerated bus, not a hub or the Bluetooth stack. When a game asks it for calibration, pairing, or firmware information, it answers with the physical controller's own reports, read when that controller connected (neutral calibration and a DSZ address before any has); other feature requests are declined. Its HID report descriptor is the one dumped from a real DualSense in [dogtopus's write-up](https://gist.github.com/dogtopus/894da226d73afb3bdd195df41b3a26aa). The installed release is read from `usbip.exe`'s version, since the driver files have none, and 0.9.7.8 is refused, also by its driver's July 2026 build date, so an older `usbip.exe` left next to it doesn't let it through. 0.9.8.0 and 0.9.8.1 are not refused: attach tries each known request size, and the serial field of the newer requests is left empty so the descriptor's own serial stays.
-
-No user-mode API creates a virtual audio endpoint, and InputInjector gamepads are invisible to XInput, so neither feature is fully driverless.
-
-## Windows identity
-
-`build.rs` embeds a `VERSIONINFO` resource (`FileDescription` and `ProductName` "DSZ - DualSense Zen", version from `Cargo.toml`) and the app icon, drawn by `src\icon_art.rs` and written as a multi-size `.ico` at build time. Task Manager, Startup apps, the taskbar's tray-icon settings, notifications, and Explorer show "DSZ" and the icon instead of `dsz.exe`. It uses the Windows SDK's `rc.exe` through the `winresource` build dependency. Without the SDK the build still succeeds, with a warning and no version info.
-
-## Layout
-
-| Path | What |
-|---|---|
-| `crates\ds-proto` | Pure protocol: input parse, `0x31`/`0x02` output, CRC, trigger effects, the `0x32` haptics and `0x39` speaker reports, virtual-pad reports |
-| `crates\dsz` | The app: Win32 HID (`hid.rs`), device threads (`device.rs`), output composer, input pipeline, haptics engine (`haptics\`, game audio in `game.rs`), virtual controllers (`virt\`: USB/IP Xbox 360, DualShock 4, and DualSense, HidHide, default-audio guard, deadzones), profiles, UDP, game watcher, tray, egui UI (`ui\`) |
-| `vendor\opus` | libopus 1.6 (BSD-3-Clause, see its `COPYING`), built into the exe by `build.rs` for the controller speaker |
-| `vendor\eframe` | eframe 0.32.3 (MIT or Apache-2.0) with one fix: it busy-polled for a repaint of a hidden window, so the app used a full core in the tray (now under 1%) |
-| `crates\dsz\defaults` | The profiles a fresh install starts with |
-| `crates\dsz\assets` | The DualSense and DualSense Edge drawings the overview page, the sidebar mark and the app icon are drawn from: OpenController's `pads.json` looks (MIT, [`OpenController-LICENSE`](crates/dsz/assets/OpenController-LICENSE)) |
-
-```powershell
-cargo test --workspace
-```
+DualSense, DualSense Edge, DualShock and PlayStation are trademarks of Sony
+Interactive Entertainment. DualWave is not affiliated with Sony. For Windows
+instructions and upstream-specific measurements, consult
+[DSZ](https://github.com/MaximumFreak/dsz).
 
 ## Protocol sources
 
@@ -405,17 +339,3 @@ DSZ's protocol code was written from public documentation and code with open lic
 | [DS4Windows](https://github.com/Ryochan7/DS4Windows) `UdpServer.cs`/`DS4Sixaxis.cs` and [evdevhook2](https://github.com/v1993/evdevhook2) `DeviceTypes.ini` | GPL-3.0, read as documentation | DSU motion axis signs and units for DualSense and DualShock 4 |
 | [dogtopus's descriptor dump](https://gist.github.com/dogtopus/894da226d73afb3bdd195df41b3a26aa) and [nondebug/dualsense](https://github.com/nondebug/dualsense) | public dumps | The virtual DualSense's HID report descriptor and USB layout |
 | [stealth-alex's DualSense output report notes](https://gist.github.com/stealth-alex/10a8e7cc6027b78fa18a7f48a0d3d1e4) | public notes | Microphone source selection (audio flags bits 0–1); the microphone volume and mute fields match Linux `hid-playstation` |
-
-
-## Support
-
-DSZ is free. If it's useful to you and you'd like to support it, you can [buy me a coffee on Ko-fi](https://ko-fi.com/maximumfreak). Bug reports in Issues help just as much.
-
-## Thanks
-
-DSZ builds on the work of [Jays2Kings](https://github.com/Jays2Kings/DS4Windows), [Ryochan7](https://github.com/Ryochan7/DS4Windows), [Schmaldeo](https://github.com/schmaldeo/DS4Windows), [hbashton](https://github.com/hbashton/DS4Windows), and the DS4Windows community, with thanks to [VIIPER](https://github.com/Alia5/VIIPER), [HidHide](https://github.com/nefarius/HidHide), [usbip-win2](https://github.com/vadimgrn/usbip-win2), and the wider controller-research community. The controller drawings and the app icon are drawn from [OpenController](https://github.com/Brunovncs/OpenController)'s shapes, by Brunovncs (MIT).
-
-
-## License
-
-MIT, see [LICENSE](LICENSE). eframe in `vendor\eframe` is MIT or Apache-2.0 (the published crate, with one patch). libopus in `vendor\opus` is BSD-3-Clause. The controller drawings in `crates\dsz\assets\pads.json` are OpenController's (Brunovncs, MIT, `crates\dsz\assets\OpenController-LICENSE`). DualSense, DualSense Edge, DualShock, and PlayStation are trademarks of Sony Interactive Entertainment; this project is not affiliated with Sony.
