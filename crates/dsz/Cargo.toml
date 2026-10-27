@@ -11,6 +11,7 @@ name = "dsz"
 path = "src/main.rs"
 
 [dependencies]
+semver = "1"
 ds-proto = { path = "../ds-proto" }
 eframe = { version = "0.32", default-features = false, features = ["glow", "default_fonts", "accesskit"] }
 serde = { version = "1", features = ["derive"] }

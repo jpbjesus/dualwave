@@ -50,7 +50,7 @@ consult its release notes before downloading.
 | Profiles and games | Executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
 | Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
-| Desktop integration | Tray, startup preferences and device naming |
+| Desktop integration | Tray, startup preferences and device naming; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
 | Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report |
 
 ## Inside the app
@@ -246,7 +246,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 Example download for the 0.4.2 alpha release:
 
 ```sh
-release=v0.4.2-alpha.1
+release=v0.4.2-alpha.2
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -261,10 +261,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.2-alpha.1 --dry-run
-sh install-dualwave.sh --version v0.4.2-alpha.1
+sh install-dualwave.sh --version v0.4.2-alpha.2 --dry-run
+sh install-dualwave.sh --version v0.4.2-alpha.2
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.2-alpha.1 --format native --dry-run
+sh install-dualwave.sh --version v0.4.2-alpha.2 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```

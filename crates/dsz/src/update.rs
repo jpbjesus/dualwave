@@ -34,7 +34,7 @@ pub const RELEASES: &str = "https://github.com/MaximumFreak/dsz/releases";
 #[cfg(windows)]
 const ASSET: &str = "dsz.exe";
 #[cfg(target_os = "linux")]
-const LATEST: &str = "https://api.github.com/repos/jpbjesus/dualwave/releases/latest";
+const LATEST: &str = "https://api.github.com/repos/jpbjesus/dualwave/releases?per_page=100";
 #[cfg(target_os = "linux")]
 pub const RELEASES: &str = "https://github.com/jpbjesus/dualwave/releases";
 #[cfg(target_os = "linux")]
@@ -178,16 +178,34 @@ fn latest() -> Result<Release, String> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    crate::install::download(&format!("{LATEST}?t={t}"), &file)
-        .map_err(|_| "Couldn't reach GitHub to check for updates.".to_string())?;
+    let separator = if LATEST.contains('?') { '&' } else { '?' };
+    crate::install::download(&format!("{LATEST}{separator}t={t}"), &file)
+        .map_err(|error| {
+            log::warn!("GitHub update metadata request failed: {error}");
+            "Couldn't reach GitHub to check for updates.".to_string()
+        })?;
     let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&file);
-    parse(&text).ok_or_else(|| "GitHub's answer had no release in it.".to_string())
+    let release = parse(&text).ok_or_else(|| "GitHub's answer had no release in it.".to_string())?;
+    log::debug!("update check: latest published release {}", release.version);
+    Ok(release)
 }
 
 fn parse(json: &str) -> Option<Release> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    if let Some(releases) = v.as_array() {
+        return releases.iter().filter_map(parse_release)
+            .max_by(|a, b| version_number(&a.version).unwrap().cmp_precedence(&version_number(&b.version).unwrap()));
+    }
+    parse_release(&v)
+}
+
+fn parse_release(v: &serde_json::Value) -> Option<Release> {
+    if v["draft"].as_bool() == Some(true) { return None; }
+    // Alpha builds follow published pre-releases; stable builds stay on stable.
+    if v["prerelease"].as_bool() == Some(true) && !env!("CARGO_PKG_VERSION").contains('-') { return None; }
     let version = v["tag_name"].as_str()?.trim_start_matches('v').to_string();
+    version_number(&version)?;
     let page = v["html_url"].as_str().unwrap_or(RELEASES).to_string();
     let asset = v["assets"]
         .as_array()?
@@ -213,16 +231,20 @@ fn hex32(s: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-fn parts(v: &str) -> Vec<u32> {
-    v.split(|c: char| !c.is_ascii_digit())
-        .take_while(|p| !p.is_empty())
-        .map(|p| p.parse().unwrap_or(0))
-        .collect()
+fn version_number(v: &str) -> Option<semver::Version> {
+    // Older release tags may omit the patch component.
+    let end = v.find(['-', '+']).unwrap_or(v.len());
+    let core = &v[..end];
+    let padding = match core.split('.').count() { 1 => ".0.0", 2 => ".0", 3 => "", _ => return None };
+    semver::Version::parse(&format!("{core}{padding}{}", &v[end..])).ok()
 }
 
-/// Whether version `a` is newer than `b` ("0.3.10" > "0.3.9").
+/// Release candidates precede stable, and alpha counters compare numerically.
 fn newer(a: &str, b: &str) -> bool {
-    parts(a) > parts(b)
+    match (version_number(a), version_number(b)) {
+        (Some(a), Some(b)) => a.cmp_precedence(&b).is_gt(),
+        _ => false,
+    }
 }
 
 /// Where browsers save downloads: the user's Downloads folder.
@@ -450,6 +472,43 @@ mod tests {
         assert_eq!(r.size, Some(9294336));
         assert_eq!(r.sha256.unwrap()[..2], [0xef, 0x4f]);
         assert!(parse(r#"{"tag_name":"v1","assets":[]}"#).is_none(), "no exe, no update");
+    }
+
+    #[test]
+    fn compares_alpha_versions_and_stable_promotions() {
+        assert!(newer("0.4.2-alpha.2", "0.4.2-alpha.1"));
+        assert!(newer("0.4.2-alpha.10", "0.4.2-alpha.2"));
+        assert!(newer("0.4.2", "0.4.2-alpha.10"));
+        assert!(!newer("0.4.2-alpha.2", "0.4.2"));
+        assert!(!newer("0.4.2-alpha.1+rebuild", "0.4.2-alpha.1"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_update_feed_uses_the_published_release_list() {
+        assert_eq!(LATEST, "https://api.github.com/repos/jpbjesus/dualwave/releases?per_page=100");
+        let entry = |tag: &str, draft: bool, asset: &str| serde_json::json!({
+            "tag_name": tag, "draft": draft, "prerelease": tag.contains('-'),
+            "assets": [{"name": asset, "browser_download_url": "https://example.invalid/app", "size": 123,
+                "digest": format!("sha256:{}", "ab".repeat(32))}]
+        });
+        let feed = serde_json::json!([
+            entry("v0.5.0-alpha.1", true, ASSET),
+            entry("v0.6.0-alpha.1", false, "source.zip"),
+            entry("v0.4.2-alpha.1", false, ASSET),
+            entry("v0.4.2-alpha.10", false, ASSET),
+            entry("v0.4.2-alpha.2", false, ASSET)
+        ]);
+        let r = parse(&feed.to_string()).expect("alpha release from GitHub's list");
+        assert_eq!(r.version, "0.4.2-alpha.10");
+        assert_eq!(r.sha256, Some([0xab; 32]));
+        assert_eq!(r.size, Some(123));
+        assert!(parse("[]").is_none());
+        assert!(parse(&serde_json::json!([entry("v0.5.0-alpha.1", true, ASSET), entry("v0.6.0-alpha.1", false, "source.zip")]).to_string()).is_none());
+        let promoted = serde_json::json!([entry("v0.4.2-alpha.10", false, ASSET), entry("v0.4.2", false, ASSET)]);
+        assert_eq!(parse(&promoted.to_string()).unwrap().version, "0.4.2");
+        let single = entry("v0.4.2-alpha.1", false, ASSET);
+        assert_eq!(parse(&single.to_string()).unwrap().version, "0.4.2-alpha.1");
     }
 
     /// Asks the real GitHub: `cargo test -- --ignored asks_github`.

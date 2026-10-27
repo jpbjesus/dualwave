@@ -991,14 +991,14 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "ds-proto"
-version = "0.4.2-alpha.1"
+version = "0.4.2-alpha.2"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "dsz"
-version = "0.4.2-alpha.1"
+version = "0.4.2-alpha.2"
 dependencies = [
  "cc",
  "cpal",
@@ -1012,6 +1012,7 @@ dependencies = [
  "pkg-config",
  "reqwest",
  "rfd",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -1021,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "dualwave"
-version = "0.4.2-alpha.1"
+version = "0.4.2-alpha.2"
 dependencies = [
  "cc",
  "ds-proto",
