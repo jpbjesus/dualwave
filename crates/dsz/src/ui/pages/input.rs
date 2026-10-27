@@ -309,6 +309,63 @@ fn touch_zone(b: Button) -> Button {
     }
 }
 
+pub(crate) fn gyro_activation(ui: &mut egui::Ui, g: &mut Gyro, edge: bool) {
+    let (mut kind, mut b) = match g.activation {
+        GyroActivation::Always => (0, Button::R1),
+        GyroActivation::WhileHeld(b) => (1, b),
+        GyroActivation::WhileNotHeld(b) => (2, b),
+        GyroActivation::Toggle(b) => (3, b),
+        GyroActivation::WhileTouched(b) => (4, b),
+    };
+    let controls = |ui: &mut egui::Ui| {
+        if kind == 4 {
+            b = touch_zone(b);
+            touch_zone_combo(ui, "gyro-zone", &mut b);
+        } else if kind != 0 {
+            button_combo(ui, "gyro-btn", &mut b, edge);
+        }
+        egui::ComboBox::from_id_salt("gyro-act")
+            .width(150.0)
+            .selected_text(
+                [
+                    crate::i18n::tr("Always"),
+                    crate::i18n::tr("While holding"),
+                    crate::i18n::tr("Unless holding"),
+                    crate::i18n::tr("Toggle with"),
+                    crate::i18n::tr("While touching"),
+                ][kind],
+            )
+            .show_ui(ui, |ui| {
+                for (i, l) in [
+                    crate::i18n::tr("Always"),
+                    crate::i18n::tr("While holding"),
+                    crate::i18n::tr("Unless holding"),
+                    crate::i18n::tr("Toggle with"),
+                    crate::i18n::tr("While touching"),
+                ]
+                .iter()
+                .enumerate()
+                {
+                    ui.selectable_value(&mut kind, i, *l);
+                }
+            });
+    };
+    if ui.available_width() < 420.0 {
+        ui.label(crate::i18n::tr("Active"));
+        if ui.available_width() < 340.0 { ui.vertical(controls); }
+        else { ui.horizontal(controls); }
+    } else {
+        row(ui, crate::i18n::tr("Active"), "", controls);
+    }
+    g.activation = match kind {
+        0 => GyroActivation::Always,
+        1 => GyroActivation::WhileHeld(b),
+        2 => GyroActivation::WhileNotHeld(b),
+        3 => GyroActivation::Toggle(b),
+        _ => GyroActivation::WhileTouched(touch_zone(b)),
+    };
+}
+
 fn touch_zone_combo(ui: &mut egui::Ui, id: &str, b: &mut Button) {
     egui::ComboBox::from_id_salt(id)
         .width(150.0)
@@ -635,53 +692,7 @@ impl App {
                             g.mode = if on { GyroMode::Mouse } else { GyroMode::Off };
                         }
                         if g.mode == GyroMode::Mouse {
-                            let (mut kind, mut b) = match g.activation {
-                                GyroActivation::Always => (0, Button::R1),
-                                GyroActivation::WhileHeld(b) => (1, b),
-                                GyroActivation::WhileNotHeld(b) => (2, b),
-                                GyroActivation::Toggle(b) => (3, b),
-                                GyroActivation::WhileTouched(b) => (4, b),
-                            };
-                            row(ui, crate::i18n::tr("Active"), "", |ui| {
-                                if kind == 4 {
-                                    b = touch_zone(b);
-                                    touch_zone_combo(ui, "gyro-zone", &mut b);
-                                } else if kind != 0 {
-                                    button_combo(ui, "gyro-btn", &mut b, edge);
-                                }
-                                egui::ComboBox::from_id_salt("gyro-act")
-                                    .width(150.0)
-                                    .selected_text(
-                                        [
-                                            crate::i18n::tr("Always"),
-                                            crate::i18n::tr("While holding"),
-                                            crate::i18n::tr("Unless holding"),
-                                            crate::i18n::tr("Toggle with"),
-                                            crate::i18n::tr("While touching"),
-                                        ][kind],
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (i, l) in [
-                                            crate::i18n::tr("Always"),
-                                            crate::i18n::tr("While holding"),
-                                            crate::i18n::tr("Unless holding"),
-                                            crate::i18n::tr("Toggle with"),
-                                            crate::i18n::tr("While touching"),
-                                        ]
-                                        .iter()
-                                        .enumerate()
-                                        {
-                                            ui.selectable_value(&mut kind, i, *l);
-                                        }
-                                    });
-                            });
-                            g.activation = match kind {
-                                0 => GyroActivation::Always,
-                                1 => GyroActivation::WhileHeld(b),
-                                2 => GyroActivation::WhileNotHeld(b),
-                                3 => GyroActivation::Toggle(b),
-                                _ => GyroActivation::WhileTouched(touch_zone(b)),
-                            };
+                            gyro_activation(ui, g, edge);
                             slider_row(
                                 ui,
                                 crate::i18n::tr("Sensitivity"),

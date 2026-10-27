@@ -1,6 +1,6 @@
 //! Work areas and their directly accessible configuration pages.
 use eframe::egui::{self, RichText, Stroke};
-use super::{App, Page, theme::*, workspace::{choice, choices}};
+use super::{App, Page, theme::*, workspace::{choice, choices, Part}};
 
 fn mark(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(40.0, 30.0), egui::Sense::hover());
@@ -35,23 +35,39 @@ impl App {
         });
     }
 
+    pub(super) fn open_workspace_editor(&mut self) {
+        self.page = match self.part {
+            Part::Lighting => Page::Lighting, Part::Triggers => Page::Triggers,
+            Part::Buttons => Page::Mappings, Part::Motion => Page::Input,
+        };
+        self.detailed = true;
+        self.capture_key = None;
+    }
+
     pub(super) fn section_navigation(&mut self, ui: &mut egui::Ui) {
         if matches!(self.page, Page::Profiles | Page::Settings) { return; }
         let mut selected = (self.page, self.detailed);
-        let options: &[((Page, bool), &str)] = if self.page == Page::Haptics {
-            &[((Page::Haptics, false), "Playback & microphone"), ((Page::Haptics, true), "Haptics & audio")]
+        if self.page == Page::Haptics {
+            choice(ui, &mut selected, &[
+                ((Page::Haptics, false), "Playback & microphone"),
+                ((Page::Haptics, true), "Haptics & audio"),
+            ]);
         } else {
-            &[
+            choice(ui, &mut selected, &[
                 ((Page::Overview, false), "Workspace"),
                 ((Page::Lighting, true), "Lighting"), ((Page::Triggers, true), "Triggers"),
                 ((Page::Input, true), "Motion"), ((Page::Mappings, true), "Buttons"),
                 ((Page::Virtual, true), "Virtual controller"),
                 ((Page::Overview, true), "Device status"),
-            ]
-        };
-        if choice(ui, &mut selected, options) {
+            ]);
+        }
+        if selected != (self.page, self.detailed) {
             self.page = selected.0;
             self.detailed = selected.1;
+            self.part = match self.page {
+                Page::Lighting => Part::Lighting, Page::Triggers => Part::Triggers,
+                Page::Mappings => Part::Buttons, Page::Input => Part::Motion, _ => self.part,
+            };
             self.capture_key = None;
         }
         ui.separator();

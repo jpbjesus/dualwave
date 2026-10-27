@@ -7,6 +7,28 @@ use eframe::egui::{
 
 use super::theme::*;
 
+/// Animate only a navigation change, with no idle repaint or device work.
+pub fn content_transition(ui: &mut Ui, name: &str, destination: egui::Id, reduced: bool) {
+    let id = ui.id().with(name);
+    let now = ui.input(|i| i.time);
+    let (_, started) = ui.ctx().data_mut(|data| {
+        let previous = data.get_temp::<(egui::Id, f64)>(id);
+        let state = match previous {
+            Some((last, _)) if last != destination => (destination, now),
+            Some(state) => state,
+            None => (destination, now - 1.0),
+        };
+        data.insert_temp(id, state);
+        state
+    });
+    let progress = if reduced { 1.0 } else { ((now - started) as f32 / 0.2).clamp(0.0, 1.0) };
+    if progress < 1.0 {
+        let eased = 1.0 - (1.0 - progress).powi(3);
+        ui.multiply_opacity(0.25 + 0.75 * eased);
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+    }
+}
+
 /// A rounded card with an optional title and subtitle.
 pub fn card<R>(ui: &mut Ui, title: &str, subtitle: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     card_glow(ui, title, subtitle, 0.0, add).0
@@ -30,11 +52,11 @@ pub fn card_glow<R>(
         .show(ui, |ui| {
             ui.set_width(w);
             if !title.is_empty() {
-                ui.label(RichText::new(title).font(heading(16.0)).color(text_color()));
+                ui.label(RichText::new(title).font(heading(typography::SECTION)).color(text_color()));
                 if !subtitle.is_empty() {
                     ui.label(RichText::new(subtitle).size(12.5).color(muted_color()));
                 }
-                ui.add_space(8.0);
+                ui.add_space(spacing::CONTROL);
             }
             add(ui)
         });
@@ -42,11 +64,11 @@ pub fn card_glow<R>(
 }
 
 pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str) {
-    ui.label(RichText::new(title).font(heading(24.0)).color(text_color()));
+    ui.label(RichText::new(title).font(heading(typography::PAGE)).color(text_color()));
     if !subtitle.is_empty() {
         ui.label(RichText::new(subtitle).size(13.5).color(muted_color()));
     }
-    ui.add_space(8.0);
+    ui.add_space(spacing::CONTROL);
 }
 
 /// iOS-style switch.
@@ -90,10 +112,10 @@ pub fn row<R>(ui: &mut Ui, label: &str, hint: &str, control: impl FnOnce(&mut Ui
     let mut labels = ui.new_child(egui::UiBuilder::new()
         .max_rect(egui::Rect::from_min_max(origin + egui::vec2(0.0, 3.0), egui::pos2(label_right, origin.y + 34.0)))
         .layout(Layout::top_down(Align::Min)));
-    labels.spacing_mut().item_spacing.y = 4.0;
+    labels.spacing_mut().item_spacing.y = spacing::RELATED;
     labels.add(egui::Label::new(RichText::new(label).color(text_color())).wrap());
     if !hint.is_empty() {
-        labels.add(egui::Label::new(RichText::new(hint).size(12.0).color(muted_color())).wrap());
+        labels.add(egui::Label::new(RichText::new(hint).size(typography::CAPTION).color(muted_color())).wrap());
     }
     let bottom = labels.min_rect().bottom().max(control_bounds.bottom()).max(origin.y + 34.0);
     ui.advance_cursor_after_rect(egui::Rect::from_min_max(origin, egui::pos2(origin.x + width, bottom)));

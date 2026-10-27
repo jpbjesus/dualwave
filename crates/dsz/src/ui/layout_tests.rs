@@ -228,7 +228,7 @@ fn microphone_control_keeps_capture_and_mute_independent() {
 }
 
 #[test]
-fn controller_editors_are_visible_without_an_advanced_menu() {
+fn controller_editors_are_directly_visible() {
     let dir = std::env::temp_dir().join(format!("dualwave-navigation-layout-{}", std::process::id()));
     let mut app = App::new(Engine::new(dir.clone()));
     assert_eq!((app.page, app.detailed), (Page::Overview, false), "startup must show the visual controller workspace");
@@ -237,10 +237,9 @@ fn controller_editors_are_visible_without_an_advanced_menu() {
     let output = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 520.0))), ..Default::default() }, |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| app.section_navigation(ui));
     });
-    for label in ["Lighting", "Triggers", "Motion", "Buttons", "Virtual controller"] {
+    for label in ["Workspace", "Lighting", "Triggers", "Motion", "Buttons", "Virtual controller", "Device status"] {
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr(label))), "{label} must be directly visible in controller navigation");
     }
-    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr("Advanced"))), "configuration must not be hidden in an Advanced menu");
     drop(app);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -266,6 +265,14 @@ fn main_navigation_returns_to_the_visual_workspaces() {
     let mut app = App::new(Engine::new(dir.clone()));
     let ctx = egui::Context::default();
     theme::install(&ctx, 1.0);
+    for (label, page) in [("Lighting", Page::Lighting), ("Triggers", Page::Triggers), ("Buttons", Page::Mappings), ("Motion", Page::Input)] {
+        app.capture_key = Some(0);
+        click(&mut app, &ctx, label);
+        assert_eq!((app.page, app.detailed), (page, true));
+        assert_eq!(app.capture_key, None);
+        click(&mut app, &ctx, "Workspace");
+        assert_eq!((app.page, app.detailed), (Page::Overview, false));
+    }
     click(&mut app, &ctx, "Motion");
     assert_eq!((app.page, app.detailed), (Page::Input, true));
     click(&mut app, &ctx, "Audio");
@@ -316,4 +323,46 @@ fn detected_game_can_be_associated_without_enabling_automatic_switching() {
     assert!(engine.take_game_discovery_request(), "opening game profiles requests discovery even with switching off");
     drop(settings); drop(app); drop(engine);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn navigation_transitions_finish_and_respect_reduced_motion() {
+    let ctx = egui::Context::default();
+    let render = |time, destination, reduced| {
+        let mut opacity = 0.0;
+        let _ = ctx.run(egui::RawInput { time: Some(time), ..Default::default() }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                widgets::content_transition(ui, "test-transition", egui::Id::new(destination), reduced);
+                opacity = ui.opacity();
+            });
+        });
+        opacity
+    };
+    assert_eq!(render(0.0, 0, false), 1.0, "initial page appears immediately");
+    assert!(render(1.0, 1, false) < 1.0, "navigation starts a transition");
+    assert!(render(1.1, 1, false) > 0.8, "transition advances with frame time");
+    assert_eq!(render(1.3, 1, false), 1.0, "transition ends");
+    assert_eq!(render(2.0, 2, true), 1.0, "reduced motion switches immediately");
+    assert_eq!(render(3.0, 2, false), 1.0, "idle content remains fully visible");
+}
+
+#[test]
+fn gyro_activation_wraps_inside_a_narrow_inspector() {
+    let ctx = egui::Context::default();
+    theme::install(&ctx, 1.0);
+    for width in [280.0, 300.0, 400.0] {
+        let mut gyro = crate::profile::Gyro::default();
+        gyro.activation = crate::profile::GyroActivation::WhileTouched(ds_proto::input::Button::TouchpadRight);
+        let before = gyro.clone();
+        for _ in 0..3 {
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 300.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let right = ui.available_rect_before_wrap().right();
+                    pages::input::gyro_activation(ui, &mut gyro, true);
+                    assert!(ui.min_rect().right() <= right + 1.0, "activation controls must wrap at {width} points");
+                });
+            });
+        }
+        assert_eq!(gyro, before);
+    }
 }

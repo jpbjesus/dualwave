@@ -594,6 +594,8 @@ impl eframe::App for App {
                 }
                 ui.add_space(6.0);
                 centered(ui, CONTENT, |ui| self.section_navigation(ui));
+                ui.scope(|ui| {
+                widgets::content_transition(ui, "page-transition", egui::Id::new((self.page, self.detailed)), settings.reduced_motion || self.system_reduced_motion);
                 if !self.detailed && matches!(self.page, Page::Overview | Page::Haptics) {
                     centered(ui, CONTENT, |ui| {
                         self.editing_banner(ui, dev.as_ref(), &profile.name);
@@ -640,6 +642,7 @@ impl eframe::App for App {
                             });
                         });
                 }
+                });
             });
 
         // Publish edits (renames go through the store, not this path).

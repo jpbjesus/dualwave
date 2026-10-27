@@ -28,6 +28,22 @@ pub fn good_color() -> Color32 { palette(0x27664e, 0xa4d5c2) }
 pub fn warn_color() -> Color32 { palette(0x82531e, 0xe6c497) }
 pub fn bad_color() -> Color32 { palette(0xb12e38, 0xff9ba4) }
 
+/// Shared rhythm for page sections and their controls; keep the open workspace layout.
+pub mod spacing {
+    pub const RELATED: f32 = 4.0;
+    pub const CONTROL: f32 = 8.0;
+    pub const GROUP: f32 = 12.0;
+    pub const SECTION: f32 = 24.0;
+}
+
+pub mod typography {
+    pub const CAPTION: f32 = 12.0;
+    pub const BODY: f32 = 14.0;
+    pub const SECTION: f32 = 16.0;
+    pub const PANEL: f32 = 20.0;
+    pub const PAGE: f32 = 24.0;
+}
+
 pub const R_CARD: u8 = 0;
 pub const R_CTRL: u8 = 5;
 
@@ -128,10 +144,10 @@ pub fn install(ctx: &egui::Context, scale: f32) {
                 TextStyle::Small,
                 FontId::new(11.5, FontFamily::Proportional),
             ),
-            (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(typography::BODY, FontFamily::Proportional)),
             (
                 TextStyle::Button,
-                FontId::new(14.0, FontFamily::Name("medium".into())),
+                FontId::new(typography::BODY, FontFamily::Name("medium".into())),
             ),
             (TextStyle::Heading, FontId::new(22.0, semibold())),
             (
@@ -140,8 +156,8 @@ pub fn install(ctx: &egui::Context, scale: f32) {
             ),
         ]
         .into();
-        s.spacing.item_spacing = egui::vec2(10.0, 8.0);
-        s.spacing.button_padding = egui::vec2(12.0, 6.0);
+        s.spacing.item_spacing = egui::vec2(10.0, spacing::CONTROL);
+        s.spacing.button_padding = egui::vec2(spacing::GROUP, 6.0);
         s.spacing.interact_size = egui::vec2(36.0, 28.0);
         s.spacing.slider_width = 160.0;
         s.spacing.combo_width = 180.0;

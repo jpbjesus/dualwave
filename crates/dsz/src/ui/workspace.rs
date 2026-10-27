@@ -164,7 +164,7 @@ impl App {
             let profile = dev.map(|d| self.engine.profile_name_for(d))
                 .unwrap_or_else(|| self.engine.settings.read().default_profile.clone());
             let reason = if !self.engine.settings.read().auto_profiles { crate::games::SelectionReason::Disabled } else { status.reason };
-            let summary = [Some(profile.as_str()), Some(tr(reason.label())), status.exe.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+            let summary = [Some(tr(if dev.is_some() { "Applied profile" } else { "Default profile" })), Some(profile.as_str()), Some(tr(reason.label())), status.exe.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(egui::Button::new(RichText::new(&summary).size(12.0).color(muted_color())).frame(false)
                     .wrap_mode(egui::TextWrapMode::Truncate)).on_hover_text(format!("{}\n{}", summary, tr("Manage game profiles"))).clicked() {
@@ -174,12 +174,16 @@ impl App {
                 }
             });
         });
-        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(tr("Editing profile")).size(typography::CAPTION).color(muted_color()));
+            ui.label(RichText::new(&p.name).size(typography::CAPTION).color(text_color()));
+        });
+        ui.add_space(spacing::CONTROL);
         let area = ui.available_rect_before_wrap();
         let footer_height = 82.0;
         let footer = egui::Rect::from_min_max(egui::pos2(area.left(), area.bottom() - footer_height), area.right_bottom());
         let body = egui::Rect::from_min_max(area.left_top(), egui::pos2(area.right(), footer.top() - 14.0));
-        let gap = 24.0;
+        let gap = spacing::SECTION;
         let inspector_width = (body.width() * 0.36).clamp(300.0, 400.0).min(body.width() * 0.49);
         let stage = egui::Rect::from_min_max(body.left_top(), egui::pos2(body.right() - inspector_width - gap, body.bottom()));
         let inspector = egui::Rect::from_min_max(egui::pos2(stage.right() + gap, body.top()), body.right_bottom());
@@ -194,11 +198,16 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 10.0;
                 ui.spacing_mut().button_padding = egui::vec2(7.0, 4.0);
                 ui.spacing_mut().slider_width = (inspector.width() - 170.0).clamp(70.0, 160.0);
+                ui.label(RichText::new(tr("Quick controls")).size(typography::CAPTION).color(muted_color()));
                 choice(ui, &mut self.part, &[(Part::Lighting, "Lighting"), (Part::Triggers, "Triggers"), (Part::Buttons, "Buttons"), (Part::Motion, "Motion")]);
                 ui.add_space(8.0);
                 ui.separator();
                 ui.add_space(8.0);
-                self.inspector(ui, p);
+                ui.scope(|ui| {
+                    let reduced = self.engine.settings.read().reduced_motion || self.system_reduced_motion;
+                    widgets::content_transition(ui, "inspector-transition", egui::Id::new(self.part as u8), reduced);
+                    self.inspector(ui, p);
+                });
             });
         });
         ui.painter().line_segment([footer.left_top() - egui::vec2(0.0, 7.0), footer.right_top() - egui::vec2(0.0, 7.0)], Stroke::new(1.0, border_color()));
@@ -246,7 +255,7 @@ impl App {
             widgets::microphone_control(&mut cols[1], &mut p.microphone.enabled, &mut p.microphone.muted, level);
             let status = tr(self.microphone_status(dev));
             cols[1].add(egui::Label::new(RichText::new(status).size(11.0).color(muted_color())).truncate()).on_hover_text(status);
-            cols[2].label(RichText::new(tr("Virtual controller")).strong()).on_hover_text(tr("Requested virtual output"));
+            cols[2].label(RichText::new(tr("Requested virtual output")).strong()).on_hover_text(tr("Requested virtual output"));
             egui::ComboBox::from_id_salt("quick-virtual-output").width((cols[2].available_width() - 24.0).max(100.0))
                 .selected_text(tr(p.virtual_out.kind.label())).show_ui(&mut cols[2], |ui| {
                     for kind in [VirtualKind::Off, VirtualKind::Xbox360, VirtualKind::DualSense, VirtualKind::DualShock4] {
@@ -254,7 +263,7 @@ impl App {
                     }
                 });
             let status = self.output_status(dev);
-            cols[2].add(egui::Label::new(RichText::new(&status).size(11.0).color(muted_color())).truncate()).on_hover_text([tr("Actual output"), &status].join(": "));
+            cols[2].add(egui::Label::new(RichText::new([tr("Actual output"), &status].join(": ")).size(11.0).color(muted_color())).truncate()).on_hover_text([tr("Actual output"), &status].join(": "));
         });
     }
 
@@ -364,8 +373,9 @@ impl App {
             ui.ctx().data_mut(|data| data.remove::<(String, Button, Gesture, Option<usize>)>(ui.id().with("workspace-key-capture")));
         }
         let title = match self.part { Part::Lighting => "Lighting", Part::Triggers => "Adaptive triggers", Part::Buttons => "Buttons", Part::Motion => "Motion" };
-        ui.label(RichText::new(tr(title)).font(heading(20.0)));
-        ui.add_space(6.0);
+        ui.label(RichText::new(tr(title)).font(heading(typography::PANEL)));
+        if ui.link(tr("Open full editor")).clicked() { self.open_workspace_editor(); }
+        ui.add_space(spacing::CONTROL);
         match self.part {
             Part::Lighting => {
                 choice(ui, &mut p.lighting.mode, &[(LightMode::Static, "Static"), (LightMode::Breathing, "Breathing"), (LightMode::Rainbow, "Rainbow"), (LightMode::Off, "Off")]);
@@ -407,7 +417,7 @@ impl App {
                     }
                 });
                 if !both_match { widgets::muted(ui, tr("Left and right use different effects.")); }
-                else if selected_preset.is_none() { widgets::muted(ui, tr("Custom effect · use the Triggers tab for all parameters.")); }
+                else if selected_preset.is_none() { widgets::muted(ui, tr("Custom effect · open the full editor for all parameters.")); }
                 let effect = if self.trigger_side == Side::Right { &p.triggers.right } else { &p.triggers.left };
                 if let Some(mut value) = intensity(effect) {
                     if ui.add(egui::Slider::new(&mut value, 1..=7).text(tr("Intensity")).suffix(" / 7")).changed() { adjust_intensity(p, self.trigger_side, value); }
@@ -449,11 +459,40 @@ impl App {
                 }
             }
             Part::Motion => {
-                ui.label(tr("Gyro"));
+                ui.label(RichText::new(tr("Gyro mouse")).strong());
                 choice(ui, &mut p.gyro.mode, &[(GyroMode::Off, "Off"), (GyroMode::Mouse, "Mouse")]);
-                ui.add(egui::Slider::new(&mut p.gyro.sensitivity, 1.0..=40.0).text(tr("Sensitivity")));
-                ui.label(tr("Touchpad"));
+                if p.gyro.mode == GyroMode::Mouse {
+                    let edge = self.device().map(|d| d.model.is_edge()).unwrap_or(true);
+                    super::pages::input::gyro_activation(ui, &mut p.gyro, edge);
+                    ui.add(egui::Slider::new(&mut p.gyro.sensitivity, 1.0..=80.0).text(tr("Sensitivity")));
+                    ui.label(tr("Horizontal from"));
+                    choice(ui, &mut p.gyro.axis, &[(GyroAxis::Yaw, "Turn"), (GyroAxis::Roll, "Lean"), (GyroAxis::Combined, "Both")]);
+                }
+                ui.add_space(spacing::GROUP);
+                ui.separator();
+                ui.label(RichText::new(tr("Touchpad")).strong());
                 choice(ui, &mut p.touchpad.mode, &[(TouchMode::Passthrough, "Game"), (TouchMode::Mouse, "Mouse")]);
+                if p.touchpad.mode == TouchMode::Mouse {
+                    ui.add(egui::Slider::new(&mut p.touchpad.sensitivity, 0.1..=4.0).text(tr("Speed")).suffix("×"));
+                    ui.checkbox(&mut p.touchpad.tap_to_click, tr("Tap to click"));
+                    ui.checkbox(&mut p.touchpad.two_finger_scroll, tr("Two-finger scroll"));
+                }
+                ui.add_space(spacing::GROUP);
+                ui.separator();
+                ui.label(RichText::new(tr("Sticks")).strong());
+                for (id, title, stick) in [("quick-left-stick", "Left stick", &mut p.sticks.left), ("quick-right-stick", "Right stick", &mut p.sticks.right)] {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(tr(title));
+                        egui::ComboBox::from_id_salt(id).width(140.0)
+                            .selected_text(tr(match stick.mode { StickMode::Passthrough => "Game", StickMode::Mouse => "Mouse", StickMode::Scroll => "Scroll wheel", StickMode::Wasd => "WASD", StickMode::Arrows => "Arrow keys" }))
+                            .show_ui(ui, |ui| {
+                                for (mode, label) in [(StickMode::Passthrough, "Game"), (StickMode::Mouse, "Mouse"), (StickMode::Scroll, "Scroll wheel"), (StickMode::Wasd, "WASD"), (StickMode::Arrows, "Arrow keys")] {
+                                    ui.selectable_value(&mut stick.mode, mode, tr(label));
+                                }
+                            });
+                    });
+                }
+                widgets::muted(ui, tr("Calibration and advanced settings are in the full editor."));
             }
         }
         if self.part == Part::Triggers {
@@ -487,6 +526,69 @@ mod tests {
             assert_eq!(p.mappings[..2], other);
             assert_eq!(p.mappings[2].action, action);
         }
+    }
+
+    #[test]
+    fn motion_workspace_exposes_activation_touchpad_and_sticks_without_changing_settings() {
+        let dir = std::env::temp_dir().join(format!("dualwave-motion-workspace-{}", std::process::id()));
+        let mut app = App::new(crate::engine::Engine::new(dir.clone()));
+        app.part = Part::Motion;
+        let ctx = egui::Context::default();
+        super::super::theme::install(&ctx, 1.0);
+        let mut p = Profile::default();
+        p.gyro.mode = GyroMode::Mouse;
+        p.gyro.sensitivity = 80.0;
+        p.gyro.activation = GyroActivation::WhileTouched(Button::TouchpadRight);
+        p.touchpad.mode = TouchMode::Mouse;
+        p.sticks.left.mode = StickMode::Scroll;
+        p.sticks.right.mode = StickMode::Arrows;
+        let before = p.clone();
+        let out = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(440.0, 1000.0))), ..Default::default() }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.inspector(ui, &mut p));
+        });
+        for label in ["While touching", "Touchpad Right", "Horizontal from", "Tap to click", "Two-finger scroll", "Left stick", "Right stick", "Open full editor"] {
+            assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == tr(label))), "motion control {label} is visible");
+        }
+        assert_eq!(p, before, "opening motion controls preserves existing settings and full sensitivity range");
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inspector_opens_the_selected_editor_without_changing_the_profile() {
+        let dir = std::env::temp_dir().join(format!("dualwave-inspector-navigation-{}", std::process::id()));
+        let mut app = App::new(crate::engine::Engine::new(dir.clone()));
+        let ctx = egui::Context::default();
+        super::super::theme::install(&ctx, 1.0);
+        let mut profile = Profile::default();
+        let before = profile.clone();
+        for (part, page) in [(Part::Lighting, Page::Lighting), (Part::Triggers, Page::Triggers), (Part::Buttons, Page::Mappings), (Part::Motion, Page::Input)] {
+            app.part = part;
+            app.page = Page::Overview;
+            app.detailed = false;
+            app.capture_key = Some(0);
+            let mut target = egui::Pos2::ZERO;
+            for pass in 0..4 {
+                let events = if pass > 1 {
+                    vec![egui::Event::PointerMoved(target), egui::Event::PointerButton {
+                        pos: target, button: egui::PointerButton::Primary, pressed: pass == 2, modifiers: egui::Modifiers::NONE,
+                    }]
+                } else { Vec::new() };
+                let output = ctx.run(egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 700.0))), ..Default::default() }, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.inspector(ui, &mut profile));
+                });
+                if pass == 1 {
+                    target = output.shapes.iter().find_map(|s| match &s.shape {
+                        egui::Shape::Text(t) if t.galley.job.text == tr("Open full editor") => Some(t.pos + t.galley.rect.center().to_vec2()), _ => None,
+                    }).expect("selected area's full editor link is visible");
+                }
+            }
+            assert_eq!((app.page, app.detailed), (page, true));
+            assert_eq!(app.capture_key, None);
+            assert_eq!(profile, before, "navigation must not edit a profile");
+        }
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

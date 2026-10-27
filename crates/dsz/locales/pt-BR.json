@@ -801,7 +801,6 @@
   "Playback & microphone": "Reprodução e microfone",
   "Preview": "Pré-visualização",
   "Device status": "Estado do controle",
-  "Custom effect · use the Triggers tab for all parameters.": "Efeito personalizado · todos os parâmetros estão na aba Gatilhos.",
   "Custom action · use the Buttons tab for all parameters.": "Ação personalizada · todos os parâmetros estão na aba Botões.",
   "Ready": "Pronto",
   "Waiting": "Aguardando",
@@ -922,5 +921,10 @@
   "Headphone jack": "Entrada de fone",
   "0 keeps it off": "0 mantém desligado",
   "Level": "Nível",
-  "Not tried on a real DualShock 4 yet. While a source is on, the controller gets audio all the time, which uses more battery.": "Ainda não testado em um DualShock 4 real. Com uma fonte ativada, o controle recebe áudio o tempo todo, o que gasta mais bateria."
+  "Not tried on a real DualShock 4 yet. While a source is on, the controller gets audio all the time, which uses more battery.": "Ainda não testado em um DualShock 4 real. Com uma fonte ativada, o controle recebe áudio o tempo todo, o que gasta mais bateria.",
+  "Quick controls": "Controles rápidos",
+  "Open full editor": "Abrir editor completo",
+  "Custom effect · open the full editor for all parameters.": "Efeito personalizado · abra o editor completo para todos os parâmetros.",
+  "Calibration and advanced settings are in the full editor.": "A calibração e os ajustes avançados estão no editor completo.",
+  "WASD": "WASD"
 }

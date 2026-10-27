@@ -49,7 +49,7 @@ consult its release notes before downloading.
 | Upstream 0.4.2 | Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
-| Interface | Direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
+| Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
 | Desktop integration | Tray, startup preferences and device naming |
 | Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report |
 
@@ -64,8 +64,9 @@ controls. Playback volume, microphone state and virtual output are below the
 preview.
 
 The main navigation contains **Controller**, **Audio**, **Profiles** and
-**Preferences**. Controller tabs provide access to the complete editors and
-connection diagnostics.
+**Preferences**. Lighting, triggers, motion and buttons each have a directly
+visible tab. The Workspace inspector also opens the selected full editor directly.
+**Workspace**, **Virtual controller** and **Device status** remain directly accessible.
 
 ### Lighting
 
@@ -231,22 +232,21 @@ chmod +x DualWave-x86_64.AppImage
    **DualWave Microphone** in the recording application.
 
 Normal operation runs as the desktop user. System installation is separate from
-application startup. The published alpha.1 setup targets CachyOS; the current source adds experimental
-portable host setup as described below.
+application startup. The CachyOS setup is bundled; experimental portable host setup is described below.
 
 ## Distribution
 
 | Format | Status | Scope |
 | --- | --- | --- |
 | AppImage | Published for Linux x86_64 | GUI, audio CLI, userspace libraries and source-only host-support package |
-| Native binary archive | Build implemented; local source build and manual release workflow | GUI, CLI, licenses, desktop launcher, dependency manifest and separate host setup payload |
+| Native binary archive | Published for Linux x86_64; built on CachyOS | GUI, CLI, licenses, desktop launcher, dependency manifest and separate host setup payload |
 | Flatpak | Under evaluation; no package or Flatpak repository is provided | Requires validation of HID access, uinput, process discovery, PipeWire and communication with the host USB/IP broker |
-| `curl` installation | Source installer implemented; requires an explicit release version | Verifies the selected asset before activation, installs as the desktop user, supports dry run and managed uninstall |
+| `curl` installation | Published installer; requires an explicit release version | Verifies the selected asset before activation, installs as the desktop user, supports dry run and managed uninstall |
 
-Example download for the published 0.4.1 alpha release:
+Example download for the 0.4.2 alpha release:
 
 ```sh
-release=v0.4.1-alpha.1
+release=v0.4.2-alpha.1
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -261,17 +261,16 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.1-alpha.1 --dry-run
-sh install-dualwave.sh --version v0.4.1-alpha.1
-# For a release that includes a native archive:
-sh install-dualwave.sh --version v0.4.1-alpha.1 --format native --dry-run
+sh install-dualwave.sh --version v0.4.2-alpha.1 --dry-run
+sh install-dualwave.sh --version v0.4.2-alpha.1
+# Preview a native archive installation:
+sh install-dualwave.sh --version v0.4.2-alpha.1 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```
 
-The published alpha.1 release contains the AppImage. Native archives and the new
-host setup payload are available from this source revision and must be attached
-to a subsequent release before `--format native` can download them. Build locally:
+The 0.4.2 alpha release includes the AppImage, native archive and installation
+script. Both application formats bundle the separate host setup payload. Build locally:
 
 ```sh
 python3 packaging/build-binaries.py

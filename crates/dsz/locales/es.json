@@ -767,7 +767,6 @@
   "Isolated media transport": "Transporte de audio aislado",
   "Hide to the tray when available; otherwise minimize normally": "Ocultar en la bandeja si está disponible; de lo contrario, minimizar normalmente",
   "No games yet. Add one while it runs, or browse for its executable.": "Aún no hay juegos. Añade uno mientras se ejecuta o busca su ejecutable.",
-  "Custom effect · use the Triggers tab for all parameters.": "Efecto personalizado · todos los parámetros están en la pestaña Gatillos.",
   "Off: profiles never acquire exclusive physical input. Ownership is released on exit.": "Desactivado: los perfiles no adquieren entrada física exclusiva. Se libera al salir.",
   "Endpoint availability does not grant capture permission or remove mute.": "La disponibilidad del dispositivo no concede permiso de captura ni activa el micrófono.",
   "Continuous light resistance.": "Resistencia ligera continua.",
@@ -922,5 +921,10 @@
   "Headphone jack": "Toma de auriculares",
   "0 keeps it off": "0 lo mantiene apagado",
   "Level": "Nivel",
-  "Not tried on a real DualShock 4 yet. While a source is on, the controller gets audio all the time, which uses more battery.": "Aún no probado en un DualShock 4 real. Con una fuente activada, el mando recibe audio todo el tiempo, lo que gasta más batería."
+  "Not tried on a real DualShock 4 yet. While a source is on, the controller gets audio all the time, which uses more battery.": "Aún no probado en un DualShock 4 real. Con una fuente activada, el mando recibe audio todo el tiempo, lo que gasta más batería.",
+  "Quick controls": "Controles rápidos",
+  "Open full editor": "Abrir editor completo",
+  "Custom effect · open the full editor for all parameters.": "Efecto personalizado · abre el editor completo para ver todos los parámetros.",
+  "Calibration and advanced settings are in the full editor.": "La calibración y los ajustes avanzados están en el editor completo.",
+  "WASD": "WASD"
 }

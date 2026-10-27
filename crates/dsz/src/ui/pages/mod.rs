@@ -1,5 +1,5 @@
 mod haptics;
-mod input;
+pub(super) mod input;
 mod lighting;
 pub(super) mod mappings;
 mod overview;

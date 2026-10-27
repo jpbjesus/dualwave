@@ -79,6 +79,7 @@ def main():
     licenses = app / 'usr/share/licenses/dualwave'
     licenses.mkdir(parents=True)
     shutil.copy2(ROOT / 'LICENSE', licenses / 'LICENSE')
+    shutil.copy2(ROOT / 'crates/ds-proto/DS4-Sound-Link-LICENSE', licenses / 'DS4-Sound-Link-LICENSE')
     shutil.copy2(ROOT / 'packaging/kernel/COPYING', licenses / 'kernel-COPYING')
     shutil.copy2(ROOT / 'vendor/opus/COPYING', licenses / 'opus-COPYING')
     for name in ['InstrumentSans-OFL.txt', 'Manrope-OFL.txt', 'OpenController-LICENSE', 'SimpleIcons-LICENSE.md']:

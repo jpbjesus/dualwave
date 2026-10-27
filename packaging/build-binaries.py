@@ -37,7 +37,7 @@ def main():
         (stage / 'bin').mkdir()
         licenses = stage / 'share/licenses/dualwave'
         licenses.mkdir(parents=True)
-        for source in [ROOT / 'LICENSE', ROOT / 'vendor/opus/COPYING', *sorted((ROOT / 'crates/dsz/assets').glob('*LICENSE*')), *sorted((ROOT / 'crates/dsz/assets').glob('*OFL*'))]:
+        for source in [ROOT / 'LICENSE', ROOT / 'crates/ds-proto/DS4-Sound-Link-LICENSE', ROOT / 'vendor/opus/COPYING', *sorted((ROOT / 'crates/dsz/assets').glob('*LICENSE*')), *sorted((ROOT / 'crates/dsz/assets').glob('*OFL*'))]:
             shutil.copy2(source, licenses / source.name)
         (stage / 'libexec').mkdir()
         dependencies = {}
