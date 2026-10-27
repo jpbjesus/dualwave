@@ -27,6 +27,102 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// Speaker and headphone sound on a DualShock 4 over Bluetooth.
+    fn ds4_audio_card(&mut self, ui: &mut egui::Ui, p: &mut Profile, d: &Arc<Device>) {
+        let devices = self.audio_device_list();
+        let capture = self.engine.audio.status.lock().clone();
+        card(
+            ui,
+            crate::i18n::tr("DualShock 4 speaker / headphones (experimental)"),
+            crate::i18n::tr("Sound on the controller over Bluetooth. Off until you turn on a source."),
+            |ui| {
+                if !d.ds4_audio_capable() {
+                    muted(ui, crate::i18n::tr("Needs a Sony DualShock 4 over Bluetooth. Over USB, Windows already has the controller as a sound device."));
+                    return;
+                }
+                let game_speaker = p.virtual_out.game_speaker;
+                let a = &mut p.haptics.ds4_audio;
+                toggle_row(
+                    ui,
+                    crate::i18n::tr("PC audio"),
+                    crate::i18n::tr("Play what the PC plays on the controller"),
+                    &mut a.pc_audio,
+                );
+                toggle_row(
+                    ui,
+                    crate::i18n::tr("Game speaker sound"),
+                    crate::i18n::tr("A game's DualSense speaker sound, through the virtual DualSense"),
+                    &mut a.game_speaker,
+                );
+                if a.game_speaker
+                    && (d.virt.active() != Some(VirtualKind::DualSense) || !game_speaker)
+                {
+                    muted(ui, crate::i18n::tr("For game sound, select DualSense on the Virtual controller page, with Game speaker on."));
+                }
+                if !a.pc_audio && !a.game_speaker {
+                    return;
+                }
+                row(ui, crate::i18n::tr("Output"), crate::i18n::tr("Where the controller plays it"), |ui| {
+                    segmented(
+                        ui,
+                        &mut a.output,
+                        &[
+                            (Ds4AudioOutput::Speaker, crate::i18n::tr("Speaker")),
+                            (Ds4AudioOutput::Headphones, crate::i18n::tr("Headphone jack")),
+                        ],
+                    );
+                });
+                slider_row(ui, crate::i18n::tr("Volume"), crate::i18n::tr("0 keeps it off"), &mut a.volume, 0..=100, "%");
+                if a.pc_audio {
+                    let h = &mut p.haptics;
+                    row(
+                        ui,
+                        crate::i18n::tr("Capture from"),
+                        crate::i18n::tr("What the PC plays on this output"),
+                        |ui| {
+                            let label = if h.device.is_empty() {
+                                crate::i18n::tr("Windows default").to_string()
+                            } else {
+                                h.device.clone()
+                            };
+                            egui::ComboBox::from_id_salt("ds4-audio-dev")
+                                .width(240.0)
+                                .selected_text(label)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut h.device, String::new(), crate::i18n::tr("Windows default"));
+                                    for dv in &devices {
+                                        ui.selectable_value(&mut h.device, dv.clone(), dv);
+                                    }
+                                });
+                        },
+                    );
+                    if let Some(e) = capture.error.as_ref().filter(|_| !capture.running) {
+                        ui.label(RichText::new(e).size(12.0).color(bad_color()));
+                    }
+                }
+                let streaming = d.stats.stream_hz.load(Ordering::Relaxed);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(crate::i18n::tr("Level")).color(muted_color()));
+                    meter(ui, d.speaker_level.load(Ordering::Relaxed) as f32 / 255.0, violet_color(), 184.0);
+                    let (t, c) = if streaming > 0 {
+                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s", "{streaming} paq/s"; "{streaming} pac/s"), good_color())
+                    } else {
+                        (crate::i18n::tr("off").to_string(), faint_color())
+                    };
+                    pill(ui, &t, c);
+                });
+                let under = d.stats.stream_underruns.load(Ordering::Relaxed);
+                if under > 0 {
+                    muted(
+                        ui,
+                        &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão", "{under} corte(s) de audio suavizado(s) desde la conexión"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
+                    );
+                }
+                note(ui, crate::i18n::tr("Not tried on a real DualShock 4 yet. While a source is on, the controller gets audio all the time, which uses more battery."), warn_color());
+            },
+        );
+    }
+
     pub(crate) fn page_haptics(
         &mut self,
         ui: &mut egui::Ui,
@@ -42,10 +138,14 @@ impl App {
         if ds4 {
             note(
                 ui,
-                crate::i18n::tr("A DualShock 4 has rumble motors, not the DualSense voice coils. Rumble and button clicks use classic rumble. The haptic stream and the speaker are DualSense only."),
+                crate::i18n::tr("A DualShock 4 has rumble motors, not the DualSense voice coils. Rumble and button clicks use classic rumble. The haptic stream is DualSense only."),
                 warn_color(),
             );
             ui.add_space(10.0);
+            if let Some(d) = dev {
+                self.ds4_audio_card(ui, p, d);
+                ui.add_space(12.0);
+            }
         }
         let bt = dev.map(|d| d.is_bluetooth()).unwrap_or(true) && !ds4;
         if !bt && !ds4 {
@@ -289,7 +389,7 @@ impl App {
                 let m = &mut p.microphone;
                 let level = dev.filter(|d| d.microphone.recording()).map(|d| d.microphone.peak() as f32 / 255.0);
                 let (control, _) = microphone_control(ui, &mut m.enabled, &mut m.muted, level);
-                control.on_hover_text(crate::i18n::tr(if cfg!(target_os = "linux") { "Requires Bluetooth and working PipeWire audio or an active virtual DualSense controller" } else { "Requires Bluetooth and an active virtual DualSense controller" }));
+                control.on_hover_text(crate::i18n::tr(if cfg!(target_os = "linux") { "Requires Bluetooth and working PipeWire audio or an active virtual DualSense controller" } else { "Requires Bluetooth and a virtual DualSense, Xbox 360 or DualShock 4 controller" }));
                 if m.enabled {
                     row(
                         ui,
@@ -317,13 +417,13 @@ impl App {
                         "%",
                     );
                     if let Some(d) = dev {
-                        let virtual_microphone = d.virt.active() == Some(VirtualKind::DualSense);
+                        let virtual_microphone = d.virt.microphone_ready();
                         #[cfg(windows)]
                         let ready = bt && virtual_microphone;
                         #[cfg(target_os = "linux")]
                         let ready = bt && (virtual_microphone || d.native_audio().is_some_and(|audio| audio.healthy()));
                         if !ready {
-                            note(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Connect over Bluetooth and check that PipeWire audio is available. A virtual DualSense can also expose its microphone." } else { "Connect over Bluetooth and select DualSense on the Virtual controller page to expose the microphone to Windows." }), warn_color());
+                            note(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Connect over Bluetooth and check that PipeWire audio is available. A virtual DualSense can also expose its microphone." } else { "Connect over Bluetooth and select a virtual controller on the Virtual controller page to expose the microphone to Windows." }), warn_color());
                         } else {
                             let toggled = d.toggles.lock().mute_engaged;
                             ui.horizontal(|ui| {
