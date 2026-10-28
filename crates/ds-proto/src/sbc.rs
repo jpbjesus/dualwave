@@ -112,8 +112,8 @@ impl Encoder {
             }
             for band in 0..SUBBANDS {
                 let mut v = 0.0;
-                for tap in 0..HISTORY {
-                    v += self.matrix[band][tap] * history[tap];
+                for (tap, sample) in history.iter().enumerate() {
+                    v += self.matrix[band][tap] * sample;
                 }
                 out[at + band] = v;
             }
