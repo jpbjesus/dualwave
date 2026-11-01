@@ -172,6 +172,28 @@ pub enum AudioSource {
     SystemAudio,
 }
 
+/// The controller speaker's own amplifier: the output report's preamp gain.
+/// Normal preserves the reports sent before amplifier controls existed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpeakerAmp {
+    #[default]
+    Normal,
+    Louder,
+    Loudest,
+}
+
+impl SpeakerAmp {
+    /// Normal is Linux's +6 dB; the others are the next two steps of the
+    /// 3-bit field, not measured.
+    pub fn preamp(self) -> u8 {
+        match self {
+            SpeakerAmp::Normal => ds_proto::output::SPEAKER_PREAMP_DEFAULT,
+            SpeakerAmp::Louder => 3,
+            SpeakerAmp::Loudest => 4,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Latency {
     Short,
@@ -253,6 +275,8 @@ pub struct Haptics {
     pub rumble_as_haptics: bool,
     /// Controller speaker volume over Bluetooth, 0..=100; 0 keeps it off.
     pub speaker_volume: u8,
+    /// The speaker's amplifier (not the headset jack).
+    pub speaker_amp: SpeakerAmp,
     /// Also play the captured PC audio on the controller speaker.
     pub pc_audio_on_speaker: bool,
     /// Send speaker audio to a headset in the controller's jack instead,
@@ -278,6 +302,7 @@ impl Default for Haptics {
             rumble_intensity: 1.0,
             rumble_as_haptics: false,
             speaker_volume: 80,
+            speaker_amp: SpeakerAmp::Normal,
             pc_audio_on_speaker: false,
             headset_when_plugged: true,
             ds4_audio: Ds4Audio::default(),
@@ -400,6 +425,9 @@ impl Default for Touchpad {
 pub enum GyroMode {
     Off,
     Mouse,
+    /// Turning speed drives the virtual controller's right stick, for games
+    /// that ignore the mouse while a controller is in use.
+    RightStick,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -441,6 +469,14 @@ pub struct Gyro {
     pub smoothing: f32,
     /// Extra speed for fast flicks, 0 = none.
     pub acceleration: f32,
+    /// Right stick output: degrees per second that tilt the stick fully.
+    pub stick_speed: f32,
+    /// Right stick output: 0..=0.5, where the stick starts once the gyro
+    /// moves, to step over the game's own deadzone.
+    pub stick_min: f32,
+    /// Right stick output: 1..=3, the game's stick response curve to undo,
+    /// so slow turns aren't slowed further. 1 = linear.
+    pub stick_curve: f32,
 }
 
 impl Default for Gyro {
@@ -456,6 +492,9 @@ impl Default for Gyro {
             deadzone: 1.2,
             smoothing: 0.35,
             acceleration: 0.0,
+            stick_speed: 120.0,
+            stick_min: 0.0,
+            stick_curve: 1.0,
         }
     }
 }
@@ -899,12 +938,12 @@ pub struct VirtualOutput {
     pub game_leds: bool,
     /// Game haptics: the virtual DualSense's actuator channels.
     pub game_haptics: bool,
-    /// 0..=100
+    /// Percent, 0..=200; past 100 a limiter holds the peaks.
     pub game_haptics_level: u8,
     /// Game speaker: the virtual DualSense's speaker channels, to the
     /// controller speaker over Bluetooth.
     pub game_speaker: bool,
-    /// 0..=100
+    /// Percent, 0..=200; past 100 a limiter holds the peaks.
     pub game_speaker_level: u8,
     pub left_deadzone: StickDeadzone,
     pub right_deadzone: StickDeadzone,
@@ -1377,6 +1416,42 @@ mod tests {
         assert_eq!(d.default_profile, "Xbox");
         assert_eq!(d.dualsense_profile, "DualSense");
         assert_eq!(d.fallback_pad, crate::settings::FallbackPad::Off);
+    }
+
+    #[test]
+    fn speaker_defaults_preserve_existing_levels() {
+        let p = Profile::default();
+        assert_eq!(p.haptics.speaker_volume, 80);
+        assert_eq!(p.haptics.speaker_amp, SpeakerAmp::Normal);
+        assert_eq!(p.haptics.speaker_amp.preamp(), 2);
+        assert_eq!(SpeakerAmp::Normal.preamp(), 0x02, "Normal is what Linux sends");
+        assert_eq!((p.virtual_out.game_haptics_level, p.virtual_out.game_speaker_level), (100, 100));
+        // A profile from before the amplifier setting keeps Normal; its saved
+        // volume and levels are kept as they are.
+        let h: Haptics = serde_json::from_str(r#"{"speaker_volume":60}"#).unwrap();
+        assert_eq!(h.speaker_amp, SpeakerAmp::Normal);
+        assert_eq!(h.speaker_volume, 60);
+        let v: VirtualOutput = serde_json::from_str(r#"{"game_speaker_level":100}"#).unwrap();
+        assert_eq!(v.game_speaker_level, 100);
+        let mut h = Haptics::default();
+        h.speaker_amp = SpeakerAmp::Loudest;
+        let back: Haptics = serde_json::from_str(&serde_json::to_string(&h).unwrap()).unwrap();
+        assert_eq!(back.speaker_amp, SpeakerAmp::Loudest);
+        let v: VirtualOutput = serde_json::from_str(r#"{"game_haptics_level":180}"#).unwrap();
+        assert_eq!(v.game_haptics_level, 180);
+    }
+
+    #[test]
+    fn gyro_from_before_right_stick_loads_unchanged() {
+        let g: Gyro = serde_json::from_str(r#"{"mode":"Mouse","sensitivity":20.0}"#).unwrap();
+        assert_eq!(g.mode, GyroMode::Mouse);
+        assert_eq!(g.sensitivity, 20.0);
+        assert_eq!((g.stick_speed, g.stick_min, g.stick_curve), (120.0, 0.0, 1.0));
+        assert_eq!(Gyro::default().mode, GyroMode::Off);
+        let mut g = Gyro::default();
+        g.mode = GyroMode::RightStick;
+        let back: Gyro = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
+        assert_eq!(back, g);
     }
 
     #[test]

@@ -6,6 +6,8 @@ use crate::engine::Engine;
 
 pub fn open() -> bool { false }
 
+pub fn guide_down() {}
+
 pub fn run(_engine: Arc<Engine>) {
     log::debug!("Xbox Game Bar watcher is not applicable on Linux");
 }

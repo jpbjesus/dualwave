@@ -460,11 +460,15 @@ impl App {
             }
             Part::Motion => {
                 ui.label(RichText::new(tr("Gyro mouse")).strong());
-                choice(ui, &mut p.gyro.mode, &[(GyroMode::Off, "Off"), (GyroMode::Mouse, "Mouse")]);
-                if p.gyro.mode == GyroMode::Mouse {
+                choice(ui, &mut p.gyro.mode, &[(GyroMode::Off, "Off"), (GyroMode::Mouse, "Mouse"), (GyroMode::RightStick, "Right stick")]);
+                if p.gyro.mode != GyroMode::Off {
                     let edge = self.device().map(|d| d.model.is_edge()).unwrap_or(true);
                     super::pages::input::gyro_activation(ui, &mut p.gyro, edge);
-                    ui.add(egui::Slider::new(&mut p.gyro.sensitivity, 1.0..=80.0).text(tr("Sensitivity")));
+                    if p.gyro.mode == GyroMode::RightStick {
+                        ui.add(egui::Slider::new(&mut p.gyro.stick_speed, 20.0..=600.0).text(tr("Full tilt at")));
+                    } else {
+                        ui.add(egui::Slider::new(&mut p.gyro.sensitivity, 1.0..=80.0).text(tr("Sensitivity")));
+                    }
                     ui.label(tr("Horizontal from"));
                     choice(ui, &mut p.gyro.axis, &[(GyroAxis::Yaw, "Turn"), (GyroAxis::Roll, "Lean"), (GyroAxis::Combined, "Both")]);
                 }

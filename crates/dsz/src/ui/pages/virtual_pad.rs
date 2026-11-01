@@ -398,6 +398,10 @@ impl App {
                     },
                 );
             } else {
+                let ds_profile = {
+                    let s = self.engine.settings.read();
+                    s.auto_dualsense.then(|| s.dualsense_profile.clone())
+                };
                 card(
                     ui,
                     crate::i18n::tr("Game feedback"),
@@ -422,37 +426,48 @@ impl App {
                             crate::i18n::tr("DualSense and DualShock 4 modes"),
                             &mut vo.game_leds,
                         );
-                        toggle_row(
-                            ui,
-                            crate::i18n::tr("Game haptics"),
-                            crate::i18n::tr("The game's haptic audio, to the actuators over Bluetooth"),
-                            &mut vo.game_haptics,
-                        );
-                        if vo.game_haptics {
-                            slider_row(
+                        if vo.kind == VirtualKind::DualSense {
+                            toggle_row(
                                 ui,
-                                crate::i18n::tr("Haptics level"),
-                                "",
-                                &mut vo.game_haptics_level,
-                                0..=100,
-                                "%",
+                                crate::i18n::tr("Game haptics"),
+                                crate::i18n::tr("The game's haptic audio, to the actuators over Bluetooth"),
+                                &mut vo.game_haptics,
                             );
-                        }
-                        toggle_row(
-                            ui,
-                            crate::i18n::tr("Game speaker"),
-                            crate::i18n::tr("The game's controller-speaker sound, to the speaker over Bluetooth"),
-                            &mut vo.game_speaker,
-                        );
-                        if vo.game_speaker {
-                            slider_row(
+                            if vo.game_haptics {
+                                slider_row(
+                                    ui,
+                                    crate::i18n::tr("Haptics level"),
+                                    crate::i18n::tr("Above 100% makes faint effects stronger"),
+                                    &mut vo.game_haptics_level,
+                                    0..=crate::haptics::streamer::LEVEL_MAX,
+                                    "%",
+                                );
+                            }
+                            toggle_row(
                                 ui,
-                                crate::i18n::tr("Speaker level"),
-                                "",
-                                &mut vo.game_speaker_level,
-                                0..=100,
-                                "%",
+                                crate::i18n::tr("Game speaker"),
+                                crate::i18n::tr("The game's controller-speaker sound, to the speaker over Bluetooth"),
+                                &mut vo.game_speaker,
                             );
+                            if vo.game_speaker {
+                                slider_row(
+                                    ui,
+                                    crate::i18n::tr("Speaker level"),
+                                    crate::i18n::tr("Above 100% makes quiet sounds louder"),
+                                    &mut vo.game_speaker_level,
+                                    0..=crate::haptics::streamer::LEVEL_MAX,
+                                    "%",
+                                );
+                            }
+                        } else if let Some(name) = &ds_profile {
+                            muted(ui, &crate::localized_format!(
+                                "Game haptics and speaker sound need a virtual DualSense. Games with DualSense support switch to the \"{name}\" profile, so set them there.",
+                                "A háptica e o som do alto-falante do jogo precisam de um DualSense virtual. Jogos com suporte ao DualSense mudam para o perfil \"{name}\"; ajuste-os lá.",
+                                "La háptica y el sonido del altavoz del juego necesitan un DualSense virtual. Los juegos compatibles con DualSense cambian al perfil \"{name}\"; ajústalos allí.";
+                                    "A háptica e o som do altifalante do jogo requerem um DualSense virtual. Jogos com suporte para DualSense mudam para o perfil \"{name}\"; ajuste estas opções lá."
+                            ));
+                        } else {
+                            muted(ui, crate::i18n::tr("Game haptics and speaker sound need a virtual DualSense."));
                         }
                         if let Some(d) = dev {
                             ui.add_space(4.0);
