@@ -117,11 +117,9 @@ pub fn trigger(v: u8, range: [u8; 2]) -> u8 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn default_reach_preserves_controller_reports_and_usb_identity() {
+    fn controller_reports_and_usb_identity(mut p: crate::profile::Profile) -> Vec<u8> {
         use crate::composer::Composer;
         use crate::device::{Feedback, Overrides, Toggles};
-        use crate::profile::Profile;
         use crate::virt::usbip::{descriptors as d, wire};
         use ds_proto::{stream, Connection, InputState};
 
@@ -130,7 +128,6 @@ mod tests {
             bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
             bytes.extend_from_slice(data);
         };
-        let mut p = Profile::default();
         let mut buf = [0u8; stream::MAX_REPORT];
         for disabled in [false, true] {
             if disabled {
@@ -166,8 +163,25 @@ mod tests {
         for id in [0x02, 0x12, 0x81, 0xA3] {
             add(&d::ds4::feature(id, None, &[0; 6]).unwrap());
         }
+        bytes
+    }
+
+    #[test]
+    fn default_reach_preserves_controller_reports_and_usb_identity() {
         // Captured from the unchanged report builders, before enabling reach.
-        assert_eq!(bytes.as_slice(), include_bytes!("fixtures/reach-disabled.bin"));
+        assert_eq!(controller_reports_and_usb_identity(crate::profile::Profile::default()).as_slice(), include_bytes!("fixtures/reach-disabled.bin"));
+    }
+
+    #[test]
+    fn disabled_flick_and_macros_preserve_reports_and_usb_identity() {
+        use crate::profile::{Action, MacroStep, Mapping, Profile, StickMode};
+        let mut p: Profile = serde_json::from_str("{}").unwrap();
+        assert_eq!(p.sticks.left.mode, StickMode::Passthrough);
+        assert_eq!(p.sticks.right.mode, StickMode::Passthrough);
+        p.sticks.left.flick_pixels_per_turn = 10000.0;
+        p.sticks.right.flick_pixels_per_turn = 100.0;
+        p.mappings.push(Mapping { enabled: false, action: Action::Macro { steps: vec![MacroStep::default()] }, ..Default::default() });
+        assert_eq!(controller_reports_and_usb_identity(p).as_slice(), include_bytes!("fixtures/reach-disabled.bin"));
     }
 
     #[test]

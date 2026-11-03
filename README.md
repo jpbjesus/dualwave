@@ -44,16 +44,41 @@ consult its release notes before downloading.
 | Headphone audio | Bluetooth stereo playback through the 3.5 mm jack, routing and volume |
 | Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
 | Haptics | Game and system audio, button feedback, trigger texture and rumble conversion |
-| Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons |
-| Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third |
+| Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; visible action choices and inline macros with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
+| Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third; optional flick stick with calibrated pixels per full turn, horizontal rotation and a 100 ms initial turn |
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
 | Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP |
+| Controller power | Turn off the connected Bluetooth controller directly from the home page |
 | Upstream 0.4.4 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
 | Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
 | Desktop integration | Tray, startup preferences and device naming; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
 | Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report |
+
+Flick stick is selected per stick in **Motion & touch**. Set **Pixels per full turn**
+for the game's mouse sensitivity and disable mouse acceleration in the game.
+Pair it with gyro mouse for vertical aiming. A virtual controller centers a
+stick used for flick turns; the physical stick remains visible to games unless
+physical input is isolated.
+
+Open **Buttons → Create macro** to choose the controller button and build the
+sequence directly on the page. Common actions (keyboard, mouse, controller and
+macro) are visible without opening a menu. Add, reorder or remove each step in
+the numbered sequence; each step holds its input, releases it, then pauses.
+**Play once** runs the sequence once, **Repeat while held** stops when the button
+is released and **Repeat until pressed again** stops on the next activation.
+Existing Turbo macros keep using the step timings. **Advanced** contains button
+combinations, original-button suppression and gesture timing; a summary keeps
+configured options visible when collapsed. The Workspace's **Edit macro** link
+opens the selected mapping in the full editor. Virtual-controller steps need a
+virtual output enabled.
+Playback stops on mapping edits, profile changes and disconnect. Macros use the
+controller's existing input clock: delays can be longer than configured when
+reports arrive late, and missed steps are never sent as a catch-up burst.
+Playback is limited to the first 128 steps and 60 seconds per hold or pause.
+These features require explicit selection; existing profiles retain their modes.
+Hardware and game calibration validation is pending.
 
 ## Inside the app
 

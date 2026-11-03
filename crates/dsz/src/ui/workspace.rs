@@ -166,6 +166,12 @@ impl App {
             let reason = if !self.engine.settings.read().auto_profiles { crate::games::SelectionReason::Disabled } else { status.reason };
             let summary = [Some(tr(if dev.is_some() { "Applied profile" } else { "Default profile" })), Some(profile.as_str()), Some(tr(reason.label())), status.exe.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(d) = dev.filter(|d| available && d.is_bluetooth()) {
+                    if widgets::power_button(ui, tr("Turn off controller")).clicked() {
+                        let mac = d.mac.lock().clone();
+                        std::thread::spawn(move || crate::platform::bt_disconnect(&mac));
+                    }
+                }
                 if ui.add(egui::Button::new(RichText::new(&summary).size(12.0).color(muted_color())).frame(false)
                     .wrap_mode(egui::TextWrapMode::Truncate)).on_hover_text(format!("{}\n{}", summary, tr("Manage game profiles"))).clicked() {
                     self.page = super::Page::Profiles;
@@ -433,21 +439,20 @@ impl App {
                     button: self.selected_button, gesture: self.quick_gesture, ..Default::default()
                 });
                 let before = edited.action.clone();
+                let before_mode = edited.mode;
                 let capture_id = ui.id().with("workspace-key-capture");
                 let target = (p.name.clone(), self.selected_button, self.quick_gesture, index);
                 let mut recording = ui.ctx().data_mut(|data| data.get_temp::<(String, Button, Gesture, Option<usize>)>(capture_id)) == Some(target.clone());
                 if !matches!(edited.action, Action::Key { .. }) { recording = false; }
                 if recording && super::pages::mappings::capture_action(ui.ctx(), &mut edited.action) { recording = false; }
-                ui.label(tr("Action"));
                 let profile_names = self.engine.profiles.names();
-                ui.horizontal_wrapped(|ui| {
-                    if let Some(record) = super::pages::mappings::action_editor(ui, &mut edited, index.unwrap_or(usize::MAX), &profile_names, &p.name,
-                        p.virtual_out.kind != VirtualKind::Off, p.virtual_out.kind == VirtualKind::Xbox360,
-                        self.engine.companion.can_hide(), recording, true) { recording = record; }
-                });
+                if let Some(record) = super::pages::mappings::action_editor(ui, &mut edited, index.unwrap_or(usize::MAX), &profile_names, &p.name,
+                    p.virtual_out.kind != VirtualKind::Off, p.virtual_out.kind == VirtualKind::Xbox360,
+                    self.engine.companion.can_hide(), recording, true) { recording = record; }
                 if !matches!(edited.action, Action::Key { .. }) { recording = false; }
-                if edited.action != before {
+                if edited.action != before || edited.mode != before_mode {
                     apply_action(p, self.selected_button, self.quick_gesture, edited.action);
+                    if let Some(i) = individual_mapping(p, self.selected_button, self.quick_gesture) { p.mappings[i].mode = edited.mode; }
                 }
                 let index = individual_mapping(p, self.selected_button, self.quick_gesture);
                 ui.ctx().data_mut(|data| {
@@ -455,6 +460,12 @@ impl App {
                     if recording { data.insert_temp(capture_id, (p.name.clone(), self.selected_button, self.quick_gesture, index)); }
                 });
                 if let Some(i) = index {
+                    if matches!(p.mappings[i].action, Action::Macro { .. }) && widgets::button(ui, tr("Edit macro")).clicked() {
+                        self.page = super::Page::Mappings;
+                        self.detailed = true;
+                        self.capture_key = None;
+                        super::pages::mappings::focus_mapping(ui.ctx(), i);
+                    }
                     ui.checkbox(&mut p.mappings[i].mute, tr("Suppress original virtual button"));
                 }
             }
@@ -488,9 +499,9 @@ impl App {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(tr(title));
                         egui::ComboBox::from_id_salt(id).width(140.0)
-                            .selected_text(tr(match stick.mode { StickMode::Passthrough => "Game", StickMode::Mouse => "Mouse", StickMode::Scroll => "Scroll wheel", StickMode::Wasd => "WASD", StickMode::Arrows => "Arrow keys" }))
+                            .selected_text(tr(match stick.mode { StickMode::Passthrough => "Game", StickMode::Mouse => "Mouse", StickMode::Flick => "Flick stick", StickMode::Scroll => "Scroll wheel", StickMode::Wasd => "WASD", StickMode::Arrows => "Arrow keys" }))
                             .show_ui(ui, |ui| {
-                                for (mode, label) in [(StickMode::Passthrough, "Game"), (StickMode::Mouse, "Mouse"), (StickMode::Scroll, "Scroll wheel"), (StickMode::Wasd, "WASD"), (StickMode::Arrows, "Arrow keys")] {
+                                for (mode, label) in [(StickMode::Passthrough, "Game"), (StickMode::Mouse, "Mouse"), (StickMode::Flick, "Flick stick"), (StickMode::Scroll, "Scroll wheel"), (StickMode::Wasd, "WASD"), (StickMode::Arrows, "Arrow keys")] {
                                     ui.selectable_value(&mut stick.mode, mode, tr(label));
                                 }
                             });
@@ -591,6 +602,43 @@ mod tests {
             assert_eq!(app.capture_key, None);
             assert_eq!(profile, before, "navigation must not edit a profile");
         }
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn workspace_macro_link_opens_its_mapping_without_changing_it() {
+        let dir = std::env::temp_dir().join(format!("dualwave-workspace-macro-{}", std::process::id()));
+        let mut app = App::new(crate::engine::Engine::new(dir.clone()));
+        app.part = Part::Buttons;
+        app.selected_button = Button::Cross;
+        app.quick_gesture = Gesture::Press;
+        let ctx = egui::Context::default();
+        super::super::theme::install(&ctx, 1.0);
+        let mut profile = Profile::default();
+        profile.mappings = vec![Mapping { button: Button::Circle, ..Default::default() }, Mapping {
+            button: Button::Cross, action: Action::Macro { steps: vec![MacroStep::default()] }, mode: HoldStyle::Toggle, ..Default::default()
+        }];
+        let before = profile.clone();
+        let mut target = egui::Pos2::ZERO;
+        for pass in 0..5 {
+            let events = if pass > 1 {
+                let mut events = vec![egui::Event::PointerMoved(target)];
+                if pass > 2 { events.push(egui::Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: pass == 3, modifiers: egui::Modifiers::NONE }); }
+                events
+            } else { Vec::new() };
+            let output = ctx.run(egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 900.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.inspector(ui, &mut profile));
+            });
+            if pass == 1 {
+                target = output.shapes.iter().find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.job.text == tr("Edit macro") => Some(t.pos + t.galley.rect.center().to_vec2()), _ => None,
+                }).expect("direct macro editing link");
+            }
+        }
+        assert_eq!((app.page, app.detailed), (Page::Mappings, true));
+        assert_eq!(ctx.data(|data| data.get_temp::<usize>(egui::Id::new("mapping-focus"))), Some(1));
+        assert_eq!(profile, before);
         drop(app);
         let _ = std::fs::remove_dir_all(dir);
     }

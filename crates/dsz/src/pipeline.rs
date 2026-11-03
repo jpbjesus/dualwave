@@ -15,6 +15,9 @@ use crate::engine::{Engine, ProfileCache};
 use crate::inputsim as sim;
 use crate::profile::*;
 
+mod flick;
+mod macros;
+
 // ------------------------------------------------------------------ gyro
 
 const COUNTS_PER_DPS: f32 = 16.0;
@@ -479,10 +482,12 @@ impl Touch {
 struct Stick {
     rem: [f32; 2],
     keys: [u16; 4],
+    flick: flick::Flick,
 }
 
 impl Stick {
     fn release(&mut self) {
+        self.flick = flick::Flick::default();
         for k in self.keys.iter_mut() {
             if *k != 0 {
                 sim::key(*k, false);
@@ -492,6 +497,19 @@ impl Stick {
     }
 
     fn process(&mut self, st: &StickSettings, mode: StickMode, x: u8, y: u8, dt: f32) {
+        if mode == StickMode::Flick {
+            // Release any keys left by a previous mode without resetting
+            // this flick's angle or fractional mouse movement.
+            for key in &mut self.keys {
+                if *key != 0 { sim::key(*key, false); *key = 0; }
+            }
+            let px = self.flick.process(x, y, dt, st.flick_pixels_per_turn) + self.rem[0];
+            let dx = px.trunc();
+            self.rem = [px - dx, 0.0];
+            sim::mouse_move(dx as i32, 0);
+            return;
+        }
+        self.flick = flick::Flick::default();
         let fx = ((x as f32 - 128.0) / 127.0).clamp(-1.0, 1.0);
         let fy = ((y as f32 - 128.0) / 127.0).clamp(-1.0, 1.0);
         let mag = (fx * fx + fy * fy).sqrt().min(1.0);
@@ -503,6 +521,7 @@ impl Stick {
             (fx / mag, fy / mag, m)
         };
         match mode {
+            StickMode::Flick => unreachable!(),
             StickMode::Passthrough => self.release(),
             StickMode::Mouse => {
                 self.release();
@@ -563,6 +582,7 @@ struct MapRt {
     tap_up_at: Option<Instant>,
     /// Buttons a muted combo hid; each stays hidden until it is released.
     mute_latch: u32,
+    playback: macros::Playback,
 }
 
 fn holdable(a: &Action) -> bool {
@@ -635,7 +655,7 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
             }
         }
         // Read from the mapping state when the pad is built.
-        Action::Gamepad { .. } | Action::Xbox { .. } => {}
+        Action::Gamepad { .. } | Action::Xbox { .. } | Action::Macro { .. } => {}
         // Started by the mapping, which knows the buttons to watch.
         Action::HoldProfile { .. } => {}
         Action::TurnOffController => turn_off_controller(engine, device),
@@ -832,6 +852,9 @@ impl Pipeline {
             s.release();
         }
         for (rt, a) in self.maps.iter_mut().zip(self.map_actions.iter()) {
+            if let Some((input, _)) = rt.playback.cancel() {
+                action_up(&input.action());
+            }
             if rt.out_down {
                 action_up(a);
                 rt.out_down = false;
@@ -860,6 +883,13 @@ impl Pipeline {
         }
 
         let profile = self.cache.get(engine, device);
+        if self.built_for.as_ref().is_some_and(|b| b.name != profile.name) {
+            for (rt, action) in self.maps.iter_mut().zip(&self.map_actions) {
+                if let Some((input, _)) = rt.playback.cancel() { action_up(&input.action()); }
+                if matches!(action, Action::Macro { .. }) { rt.toggled = false; }
+            }
+            for stick in &mut self.sticks { stick.release(); }
+        }
         let changed = match &self.built_for {
             Some(b) if Arc::ptr_eq(b, &profile) => false,
             // Another profile, or an edit: rebuild only if the mappings
@@ -1193,6 +1223,35 @@ impl Pipeline {
                 }
             };
 
+            if let Action::Macro { steps } = &m.action {
+                if start {
+                    rt.active = true;
+                    if m.mode == HoldStyle::Toggle && rt.playback.running() {
+                        if let Some((input, _)) = rt.playback.cancel() { action_up(&input.action()); }
+                        rt.toggled = false;
+                    } else {
+                        rt.playback.start();
+                        rt.toggled = m.mode == HoldStyle::Toggle;
+                    }
+                }
+                if end {
+                    rt.active = false;
+                    if matches!(m.mode, HoldStyle::Hold | HoldStyle::Turbo) {
+                        if let Some((input, _)) = rt.playback.cancel() { action_up(&input.action()); }
+                    }
+                }
+                let repeat = match m.mode {
+                    HoldStyle::Tap => false,
+                    HoldStyle::Toggle => rt.toggled,
+                    HoldStyle::Hold | HoldStyle::Turbo => rt.active,
+                };
+                if let Some((input, down)) = rt.playback.advance(steps, repeat, now) {
+                    let action = input.action();
+                    if down { action_down(engine, device, &action); } else { action_up(&action); }
+                }
+                continue;
+            }
+
             if start {
                 rt.active = true;
                 if let Action::HoldProfile { name, then } = &m.action {
@@ -1266,6 +1325,7 @@ impl Pipeline {
         // pad or the helper pad (see `process`).
         let own_xbox = device.virt.active() == Some(VirtualKind::Xbox360);
         for (m, rt) in profile.mappings.iter().zip(self.maps.iter()) {
+            if m.enabled { inject |= rt.playback.held_button(); }
             if !m.enabled || !rt.out_down {
                 continue;
             }
@@ -1472,6 +1532,89 @@ mod turn_off_tests {
             action: Action::TurnOffController,
             ..Mapping::default()
         }
+    }
+
+    fn macro_mapping(mode: crate::profile::HoldStyle) -> Mapping {
+        Mapping {
+            button: Button::Options,
+            mode,
+            action: Action::Macro { steps: vec![crate::profile::MacroStep {
+                input: crate::profile::MacroInput::Gamepad { button: Button::Cross },
+                hold_ms: 20, wait_ms: 10,
+            }] },
+            ..Mapping::default()
+        }
+    }
+
+    #[test]
+    fn macro_tap_finishes_after_release_and_hold_cancels() {
+        use crate::profile::HoldStyle;
+        for mode in [HoldStyle::Tap, HoldStyle::Hold, HoldStyle::Turbo] {
+            let mut rig = rig(Connection::Bluetooth, "", vec![macro_mapping(mode)]);
+            let up = centered(&[]);
+            let down = centered(&[Button::Options]);
+            let t = Instant::now();
+            step(&mut rig, &up, &down, t);
+            assert_eq!(rig.pipe.maps[0].playback.held_button(), Button::Cross.bit());
+            let profile = rig.engine.profiles.get_or_first("Turn off");
+            let (_, injected, _) = rig.pipe.mappings(&rig.engine, &rig.device, &profile, &down, &down, t);
+            assert_eq!(injected, Button::Cross.bit());
+            step(&mut rig, &down, &up, t + Duration::from_millis(5));
+            assert_eq!(rig.pipe.maps[0].playback.running(), mode == HoldStyle::Tap);
+            step(&mut rig, &up, &up, t + Duration::from_millis(20));
+            assert_eq!(rig.pipe.maps[0].playback.held_button(), 0);
+            step(&mut rig, &up, &up, t + Duration::from_millis(30));
+            assert!(!rig.pipe.maps[0].playback.running());
+        }
+    }
+
+    #[test]
+    fn macro_toggle_stops_on_second_press_and_release_all_cancels() {
+        let mut rig = rig(Connection::Bluetooth, "", vec![macro_mapping(crate::profile::HoldStyle::Toggle)]);
+        let up = centered(&[]);
+        let down = centered(&[Button::Options]);
+        let t = Instant::now();
+        step(&mut rig, &up, &down, t);
+        step(&mut rig, &down, &up, t + Duration::from_millis(5));
+        assert!(rig.pipe.maps[0].playback.running());
+        step(&mut rig, &up, &down, t + Duration::from_millis(10));
+        assert!(!rig.pipe.maps[0].playback.running());
+        step(&mut rig, &down, &up, t + Duration::from_millis(15));
+        step(&mut rig, &up, &down, t + Duration::from_millis(20));
+        assert!(rig.pipe.maps[0].playback.running());
+        rig.pipe.release_all();
+        assert!(!rig.pipe.maps[0].playback.running());
+        assert_eq!(rig.pipe.maps[0].playback.held_button(), 0);
+    }
+
+    #[test]
+    fn macro_cancels_on_profile_switch_even_with_identical_mappings() {
+        let mut rig = rig(Connection::Bluetooth, "", vec![macro_mapping(crate::profile::HoldStyle::Toggle)]);
+        let up = centered(&[]);
+        let down = centered(&[Button::Options]);
+        let t = Instant::now();
+        step(&mut rig, &up, &down, t);
+        let mut other = (*rig.engine.profiles.get_or_first("Turn off")).clone();
+        other.name = "Other macro profile".into();
+        let name = rig.engine.profiles.add(other);
+        rig.engine.set_device_profile(&rig.device, &name);
+        step(&mut rig, &down, &down, t + Duration::from_millis(5));
+        assert!(!rig.pipe.maps[0].playback.running());
+        assert_eq!(rig.pipe.maps[0].playback.held_button(), 0);
+    }
+
+    #[test]
+    fn macro_edit_cancels_a_running_sequence() {
+        let mut rig = rig(Connection::Bluetooth, "", vec![macro_mapping(crate::profile::HoldStyle::Tap)]);
+        let up = centered(&[]);
+        let down = centered(&[Button::Options]);
+        let t = Instant::now();
+        step(&mut rig, &up, &down, t);
+        let mut edited = (*rig.engine.profiles.get_or_first("Turn off")).clone();
+        edited.mappings[0].enabled = false;
+        rig.engine.profiles.update(edited);
+        step(&mut rig, &down, &down, t + Duration::from_millis(5));
+        assert!(!rig.pipe.maps[0].playback.running());
     }
 
     #[test]

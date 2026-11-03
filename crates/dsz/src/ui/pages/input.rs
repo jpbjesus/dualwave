@@ -920,6 +920,7 @@ impl App {
                                 .selected_text(match s.mode {
                                     StickMode::Passthrough => crate::i18n::tr("Game only"),
                                     StickMode::Mouse => crate::i18n::tr("Mouse"),
+                                    StickMode::Flick => crate::i18n::tr("Flick stick"),
                                     StickMode::Scroll => crate::i18n::tr("Scroll wheel"),
                                     StickMode::Wasd => "W A S D",
                                     StickMode::Arrows => crate::i18n::tr("Arrow keys"),
@@ -935,6 +936,7 @@ impl App {
                                         StickMode::Mouse,
                                         crate::i18n::tr("Mouse"),
                                     );
+                                    ui.selectable_value(&mut s.mode, StickMode::Flick, crate::i18n::tr("Flick stick"));
                                     ui.selectable_value(
                                         &mut s.mode,
                                         StickMode::Scroll,
@@ -965,11 +967,17 @@ impl App {
                             ui.data_mut(|d| d.insert_temp(id, state));
                         });
                     } else {
-                        let mut dz = (s.deadzone * 100.0).round();
-                        if slider_row(ui, crate::i18n::tr("Deadzone"), "", &mut dz, 0.0..=60.0, "%") {
-                            s.deadzone = dz / 100.0;
+                        if s.mode != StickMode::Flick {
+                            let mut dz = (s.deadzone * 100.0).round();
+                            if slider_row(ui, crate::i18n::tr("Deadzone"), "", &mut dz, 0.0..=60.0, "%") {
+                                s.deadzone = dz / 100.0;
+                            }
                         }
                         match s.mode {
+                            StickMode::Flick => {
+                                slider_row(ui, crate::i18n::tr("Pixels per full turn"), "", &mut s.flick_pixels_per_turn, 100.0..=20000.0, " px");
+                                muted(ui, crate::i18n::tr("Push toward an edge to turn, then rotate the stick. Use gyro mouse to aim vertically. Calibrate with the game's mouse acceleration off."));
+                            }
                             StickMode::Mouse => {
                                 slider_row(
                                     ui,

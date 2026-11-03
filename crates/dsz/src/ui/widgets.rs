@@ -367,6 +367,21 @@ pub fn two_columns(ui: &mut Ui, mut f: impl FnMut(&mut Ui, usize)) {
     });
 }
 
+pub fn power_button(ui: &mut Ui, label: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(36.0, 32.0), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    let color = if response.hovered() { with_alpha(bad_color(), 200) } else { bad_color() };
+    let p = ui.painter();
+    let c = rect.center();
+    p.add(egui::Shape::line((0..=28).map(|i| {
+        let angle = -std::f32::consts::FRAC_PI_2 + 0.55 + (std::f32::consts::TAU - 1.1) * i as f32 / 28.0;
+        c + egui::vec2(angle.cos(), angle.sin()) * 6.5
+    }).collect(), Stroke::new(1.5, color)));
+    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(1.5, color));
+    if response.has_focus() { p.rect_stroke(rect, CornerRadius::same(R_CTRL), Stroke::new(1.5, accent_color()), StrokeKind::Outside); }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
+}
+
 /// One microphone surface: click the mic to mute, or power to control capture.
 /// The meter only follows samples from an actual recording session.
 pub fn microphone_control(ui: &mut Ui, enabled: &mut bool, muted: &mut bool, level: Option<f32>) -> (Response, Response) {

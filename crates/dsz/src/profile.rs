@@ -503,6 +503,7 @@ impl Default for Gyro {
 pub enum StickMode {
     Passthrough,
     Mouse,
+    Flick,
     Scroll,
     Wasd,
     Arrows,
@@ -516,6 +517,8 @@ pub struct StickSettings {
     pub deadzone: f32,
     /// Pixels per second at full deflection.
     pub mouse_speed: f32,
+    /// Calibrate against the game's mouse sensitivity for one full turn.
+    pub flick_pixels_per_turn: f32,
     /// Response exponent, 1 = linear.
     pub curve: f32,
     pub scroll_speed: f32,
@@ -529,6 +532,7 @@ impl Default for StickSettings {
             mode: StickMode::Passthrough,
             deadzone: 0.12,
             mouse_speed: 1400.0,
+            flick_pixels_per_turn: 4320.0,
             curve: 1.8,
             scroll_speed: 1.0,
             key_threshold: 0.5,
@@ -620,6 +624,10 @@ pub enum Action {
     Mouse {
         button: MouseButton,
     },
+    Macro {
+        #[serde(default)]
+        steps: Vec<MacroStep>,
+    },
     ScrollUp,
     ScrollDown,
     Media {
@@ -658,6 +666,53 @@ pub enum Action {
     /// Drop the Bluetooth link, which powers the controller off. A controller
     /// plugged in over USB stays on.
     TurnOffController,
+}
+
+/// A bounded sequence of presses; each press is released before the next.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MacroStep {
+    pub input: MacroInput,
+    pub hold_ms: u32,
+    pub wait_ms: u32,
+}
+
+impl Default for MacroStep {
+    fn default() -> Self {
+        Self {
+            input: MacroInput::Key { vk: 0x20, ctrl: false, shift: false, alt: false, win: false },
+            hold_ms: 50,
+            wait_ms: 50,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MacroInput {
+    Key {
+        vk: u16,
+        #[serde(default)]
+        ctrl: bool,
+        #[serde(default)]
+        shift: bool,
+        #[serde(default)]
+        alt: bool,
+        #[serde(default)]
+        win: bool,
+    },
+    Mouse { button: MouseButton },
+    Gamepad { button: Button },
+}
+
+impl MacroInput {
+    pub fn action(self) -> Action {
+        match self {
+            Self::Key { vk, ctrl, shift, alt, win } => Action::Key { vk, ctrl, shift, alt, win },
+            Self::Mouse { button } => Action::Mouse { button },
+            Self::Gamepad { button } => Action::Gamepad { button },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1439,6 +1494,20 @@ mod tests {
         assert_eq!(back.speaker_amp, SpeakerAmp::Loudest);
         let v: VirtualOutput = serde_json::from_str(r#"{"game_haptics_level":180}"#).unwrap();
         assert_eq!(v.game_haptics_level, 180);
+    }
+
+    #[test]
+    fn flick_and_macro_profiles_round_trip_and_old_sticks_stay_passthrough() {
+        let old: StickSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.mode, StickMode::Passthrough);
+        assert_eq!(old.flick_pixels_per_turn, 4320.0);
+        let mut p = Profile::default();
+        p.sticks.right.mode = StickMode::Flick;
+        p.mappings.push(Mapping { action: Action::Macro { steps: vec![MacroStep::default()] }, ..Default::default() });
+        let back: Profile = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert_eq!(back, p);
+        let step: MacroStep = serde_json::from_str("{}").unwrap();
+        assert_eq!(step, MacroStep::default());
     }
 
     #[test]
