@@ -43,15 +43,15 @@ pub fn snapshot(engine: &Engine) -> (Option<Battery>, String) {
     (selected, description)
 }
 
-/// A high-contrast vertical battery overlapping the left grip. The fill itself
+/// A high-contrast vertical battery overlapping the right grip. The fill itself
 /// conveys charge without depending on color; the bolt/check conveys power.
 pub fn icon_rgba(size: usize, battery: Option<Battery>) -> Vec<u8> {
     let mut rgba = crate::icon_art::icon_rgba(size);
     let Some(battery) = battery else { return rgba; };
     if size < 12 { return rgba; }
     let scale = size as f32 / 32.0;
-    let x0 = (2.0 * scale).round() as usize;
-    let x1 = (10.0 * scale).round() as usize;
+    let x0 = (22.0 * scale).round() as usize;
+    let x1 = (30.0 * scale).round() as usize;
     let y0 = (11.0 * scale).round() as usize;
     let y1 = (30.0 * scale).round() as usize;
     let border = scale.round().max(1.0) as usize;
@@ -116,15 +116,15 @@ mod tests {
     }
 
     #[test]
-    fn battery_is_vertical_on_left_and_fills_from_bottom() {
+    fn battery_is_vertical_on_right_and_fills_from_bottom() {
         let rgba = icon_rgba(32, battery(50, BatteryStatus::Discharging, true));
         let pixel = |x: usize, y: usize| &rgba[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
-        assert_eq!(pixel(5, 10), [240, 244, 250, 255]);
-        assert_eq!(pixel(5, 13), [24, 29, 40, 255]);
-        assert_eq!(pixel(5, 27), [68, 206, 128, 255]);
+        assert_eq!(pixel(25, 10), [240, 244, 250, 255]);
+        assert_eq!(pixel(25, 13), [24, 29, 40, 255]);
+        assert_eq!(pixel(25, 27), [68, 206, 128, 255]);
         let base = crate::icon_art::icon_rgba(32);
         for y in 0..32 {
-            for x in 10..32 {
+            for x in 0..22 {
                 let offset = (y * 32 + x) * 4;
                 assert_eq!(&rgba[offset..offset + 4], &base[offset..offset + 4]);
             }
