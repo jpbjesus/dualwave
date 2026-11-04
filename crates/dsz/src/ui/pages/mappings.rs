@@ -9,6 +9,9 @@ use crate::ui::theme::*;
 use crate::ui::widgets::*;
 use crate::ui::App;
 
+#[path = "mapping_visual.rs"]
+mod visual;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AKind {
     None,
@@ -154,41 +157,20 @@ pub(crate) fn action_editor(
             macro_editor(ui, steps, &mut m.mode, i, virtual_on);
         }
     } else {
+        if matches!(m.action, Action::Key { .. }) {
+            if let Some(input) = visual::shortcuts(ui) { m.action = input.action(); m.mode = HoldStyle::Tap; }
+        }
         ui.horizontal_wrapped(|ui| {
             match &mut m.action {
                 Action::Key { vk, ctrl, shift, alt, win } => {
-                    fit(ui, 110.0);
-                    egui::ComboBox::from_id_salt(("map-key", i))
-                        .width(110.0)
-                        .selected_text(key_label(*vk))
-                        .height(320.0)
-                        .show_ui(ui, |ui| {
-                            for c in key_catalog() {
-                                ui.selectable_value(vk, c, key_label(c));
-                            }
-                        });
-                    let rec = recording;
-                    if ui
-                        .add(egui::Button::new(if rec { crate::i18n::tr("Press a key…") } else { crate::i18n::tr("Record") }).fill(if rec { accent_color() } else { card_hi_color() }))
-                        .clicked()
-                    {
-                        capture = Some(!rec);
-                    }
-                    ui.checkbox(ctrl, "Ctrl");
-                    ui.checkbox(shift, crate::i18n::tr("Shift"));
-                    ui.checkbox(alt, "Alt");
-                    ui.checkbox(win, "Win");
+                    ui.vertical(|ui| {
+                        if visual::keyboard(ui, vk, ctrl, shift, alt, win, recording) { capture = Some(!recording); }
+                    });
                 }
                 Action::Mouse { button } => {
-                    fit(ui, 110.0);
-                    egui::ComboBox::from_id_salt(("map-mouse", i))
-                        .width(110.0)
-                        .selected_text(mouse_label(*button))
-                        .show_ui(ui, |ui| {
-                            for b in [MouseButton::Left, MouseButton::Right, MouseButton::Middle, MouseButton::Back, MouseButton::Forward] {
-                                ui.selectable_value(button, b, mouse_label(b));
-                            }
-                        });
+                    for b in [MouseButton::Left, MouseButton::Right, MouseButton::Middle, MouseButton::Back, MouseButton::Forward] {
+                        ui.selectable_value(button, b, mouse_label(b));
+                    }
                 }
                 Action::Media { key } => {
                     fit(ui, 150.0);
@@ -240,18 +222,7 @@ pub(crate) fn action_editor(
                     });
                 }
                 Action::Gamepad { button } => {
-                    fit(ui, 130.0);
-                    egui::ComboBox::from_id_salt(("map-pad", i))
-                        .width(130.0)
-                        .selected_text(crate::i18n::tr(button.short_name()))
-                        .show_ui(ui, |ui| {
-                            for b in button_choices(false) {
-                                if b.is_touchpad_zone() {
-                                    continue;
-                                }
-                                ui.selectable_value(button, b, crate::i18n::tr(b.short_name()));
-                            }
-                        });
+                    ui.vertical(|ui| visual::buttons(ui, button, false, false));
                     if !virtual_on {
                         ui.label(RichText::new(crate::i18n::tr("needs a virtual controller")).size(12.0).color(warn_color()));
                     }
@@ -303,82 +274,103 @@ fn macro_editor(ui: &mut egui::Ui, steps: &mut Vec<MacroStep>, mode: &mut HoldSt
     ui.push_id(("macro-editor", i), |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(crate::i18n::tr("Macro steps")).strong());
-            if !steps.is_empty() && ui.add_enabled(steps.len() < 128, egui::Button::new(crate::i18n::tr("Add step"))).clicked() { steps.push(MacroStep::default()); }
+            if ui.add_enabled(steps.len() < 128, egui::Button::new(crate::i18n::tr("Add step"))).clicked() { steps.push(MacroStep::default()); }
         });
-        muted(ui, crate::i18n::tr("Each step presses, releases, then pauses. Steps run from top to bottom."));
+        egui::CollapsingHeader::new(crate::i18n::tr("Add shortcut")).default_open(steps.is_empty()).show(ui, |ui| {
+            muted(ui, crate::i18n::tr("Start with a shortcut or add your own steps."));
+            ui.add_enabled_ui(steps.len() < 128, |ui| {
+                if let Some(input) = visual::shortcuts(ui) { steps.push(MacroStep { input, ..Default::default() }); }
+            });
+        });
+        ui.add_space(8.0);
         playback_editor(ui, mode, true);
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         let mut remove = None;
         let mut swap = None;
         let count = steps.len().min(128);
+        let record_id = egui::Id::new("macro-shortcut-recording");
         if steps.is_empty() { muted(ui, crate::i18n::tr("No steps yet. Add a key, mouse click or controller button.")); }
         for (index, step) in steps.iter_mut().take(128).enumerate() {
             ui.push_id(index, |ui| {
-                ui.group(|ui| {
+                egui::Frame::new().fill(field_color()).stroke(Stroke::new(1.0, border_color()))
+                    .corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+                    ui.set_min_width((ui.available_width() - 1.0).max(0.0));
                     ui.horizontal_wrapped(|ui| {
-                        ui.label((index + 1).to_string());
+                        pill(ui, &(index + 1).to_string(), accent_color());
                         let mut kind = match step.input { MacroInput::Key { .. } => 0, MacroInput::Mouse { .. } => 1, MacroInput::Gamepad { .. } => 2 };
                         let before = kind;
-                        egui::ComboBox::from_id_salt("input-kind").selected_text(crate::i18n::tr(["Keyboard key", "Mouse button", "PlayStation button"][kind]))
-                            .show_ui(ui, |ui| {
-                                for (k, label) in ["Keyboard key", "Mouse button", "PlayStation button"].iter().enumerate() {
-                                    ui.selectable_value(&mut kind, k, crate::i18n::tr(label));
-                                }
-                            });
+                        for (k, label) in ["Keyboard", "Mouse", "Controller"].iter().enumerate() {
+                            ui.selectable_value(&mut kind, k, crate::i18n::tr(label));
+                        }
                         if kind != before {
                             step.input = match kind {
                                 1 => MacroInput::Mouse { button: MouseButton::Left },
                                 2 => MacroInput::Gamepad { button: Button::Cross },
                                 _ => MacroStep::default().input,
                             };
-                        }
-                        match &mut step.input {
-                            MacroInput::Key { vk, ctrl, shift, alt, win } => {
-                                egui::ComboBox::from_id_salt("key").selected_text(key_label(*vk)).height(250.0).show_ui(ui, |ui| {
-                                    for key in key_catalog() { ui.selectable_value(vk, key, key_label(key)); }
-                                });
-                                ui.checkbox(ctrl, "Ctrl");
-                                ui.checkbox(shift, crate::i18n::tr("Shift"));
-                                ui.checkbox(alt, "Alt");
-                                ui.checkbox(win, "Win");
-                            }
-                            MacroInput::Mouse { button } => {
-                                egui::ComboBox::from_id_salt("mouse").selected_text(mouse_label(*button)).show_ui(ui, |ui| {
-                                    for b in [MouseButton::Left, MouseButton::Right, MouseButton::Middle, MouseButton::Back, MouseButton::Forward] {
-                                        ui.selectable_value(button, b, mouse_label(b));
-                                    }
-                                });
-                            }
-                            MacroInput::Gamepad { button } => {
-                                egui::ComboBox::from_id_salt("gamepad").selected_text(crate::i18n::tr(button.short_name())).show_ui(ui, |ui| {
-                                    for b in button_choices(false).into_iter().filter(|b| !b.is_touchpad_zone()) { ui.selectable_value(button, b, crate::i18n::tr(b.short_name())); }
-                                });
-                                if !virtual_on { muted(ui, crate::i18n::tr("needs a virtual controller")); }
-                            }
+                            ui.ctx().data_mut(|d| d.remove::<egui::Id>(record_id));
                         }
                     });
+                    ui.add_space(6.0);
+                    let capture_target = ui.id().with("shortcut");
+                    let recording = ui.ctx().data(|d| d.get_temp::<egui::Id>(record_id)) == Some(capture_target);
+                    if recording {
+                        let mut action = step.input.action();
+                        if capture_action(ui.ctx(), &mut action) {
+                            if let Action::Key { vk, ctrl, shift, alt, win } = action { step.input = MacroInput::Key { vk, ctrl, shift, alt, win }; }
+                            ui.ctx().data_mut(|d| d.remove::<egui::Id>(record_id));
+                        }
+                    }
+                    match &mut step.input {
+                        MacroInput::Key { vk, ctrl, shift, alt, win } => {
+                            if visual::keyboard(ui, vk, ctrl, shift, alt, win, recording) {
+                                ui.ctx().data_mut(|d| {
+                                    d.remove::<egui::Id>(record_id);
+                                    if !recording { d.insert_temp(record_id, capture_target); }
+                                });
+                            }
+                        }
+                        MacroInput::Mouse { button } => {
+                            ui.horizontal_wrapped(|ui| {
+                                for b in [MouseButton::Left, MouseButton::Right, MouseButton::Middle, MouseButton::Back, MouseButton::Forward] {
+                                    ui.selectable_value(button, b, mouse_label(b));
+                                }
+                            });
+                        }
+                        MacroInput::Gamepad { button } => {
+                            visual::buttons(ui, button, false, false);
+                            if !virtual_on { muted(ui, crate::i18n::tr("needs a virtual controller")); }
+                        }
+                    }
+                    ui.add_space(6.0);
+                    let summary = crate::localized_format!("Timing · {} ms + {} ms", "Tempos · {} ms + {} ms", "Tiempos · {} ms + {} ms"; "Temporização · {} ms + {} ms", step.hold_ms, step.wait_ms);
+                    egui::CollapsingHeader::new(summary).id_salt("step-timing").show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(crate::i18n::tr("Hold for"));
+                            ui.add(egui::DragValue::new(&mut step.hold_ms).range(1..=60000).clamp_existing_to_range(false).suffix(" ms"));
+                            ui.label(crate::i18n::tr("Pause after"));
+                            ui.add(egui::DragValue::new(&mut step.wait_ms).range(0..=60000).clamp_existing_to_range(false).suffix(" ms"));
+                        });
+                    });
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(crate::i18n::tr("Hold for"));
-                        ui.add(egui::DragValue::new(&mut step.hold_ms).range(1..=60000).clamp_existing_to_range(false).suffix(" ms"));
-                        ui.label(crate::i18n::tr("Pause after"));
-                        ui.add(egui::DragValue::new(&mut step.wait_ms).range(0..=60000).clamp_existing_to_range(false).suffix(" ms"));
                         if ui.add_enabled(index > 0, egui::Button::new(crate::i18n::tr("Move up"))).clicked() { swap = Some((index, index - 1)); }
                         if ui.add_enabled(index + 1 < count, egui::Button::new(crate::i18n::tr("Move down"))).clicked() { swap = Some((index, index + 1)); }
                         if button(ui, crate::i18n::tr("Remove")).clicked() { remove = Some(index); }
                     });
                 });
+                if index + 1 < count { ui.label(RichText::new("↓").color(accent_color()).size(18.0)); }
             });
         }
         if let Some(index) = remove { steps.remove(index); }
-        else if let Some((a, b)) = swap { steps.swap(a, b); }
-        if ui.add_enabled(steps.len() < 128, egui::Button::new(crate::i18n::tr("Add step"))).clicked() { steps.push(MacroStep::default()); }
+        if let Some((a, b)) = swap { steps.swap(a, b); }
+        if remove.is_some() || swap.is_some() { ui.ctx().data_mut(|d| d.remove::<egui::Id>(record_id)); }
         if steps.len() >= 128 { muted(ui, crate::i18n::tr("Only the first 128 steps play.")); }
     });
 }
 
 fn playback_editor(ui: &mut egui::Ui, mode: &mut HoldStyle, is_macro: bool) {
-    ui.label(crate::i18n::tr("Playback"));
     ui.horizontal_wrapped(|ui| {
+        ui.label(crate::i18n::tr("Playback"));
         for (value, label) in [(HoldStyle::Tap, "Play once"), (HoldStyle::Hold, "Repeat while held"), (HoldStyle::Toggle, "Repeat until pressed again")] {
             if !is_macro && value == HoldStyle::Hold { ui.selectable_value(mode, value, crate::i18n::tr("While held")); }
             else if !is_macro && value == HoldStyle::Toggle { ui.selectable_value(mode, value, crate::i18n::tr("Press again to release")); }
@@ -455,23 +447,41 @@ impl App {
         &mut self, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut Profile,
     ) {
         page_header(ui, crate::i18n::tr("Button mapping"), crate::i18n::tr("Choose a controller button, then what it should do."));
+        let edge = self.engine.device_list().first().map(|d| d.model.is_edge()).unwrap_or(true);
+        let previous_button = self.selected_button;
         ui.horizontal_wrapped(|ui| {
-            if button(ui, crate::i18n::tr("Add button action")).clicked() {
-                p.mappings.push(Mapping { action: Action::Key { vk: 0x20, ctrl: false, shift: false, alt: false, win: false }, ..Default::default() });
-                focus_mapping(ctx, p.mappings.len() - 1);
-            }
-            if primary_button(ui, crate::i18n::tr("Create macro")).clicked() {
-                p.mappings.push(Mapping { mode: HoldStyle::Tap, action: Action::Macro { steps: Vec::new() }, ..Default::default() });
-                focus_mapping(ctx, p.mappings.len() - 1);
-            }
+            let width = ui.available_width().min(240.0);
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                visual::controller(ui, &mut self.selected_button, edge);
+            });
+            ui.vertical(|ui| {
+                ui.set_max_width(ui.available_width().min(340.0));
+                muted(ui, crate::i18n::tr("Select a button on the controller"));
+                ui.label(RichText::new(crate::i18n::tr(self.selected_button.short_name())).strong().size(24.0));
+                ui.horizontal_wrapped(|ui| {
+                    if button(ui, crate::i18n::tr("Add button action")).clicked() {
+                        p.mappings.push(Mapping { button: self.selected_button, action: Action::Key { vk: 0x20, ctrl: false, shift: false, alt: false, win: false }, ..Default::default() });
+                        focus_mapping(ctx, p.mappings.len() - 1);
+                    }
+                    if primary_button(ui, crate::i18n::tr("Create macro")).clicked() {
+                        p.mappings.push(Mapping { button: self.selected_button, mode: HoldStyle::Tap, action: Action::Macro { steps: Vec::new() }, ..Default::default() });
+                        focus_mapping(ctx, p.mappings.len() - 1);
+                    }
+                });
+                egui::CollapsingHeader::new(crate::i18n::tr("All buttons")).show(ui, |ui| visual::buttons(ui, &mut self.selected_button, edge, true));
+            });
         });
+        if self.selected_button != previous_button {
+            self.capture_key = None;
+            if let Some(i) = p.mappings.iter().position(|m| m.button == self.selected_button) { focus_mapping(ctx, i); }
+        }
         ui.add_space(12.0);
         #[cfg(target_os = "linux")]
         if let Some(error) = crate::inputsim::error() {
             note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}", "La entrada de teclado y ratón no está disponible: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
-        let edge = self.engine.device_list().first().map(|d| d.model.is_edge()).unwrap_or(true);
         let virtual_on = p.virtual_out.kind != VirtualKind::Off;
         let xbox_on = p.virtual_out.kind == VirtualKind::Xbox360;
         let can_hide = self.engine.companion.can_hide();
@@ -496,13 +506,14 @@ impl App {
                 .inner_margin(egui::Margin::symmetric(16, 12))
                 .show(ui, |ui| {
                     ui.set_width(row_w);
-                    ui.push_id(i, |ui| {
+                    ui.push_id((&p_name, i), |ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(crate::i18n::tr("Controller button")).strong());
-                            egui::ComboBox::from_id_salt(("map-btn", i)).width(130.0)
-                                .selected_text(crate::i18n::tr(m.button.short_name())).show_ui(ui, |ui| {
-                                    for b in button_choices(edge) { ui.selectable_value(&mut m.button, b, crate::i18n::tr(b.short_name())); }
-                                });
+                            ui.menu_button(RichText::new(crate::i18n::tr(m.button.short_name())).strong(), |ui| {
+                                ui.set_width(300.0_f32.min(ui.ctx().screen_rect().width() - 40.0));
+                                visual::controller(ui, &mut m.button, edge);
+                                visual::buttons(ui, &mut m.button, edge, true);
+                            });
                             ui.checkbox(&mut m.enabled, crate::i18n::tr("Enabled"));
                             if button(ui, crate::i18n::tr("Remove action")).clicked() { remove = Some(i); }
                         });
@@ -569,6 +580,42 @@ mod macro_tests {
     }
 
     #[test]
+    fn shortcut_preset_appends_alt_tab_without_replacing_existing_steps() {
+        let ctx = egui::Context::default();
+        crate::ui::theme::install(&ctx, 1.0);
+        let mut steps = vec![MacroStep { hold_ms: 123, ..Default::default() }];
+        let before = steps[0].clone();
+        let mut mode = HoldStyle::Tap;
+        click(&ctx, &mut steps, &mut mode, "Add shortcut");
+        click(&ctx, &mut steps, &mut mode, "Switch window");
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0], before);
+        assert!(matches!(steps[1].input, MacroInput::Key { vk: 9, alt: true, ctrl: false, .. }));
+        assert_eq!(mode, HoldStyle::Tap);
+    }
+
+    #[test]
+    fn macro_records_shortcut_and_escape_cancels_without_changing_timings() {
+        let ctx = egui::Context::default();
+        crate::ui::theme::install(&ctx, 1.0);
+        let mut steps = vec![MacroStep { hold_ms: 123, wait_ms: 456, ..Default::default() }];
+        let mut mode = HoldStyle::Tap;
+        click(&ctx, &mut steps, &mut mode, "Record shortcut");
+        frame(&ctx, &mut steps, &mut mode, vec![egui::Event::Key {
+            key: egui::Key::K, physical_key: None, pressed: true, repeat: false,
+            modifiers: egui::Modifiers { ctrl: true, shift: true, ..Default::default() },
+        }]);
+        assert!(matches!(steps[0].input, MacroInput::Key { vk: 75, ctrl: true, shift: true, alt: false, .. }));
+        assert_eq!((steps[0].hold_ms, steps[0].wait_ms), (123, 456));
+        let before = steps.clone();
+        click(&ctx, &mut steps, &mut mode, "Record shortcut");
+        frame(&ctx, &mut steps, &mut mode, vec![egui::Event::Key {
+            key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE,
+        }]);
+        assert_eq!(steps, before);
+    }
+
+    #[test]
     fn inline_macro_editor_adds_reorders_removes_and_changes_playback() {
         let ctx = egui::Context::default();
         crate::ui::theme::install(&ctx, 1.0);
@@ -602,6 +649,7 @@ mod macro_tests {
         crate::ui::theme::install(&ctx, 1.0);
         let mut profile = Profile::default();
         profile.mappings.clear();
+        app.selected_button = Button::Ps;
         let mut output = page_frame(&mut app, &mut profile, &ctx, Vec::new());
         for _ in 0..3 { output = page_frame(&mut app, &mut profile, &ctx, Vec::new()); }
         let target = output.shapes.iter().find_map(|s| match &s.shape {
@@ -617,6 +665,7 @@ mod macro_tests {
         assert_eq!(profile.mappings.len(), 1);
         assert!(matches!(profile.mappings[0].action, Action::Macro { .. }));
         assert_eq!(profile.mappings[0].mode, HoldStyle::Tap);
+        assert_eq!(profile.mappings[0].button, Button::Ps);
         let output = page_frame(&mut app, &mut profile, &ctx, Vec::new());
         assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == crate::i18n::tr("Add step"))), "macro steps are editable immediately");
         drop(app);

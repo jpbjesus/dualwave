@@ -44,7 +44,8 @@ consult its release notes before downloading.
 | Headphone audio | Bluetooth stereo playback through the 3.5 mm jack, routing and volume |
 | Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
 | Haptics | Game and system audio, button feedback, trigger texture and rumble conversion |
-| Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; visible action choices and inline macros with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
+| Agent configuration | Opt-in local CLI and stdio MCP for Codex, Claude and other agents; edit profiles, actions and macros while the app is open, with revision checks to protect recent edits |
+| Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; a clickable controller, keycap previews, shortcut presets, key capture and visual macro steps with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
 | Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third; optional flick stick with calibrated pixels per full turn, horizontal rotation and a 100 ms initial turn |
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
 | Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP |
@@ -62,9 +63,15 @@ Pair it with gyro mouse for vertical aiming. A virtual controller centers a
 stick used for flick turns; the physical stick remains visible to games unless
 physical input is isolated.
 
-Open **Buttons → Create macro** to choose the controller button and build the
-sequence directly on the page. Common actions (keyboard, mouse, controller and
-macro) are visible without opening a menu. Add, reorder or remove each step in
+Open **Buttons**, select a button on the controller drawing, then choose
+**Create macro** to build its sequence directly on the page. **All buttons**
+provides keyboard-accessible choices, including touchpad zones.
+**Add shortcut → Switch window** adds Alt+Tab; Copy, Paste and Show desktop are
+also available. Keyboard actions and macro steps show their combination as
+keycaps. Use **Record shortcut** to capture a key combination (Esc cancels), or
+**Edit keys** for modifiers and searchable key tiles. Expand a step's **Timing**
+section to change its hold and pause; opening the editor preserves saved timings.
+Common actions (keyboard, mouse, controller and macro) are visible without opening a menu. Add, reorder or remove each step in
 the numbered sequence; each step holds its input, releases it, then pauses.
 **Play once** runs the sequence once, **Repeat while held** stops when the button
 is released and **Repeat until pressed again** stops on the next activation.
@@ -270,10 +277,10 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 | Flatpak | Under evaluation; no package or Flatpak repository is provided | Requires validation of HID access, uinput, process discovery, PipeWire and communication with the host USB/IP broker |
 | `curl` installation | Published installer; requires an explicit release version | Verifies the selected asset before activation, installs as the desktop user, supports dry run and managed uninstall |
 
-Example download for the 0.4.2 alpha release:
+Example download for the current alpha release:
 
 ```sh
-release=v0.4.2-alpha.2
+release=v0.4.4-alpha.3
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -288,10 +295,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.2-alpha.2 --dry-run
-sh install-dualwave.sh --version v0.4.2-alpha.2
+sh install-dualwave.sh --version v0.4.4-alpha.3 --dry-run
+sh install-dualwave.sh --version v0.4.4-alpha.3
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.2-alpha.2 --format native --dry-run
+sh install-dualwave.sh --version v0.4.4-alpha.3 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```
@@ -435,6 +442,69 @@ previous configuration.
 Selecting a profile to edit does not silently apply it to a connected controller.
 Changes to the edited profile are saved automatically. Profile names and saved
 identifiers remain independent of the interface language.
+
+### Configure with agents (CLI and MCP)
+
+Enable **Preferences → Integrations → Agent access → Allow local configuration**
+in the running DualWave app. Access is off by default. Disabling it disconnects
+clients and removes the local endpoint. Both adapters use the same authenticated
+loopback interface; neither starts the GUI, downloads an agent, or opens a controller.
+
+The source executable is `dsz` (`dsz.exe` on Windows); installed Linux packages
+use `dualwave` instead. `dualwave-cli` is the separate audio bridge. CLI output is JSON with `ok` and
+`result` or `error`; errors return exit code 1. Operation and JSON names stay in English.
+
+```sh
+dsz --agent help
+dsz --agent list_devices
+dsz --agent list_profiles
+dsz --agent describe
+dsz --agent get_profile '{"profile":"Xbox"}'
+```
+
+`describe` lists the supported buttons, virtual key codes, defaults and operation
+arguments. To add Alt+Tab, read the target profile first, then use its returned
+`revision` as `expected_revision` (replace `1` below with that value):
+
+```sh
+dsz --agent set_mapping '{"profile":"Xbox","expected_revision":1,"mapping":{"button":"Ps","mode":"Tap","action":{"kind":"macro","steps":[{"input":{"kind":"key","vk":9,"alt":true},"hold_ms":50,"wait_ms":50}]}}}'
+```
+
+This appends a mapping without replacing the others. Choose the button you want;
+`Ps` is only an example. Use `index` to replace an existing mapping, or
+`remove_mapping` with an index to remove one. For shells where JSON quoting is
+awkward, save the arguments to a UTF-8 file and use
+`dsz --agent set_mapping --file arguments.json`.
+
+`create_profile` optionally copies a `source`. `patch_profile` merges objects and
+replaces arrays; unknown fields are rejected. Profile edits affect controllers
+already using that profile. `apply_profile` takes a `profile` and a connected
+`device_id` from `list_devices`; it uses the same manual selection as the UI.
+`get_settings` and `patch_settings` support the appearance, language, tips,
+interface size, idle timer, default profile and automatic profile selection.
+`patch_settings` also requires the settings revision. Agent access, input CRC
+checks and executable actions cannot be enabled or created by an agent.
+
+For MCP clients, configure a stdio server with the absolute executable path:
+
+```json
+{
+  "mcpServers": {
+    "dualwave": {
+      "command": "/absolute/path/to/dsz",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Use the equivalent `command` and `args` fields in your agent's MCP configuration.
+All CLI operations are also MCP tools. The transport follows the
+[MCP stdio specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
+DualWave must remain open with agent access enabled. If the app uses
+`DSZ_DATA_DIR`, give the CLI or MCP process the same environment variable.
+The discovery file `agent-endpoint.json` contains a per-session access token;
+on Linux it is created with owner-only permissions. Keep it private.
 
 ### Diagnostics and system support
 

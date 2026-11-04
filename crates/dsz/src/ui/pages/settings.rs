@@ -253,6 +253,26 @@ impl App {
 
             }
             3 => {
+                card(ui, crate::i18n::tr("Agent access"), crate::i18n::tr("Let Codex, Claude and other local agents configure DualWave"), |ui| {
+                    let mut enabled = engine.settings.read().agent_enabled;
+                    if toggle_row(ui, crate::i18n::tr("Allow local configuration"), crate::i18n::tr("Change profiles, actions and macros while DualWave is open"), &mut enabled) {
+                        engine.settings.write().agent_enabled = enabled;
+                        engine.settings_changed();
+                        ui.ctx().request_repaint();
+                    }
+                    muted(ui, crate::i18n::tr("CLI and MCP use the same access. Turn it off to disconnect agents."));
+                    if enabled {
+                        if self.agent_failed {
+                            pill(ui, crate::i18n::tr("Couldn't start agent access. Turn it off and on to retry."), bad_color());
+                        } else if self.agent_server.is_some() {
+                            pill(ui, crate::i18n::tr("Ready"), good_color());
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            ui.code("dsz --agent help");
+                            ui.code("dsz --mcp");
+                        });
+                    }
+                });
                 card(
                     ui,
                     crate::i18n::tr("Game mod API"),

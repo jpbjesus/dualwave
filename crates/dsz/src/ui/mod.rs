@@ -102,6 +102,8 @@ pub struct App {
     hwnd_found: bool,
     // Page state
     capture_key: Option<usize>,
+    agent_server: Option<crate::agent::Server>,
+    agent_failed: bool,
     rename: Option<(String, String)>,
     new_profile: String,
     confirm_delete: Option<String>,
@@ -226,6 +228,8 @@ impl App {
             #[cfg(windows)]
             hwnd_found: false,
             capture_key: None,
+            agent_server: None,
+            agent_failed: false,
             rename: None,
             new_profile: String::new(),
             confirm_delete: None,
@@ -471,6 +475,24 @@ fn repaint_in(ctx: &egui::Context, ms: u64) {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         crate::i18n::set_language(self.engine.settings.read().language);
+        let agent_enabled = self.engine.settings.read().agent_enabled;
+        if !agent_enabled {
+            self.agent_server = None;
+            self.agent_failed = false;
+        } else if self.agent_server.is_none() && !self.agent_failed {
+            match crate::agent::Server::start(self.engine.clone(), ctx.clone()) {
+                Ok(server) => self.agent_server = Some(server),
+                Err(error) => {
+                    log::warn!("Agent access could not start: {error}");
+                    self.engine.warn_toast(crate::i18n::tr("Couldn't start agent access. Turn it off and on to retry."));
+                    self.agent_failed = true;
+                }
+            }
+        }
+        // Hidden windows do not render frames. The listener can still edit;
+        // serialize a visible frame's profile copy and save with those edits.
+        let config_engine = self.engine.clone();
+        let _config_edit = config_engine.config_edit.lock();
         self.frames += 1;
         if crate::update::take_settings_request() {
             self.page = Page::Settings;
@@ -688,6 +710,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.agent_server = None;
         self.engine.flush();
     }
 }

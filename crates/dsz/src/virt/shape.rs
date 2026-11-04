@@ -173,6 +173,13 @@ mod tests {
     }
 
     #[test]
+    fn disabled_agent_access_preserves_reports_and_usb_identity() {
+        let settings: crate::settings::Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.agent_enabled);
+        assert_eq!(controller_reports_and_usb_identity(crate::profile::Profile::default()).as_slice(), include_bytes!("fixtures/reach-disabled.bin"));
+    }
+
+    #[test]
     fn disabled_flick_and_macros_preserve_reports_and_usb_identity() {
         use crate::profile::{Action, MacroStep, Mapping, Profile, StickMode};
         let mut p: Profile = serde_json::from_str("{}").unwrap();

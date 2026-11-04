@@ -4,6 +4,7 @@
 //! gyro/touchpad/stick mouse, mappings, per-game profiles, and a UDP mod
 //! API for game mods.
 
+mod agent;
 mod applog;
 mod audio_led;
 mod backup;
@@ -55,6 +56,7 @@ pub const APP_TITLE: &str = "DualWave";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if let Some(code) = agent::command(&args) { std::process::exit(code); }
     if let Some(i) = args.iter().position(|a| a == "--probe-virtual") {
         crate::platform::attach_console();
         virt::probe(args.get(i + 1).map(|s| s.as_str()).unwrap_or(""));

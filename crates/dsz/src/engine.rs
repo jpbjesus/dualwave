@@ -32,6 +32,8 @@ pub struct UdpStatus {
 
 pub struct Engine {
     pub data_dir: PathBuf,
+    /// Serializes UI profile snapshots with local agent edits, including in the tray.
+    pub(crate) config_edit: Mutex<()>,
     pub devices: RwLock<Vec<Arc<Device>>>,
     pub profiles: ProfileStore,
     pub settings: RwLock<Settings>,
@@ -116,6 +118,7 @@ impl Engine {
             hider,
             dsdetect: crate::dsdetect::Detector::new(&data_dir),
             data_dir,
+            config_edit: Mutex::new(()),
             devices: RwLock::new(Vec::new()),
             profiles,
             settings: RwLock::new(settings),

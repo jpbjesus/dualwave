@@ -103,6 +103,8 @@ pub struct Settings {
     pub device_names: BTreeMap<String, String>,
     /// UDP mod API for game mods.
     pub udp_enabled: bool,
+    /// Local configuration access for CLI and MCP clients.
+    pub agent_enabled: bool,
     pub udp_port: u16,
     pub auto_profiles: bool,
     pub games: Vec<GameRule>,
@@ -171,6 +173,7 @@ impl Default for Settings {
             device_profiles: BTreeMap::new(),
             device_names: BTreeMap::new(),
             udp_enabled: true,
+            agent_enabled: false,
             udp_port: 6969,
             auto_profiles: true,
             games: Vec::new(),

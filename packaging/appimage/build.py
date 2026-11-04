@@ -42,6 +42,8 @@ def main():
     shutil.copy2(cargo_target / 'release/dualwave', binary / 'dualwave-cli')
     for name in ['AppRun', 'dualwave.desktop', 'dualwave.svg']:
         shutil.copy2(ROOT / 'packaging/appimage' / name, app / name)
+    # New appimagetool versions require desktop launchers to be executable for all users.
+    (app / 'dualwave.desktop').chmod(0o755)
     shutil.copy2(app / 'dualwave.svg', app / '.DirIcon')
     shutil.copy2(ROOT / 'packaging/appimage/setup-driver.sh', payload / 'setup-driver.sh')
     shutil.copy2(package, payload / package.name)
