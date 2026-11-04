@@ -173,6 +173,13 @@ mod tests {
     }
 
     #[test]
+    fn upstream_usb_haptics_stays_off_and_preserves_reports_for_old_profiles() {
+        let p: crate::profile::Profile = serde_json::from_str("{}").unwrap();
+        assert!(!p.virtual_out.usb_game_haptics);
+        assert_eq!(controller_reports_and_usb_identity(p).as_slice(), include_bytes!("fixtures/reach-disabled.bin"));
+    }
+
+    #[test]
     fn disabled_agent_access_preserves_reports_and_usb_identity() {
         let settings: crate::settings::Settings = serde_json::from_str("{}").unwrap();
         assert!(!settings.agent_enabled);

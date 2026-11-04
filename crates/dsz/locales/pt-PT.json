@@ -247,7 +247,6 @@
   "Forward": "Avançar",
   "Yaw": "Rotação horizontal",
   "Roll": "Inclinação lateral",
-  "Tilt and turn the controller to move the cursor or aim": "Incline e rode o comando para mover o cursor ou apontar",
   "Behavior": "Comportamento",
   "Always": "Sempre",
   "While holding": "Enquanto premir",
@@ -324,7 +323,6 @@
   "Media key": "Tecla de multimédia",
   "Next profile": "Perfil seguinte",
   "Previous profile": "Perfil anterior",
-  "Toggle gyro mouse": "Alternar rato por giroscópio",
   "Toggle touchpad mouse": "Alternar rato pelo touchpad",
   "Open a program / file": "Abrir programa / ficheiro",
   "Switch to profile": "Mudar para perfil",
@@ -597,8 +595,6 @@
   "{} · {} Hz · {} ch": "{} · {} Hz · {} canais",
   "{} connected ({})": "{} ligado ({})",
   "Couldn't open a controller ({e}). Another controller app or Steam Input may be holding it.": "Não foi possível abrir o comando ({e}). Outra aplicação ou o Steam Input pode estar a utilizá-lo.",
-  "Gyro mouse on": "Rato por giroscópio ativado",
-  "Gyro mouse off": "Rato por giroscópio desativado",
   "Touchpad mouse on": "Rato pelo touchpad ativado",
   "Touchpad mouse off": "Rato pelo touchpad desativado",
   "Turn off works over Bluetooth": "É possível desligar por Bluetooth",
@@ -996,5 +992,12 @@
   "Timing · {} ms + {} ms": "Temporização · {} ms + {} ms",
   "Select a button on the controller": "Seleciona um botão no comando",
   "All buttons": "Todos os botões",
-  "Add shortcut": "Adicionar atalho"
+  "Add shortcut": "Adicionar atalho",
+  "Game haptics over USB": "Háptica do jogo por USB",
+  "Play on the wired controller's own sound device": "Reproduzir no dispositivo de som do comando ligado por cabo",
+  "Game haptics over USB need the controller's sound device set to 4 channels (Quadraphonic)": "A háptica do jogo por USB requer o dispositivo de som do comando em 4 canais (quadrifónico)",
+  "Gyro off": "Giroscópio desativado",
+  "Gyro on": "Giroscópio ativado",
+  "Tilt and turn the controller to move the cursor or the right stick": "Inclina e roda o comando para mover o cursor ou o manípulo direito",
+  "Toggle gyro": "Alternar giroscópio"
 }

@@ -159,6 +159,9 @@ pub struct Settings {
     pub dsu_enabled: bool,
 }
 
+/// Preferred fallback when the configured default profile is missing.
+pub const DEFAULT_PROFILE: &str = "Xbox";
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -169,7 +172,7 @@ impl Default for Settings {
             start_minimized: false,
             close_to_tray: true,
             minimize_to_tray: false,
-            default_profile: "Xbox".into(),
+            default_profile: DEFAULT_PROFILE.into(),
             device_profiles: BTreeMap::new(),
             device_names: BTreeMap::new(),
             udp_enabled: true,
@@ -233,6 +236,24 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upstream_sync_preserves_existing_startup_and_quick_charge_choices() {
+        for enabled in [false, true] {
+            let parsed: Settings = serde_json::from_value(serde_json::json!({"quick_charge":enabled,"default_on_start":enabled})).unwrap();
+            assert_eq!(parsed.quick_charge,enabled);
+            assert_eq!(parsed.default_on_start,enabled);
+            let saved = serde_json::to_value(parsed).unwrap();
+            assert_eq!(saved["quick_charge"],enabled);
+            assert_eq!(saved["default_on_start"],enabled);
+            assert!(saved.get("quick_charge_v2").is_none());
+            assert!(saved.get("default_on_start_v2").is_none());
+        }
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.quick_charge);
+        assert!(!old.default_on_start);
+        assert!(!old.agent_enabled);
+    }
 
     #[test]
     fn older_settings_keep_language_and_hardware_defaults_with_system_appearance() {

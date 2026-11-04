@@ -22,12 +22,17 @@ For a standard DualSense connected over Bluetooth, it also provides headphone
 playback and microphone capture through PipeWire.
 
 The project is an independent fork of [DSZ](https://github.com/MaximumFreak/dsz).
-The current source integrates DSZ 0.4.4, including profiles active while a
+The current source integrates DSZ 0.4.5, including profiles active while a
 button is held, experimental DualShock 4 Bluetooth audio and a virtual microphone
 alongside Xbox 360 and DualShock 4 output. DualWave
 retains its Linux backends, interface and European Portuguese translations.
 Speaker amplification and audio levels keep their previous defaults; the new
-boost options require an explicit profile change.
+boost options require an explicit profile change. DSZ 0.4.5 adds gyro bias
+recovery, safer Quick Charge matching, Xbox fallback for missing default
+profiles and a full-range haptic boost above 100%. Quick Charge and startup
+profile choices retain their existing saved keys and defaults in DualWave.
+Wired game haptics from 0.4.5 are Windows-only and require the new opt-in
+**Game haptics over USB** setting; the Linux playback backend is not implemented.
 
 **Status:** alpha. Availability in the interface does not imply validation on
 every controller, firmware, Bluetooth adapter or game. See
@@ -50,7 +55,7 @@ consult its release notes before downloading.
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
 | Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP |
 | Controller power | Turn off the connected Bluetooth controller directly from the home page |
-| Upstream 0.4.4 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
+| Upstream 0.4.5 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
 | Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
@@ -684,6 +689,7 @@ DSZ's protocol code was written from public documentation and code with open lic
 
 | Source | License | Used for |
 |---|---|---|
+| [DSZ 0.4.5](https://github.com/MaximumFreak/dsz/tree/v0.4.5) | MIT | Gyro bias recovery, Quick Charge validation, boosted haptic shaping and Windows USB actuator playback |
 | Linux [`hid-playstation`](https://github.com/torvalds/linux/blob/master/drivers/hid/hid-playstation.c) | GPL-2.0, read as documentation | Input and output report layouts, valid flags, status bits, CRC prefixes, feature reports, the DualShock 4 report, speaker and headset routing (volume, output path, preamp gain) and headset detection |
 | SDL [`SDL_hidapi_ps5.c`](https://github.com/libsdl-org/SDL/blob/main/src/joystick/hidapi/SDL_hidapi_ps5.c) | zlib | Edge Fn and paddle buttons, the connection-state byte, improved rumble emulation |
 | [pydualsense](https://github.com/flok/pydualsense) | MIT | The Bluetooth `0x31` layout, player LED patterns and brightness, motor power, custom trigger modes |

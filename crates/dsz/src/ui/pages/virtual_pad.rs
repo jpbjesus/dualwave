@@ -433,6 +433,8 @@ impl App {
                                 crate::i18n::tr("The game's haptic audio, to the actuators over Bluetooth"),
                                 &mut vo.game_haptics,
                             );
+                            #[cfg(windows)]
+                            toggle_row(ui, crate::i18n::tr("Game haptics over USB"), crate::i18n::tr("Play on the wired controller's own sound device"), &mut vo.usb_game_haptics);
                             if vo.game_haptics {
                                 slider_row(
                                     ui,
