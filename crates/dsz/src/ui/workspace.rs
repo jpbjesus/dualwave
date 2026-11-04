@@ -486,8 +486,12 @@ impl App {
                 ui.add_space(spacing::GROUP);
                 ui.separator();
                 ui.label(RichText::new(tr("Touchpad")).strong());
-                choice(ui, &mut p.touchpad.mode, &[(TouchMode::Passthrough, "Game"), (TouchMode::Mouse, "Mouse")]);
-                if p.touchpad.mode == TouchMode::Mouse {
+                let before = self.effective_touchpad_mode(p);
+                let mut touch_mode = before;
+                choice(ui, &mut touch_mode, &[(TouchMode::Passthrough, "Game"), (TouchMode::Mouse, "Mouse")]);
+                if touch_mode != before { self.set_touchpad_mode(p, touch_mode); }
+                if self.touchpad_override(p).is_some() { widgets::muted(ui, tr("Changed by a button action")); }
+                if touch_mode == TouchMode::Mouse {
                     ui.add(egui::Slider::new(&mut p.touchpad.sensitivity, 0.1..=4.0).text(tr("Speed")).suffix("×"));
                     ui.checkbox(&mut p.touchpad.tap_to_click, tr("Tap to click"));
                     ui.checkbox(&mut p.touchpad.two_finger_scroll, tr("Two-finger scroll"));

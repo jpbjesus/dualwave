@@ -278,7 +278,6 @@
   "Natural scrolling": "Deslocamento natural",
   "Right side is right click": "Lado direito como clique direito",
   "Off: a press anywhere is a left click": "Desligado: premir em qualquer ponto produz um clique esquerdo",
-  "Off leaves the touchpad to the game": "Desligado: o jogo controla o touchpad",
   "Press with two fingers for a right click; hold the press and slide to drag": "Prima com dois dedos para produzir um clique direito; mantenha a pressão e deslize para arrastar",
   "Keep sending touches to a virtual DualSense while the touchpad drives the mouse": "Continuar a enviar toques ao DualSense virtual enquanto o touchpad controla o rato",
   "Acceleration": "Aceleração",
@@ -999,5 +998,10 @@
   "Gyro off": "Giroscópio desativado",
   "Gyro on": "Giroscópio ativado",
   "Tilt and turn the controller to move the cursor or the right stick": "Inclina e roda o comando para mover o cursor ou o manípulo direito",
-  "Toggle gyro": "Alternar giroscópio"
+  "Toggle gyro": "Alternar giroscópio",
+  "Battery unavailable": "Bateria indisponível",
+  "Charging": "A carregar",
+  "Full": "Completa",
+  "Off leaves the touchpad to games and the desktop": "Desativado deixa o touchpad para os jogos e o ambiente de trabalho",
+  "Changed by a button action": "Alterado por uma ação de botão"
 }

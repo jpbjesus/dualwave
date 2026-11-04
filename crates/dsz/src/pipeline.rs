@@ -1023,6 +1023,12 @@ impl Pipeline {
         }
 
         let profile = self.cache.get(engine, device);
+        // A button toggle is temporary. An explicit touchpad-mode edit or
+        // a different profile takes precedence, while unrelated edits keep it.
+        if self.built_for.as_ref().is_some_and(|b| b.name != profile.name || b.touchpad.mode != profile.touchpad.mode) {
+            device.toggles.lock().touchpad = None;
+            self.touch.release();
+        }
         if self.built_for.as_ref().is_some_and(|b| b.name != profile.name) {
             for (rt, action) in self.maps.iter_mut().zip(&self.map_actions) {
                 if let Some((input, _)) = rt.playback.cancel() { action_up(&input.action()); }
@@ -1664,6 +1670,47 @@ mod turn_off_tests {
     fn step(rig: &mut Rig, prev: &InputState, now_s: &InputState, at: Instant) {
         rig.pipe
             .process(&rig.engine, &rig.device, now_s, prev, None, at);
+    }
+
+    #[test]
+    fn editing_touchpad_mode_clears_a_runtime_override_but_unrelated_edits_keep_it() {
+        let mut r = rig(Connection::Bluetooth, "", vec![]);
+        let name = r.engine.profile_name_for(&r.device);
+        let mut profile = (*r.engine.profiles.find(&name).unwrap()).clone();
+        profile.touchpad.mode = TouchMode::Mouse;
+        r.engine.profiles.update(profile.clone());
+        let mut input = centered(&[]);
+        input.full = true;
+        let now = Instant::now();
+        step(&mut r, &input, &input, now);
+        r.device.toggles.lock().touchpad = Some(true);
+        profile.lighting.brightness = 70;
+        r.engine.profiles.update(profile.clone());
+        step(&mut r, &input, &input, now + Duration::from_millis(10));
+        assert!(r.device.live.lock().touch_mouse_active);
+        assert_eq!(r.device.toggles.lock().touchpad,Some(true));
+        profile.touchpad.mode = TouchMode::Passthrough;
+        r.engine.profiles.update(profile);
+        step(&mut r, &input, &input, now + Duration::from_millis(20));
+        assert!(!r.device.live.lock().touch_mouse_active,"Turning off the profile option must override an old button toggle");
+        assert_eq!(r.device.toggles.lock().touchpad,None);
+    }
+
+    #[test]
+    fn switching_profiles_drops_the_previous_touchpad_override() {
+        let mut r = rig(Connection::Bluetooth, "", vec![]);
+        let mut input = centered(&[]);
+        input.full = true;
+        let now = Instant::now();
+        step(&mut r, &input, &input, now);
+        r.device.toggles.lock().touchpad = Some(true);
+        step(&mut r, &input, &input, now + Duration::from_millis(10));
+        assert!(r.device.live.lock().touch_mouse_active);
+        let other = r.engine.profiles.add(Profile::named("Other touchpad"));
+        r.engine.set_device_profile(&r.device,&other);
+        step(&mut r, &input, &input, now + Duration::from_millis(20));
+        assert!(!r.device.live.lock().touch_mouse_active);
+        assert_eq!(r.device.toggles.lock().touchpad,None);
     }
 
     fn off(button: Button) -> Mapping {

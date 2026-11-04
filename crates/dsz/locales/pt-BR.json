@@ -282,7 +282,6 @@
   "Natural scrolling": "Rolagem natural",
   "Right side is right click": "Lado direito como clique direito",
   "Off: a press anywhere is a left click": "Desligado: pressionar em qualquer ponto gera clique esquerdo",
-  "Off leaves the touchpad to the game": "Desligado: o jogo controla o touchpad",
   "Press with two fingers for a right click; hold the press and slide to drag": "Pressione com dois dedos para clique direito; mantenha pressionado e deslize para arrastar",
   "Keep sending touches to a virtual DualSense while the touchpad drives the mouse": "Continue enviando toques ao DualSense virtual enquanto o touchpad controla o mouse",
   "Acceleration": "Aceleração",
@@ -999,5 +998,10 @@
   "Gyro mouse": "Mouse por giroscópio",
   "The game's haptic audio, to the actuators over Bluetooth": "Áudio háptico do jogo enviado aos atuadores por Bluetooth",
   "Game haptics over USB": "Háptica do jogo por USB",
-  "Play on the wired controller's own sound device": "Reproduzir no dispositivo de som do controle conectado por cabo"
+  "Play on the wired controller's own sound device": "Reproduzir no dispositivo de som do controle conectado por cabo",
+  "Battery unavailable": "Bateria indisponível",
+  "Charging": "Carregando",
+  "Full": "Completa",
+  "Off leaves the touchpad to games and the desktop": "Desativado deixa o touchpad para os jogos e a área de trabalho",
+  "Changed by a button action": "Alterado por uma ação de botão"
 }

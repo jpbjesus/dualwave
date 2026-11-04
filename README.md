@@ -59,7 +59,7 @@ consult its release notes before downloading.
 | Profiles and games | Executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
 | Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
-| Desktop integration | Tray, startup preferences and device naming; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
+| Desktop integration | Controller tray icon with a proportional battery overlay, charging/full indicators and percentage on hover (lowest known charge when multiple controllers are connected); startup preferences and device naming; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
 | Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report |
 
 Flick stick is selected per stick in **Motion & touch**. Set **Pixels per full turn**
@@ -285,7 +285,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 Example download for the current alpha release:
 
 ```sh
-release=v0.4.4-alpha.3
+release=v0.4.5-alpha.2
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -300,10 +300,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.4-alpha.3 --dry-run
-sh install-dualwave.sh --version v0.4.4-alpha.3
+sh install-dualwave.sh --version v0.4.5-alpha.2 --dry-run
+sh install-dualwave.sh --version v0.4.5-alpha.2
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.4-alpha.3 --format native --dry-run
+sh install-dualwave.sh --version v0.4.5-alpha.2 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```
@@ -447,6 +447,13 @@ previous configuration.
 Selecting a profile to edit does not silently apply it to a connected controller.
 Changes to the edited profile are saved automatically. Profile names and saved
 identifiers remain independent of the interface language.
+
+The touchpad controls show temporary button-action overrides and let an explicit
+mode selection clear them. The mouse button toggle is temporary: selecting another profile or
+changing the profile's touchpad mode clears it. Editing unrelated settings keeps
+that toggle. **Touchpad as mouse** off leaves raw touch input available to games;
+on Linux, native desktop input or Steam can independently map the physical
+controller's touchpad to a mouse.
 
 ### Configure with agents (CLI and MCP)
 

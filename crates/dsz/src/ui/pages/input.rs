@@ -839,22 +839,19 @@ impl App {
                 );
             } else {
                 card(ui, crate::i18n::tr("Touchpad"), "", |ui| {
-                    let t = &mut p.touchpad;
-                    let mut on = t.mode == TouchMode::Mouse;
+                    let mut on = self.effective_touchpad_mode(p) == TouchMode::Mouse;
                     if toggle_row(
                         ui,
                         crate::i18n::tr("Touchpad as mouse"),
-                        crate::i18n::tr("Off leaves the touchpad to the game"),
+                        crate::i18n::tr("Off leaves the touchpad to games and the desktop"),
                         &mut on,
                     ) {
-                        t.mode = if on {
-                            TouchMode::Mouse
-                        } else {
-                            TouchMode::Passthrough
-                        };
+                        self.set_touchpad_mode(p, if on { TouchMode::Mouse } else { TouchMode::Passthrough });
                     }
+                    if self.touchpad_override(p).is_some() { muted(ui, crate::i18n::tr("Changed by a button action")); }
+                    let t = &mut p.touchpad;
                     touch_preview(ui, &live.input);
-                    if t.mode == TouchMode::Mouse {
+                    if on {
                         slider_row(ui, crate::i18n::tr("Speed"), "", &mut t.sensitivity, 0.1..=4.0, "×");
                         slider_row(ui, crate::i18n::tr("Acceleration"), crate::i18n::tr("Faster swipes move further; 0 is steady"), &mut t.acceleration, 0.0..=2.0, "");
                         toggle_row(

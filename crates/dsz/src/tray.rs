@@ -68,7 +68,7 @@ pub use crate::icon_art::icon_rgba;
 
 /// The tray icon at the size Windows wants: the multi-size icon embedded
 /// in the exe (resource 1, see `build.rs`), else drawn here.
-unsafe fn make_hicon() -> HICON {
+unsafe fn make_hicon(battery: Option<crate::tray_battery::Battery>) -> HICON {
     let cx = GetSystemMetrics(SM_CXSMICON).max(16);
     let cy = GetSystemMetrics(SM_CYSMICON).max(16);
     let h = LoadImageW(
@@ -80,10 +80,11 @@ unsafe fn make_hicon() -> HICON {
         LR_DEFAULTCOLOR,
     );
     if !h.is_null() {
-        return h as HICON;
+        if battery.is_none() { return h as HICON; }
+        DestroyIcon(h as HICON);
     }
     let size = cx as usize;
-    let rgba = icon_rgba(size);
+    let rgba = crate::tray_battery::icon_rgba(size, battery);
     // CreateIcon wants BGRA for the color plane and a 1-bpp AND mask.
     let mut bgra = vec![0u8; size * size * 4];
     for i in 0..size * size {
@@ -276,8 +277,9 @@ pub fn start(engine: Arc<Engine>, on_show: impl Fn() + Send + Sync + 'static) {
             nid.uID = 1;
             nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
             nid.uCallbackMessage = WM_TRAY;
-            nid.hIcon = make_hicon();
-            set_tip(&mut nid, "DSZ");
+            let (mut battery, description) = crate::tray_battery::snapshot(&engine);
+            nid.hIcon = make_hicon(battery);
+            set_tip(&mut nid, &format!("{} — {description}", crate::APP_TITLE));
             Shell_NotifyIconW(NIM_ADD, &nid);
 
             // Update the tooltip with battery levels now and then.
@@ -285,29 +287,26 @@ pub fn start(engine: Arc<Engine>, on_show: impl Fn() + Send + Sync + 'static) {
             let mut msg: MSG = std::mem::zeroed();
             while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
                 if msg.message == WM_TIMER {
-                    let devs = engine.device_list();
-                    let tip = if devs.is_empty() {
-                        "DSZ — no controller".to_string()
-                    } else {
-                        let parts: Vec<String> = devs
-                            .iter()
-                            .map(|d| {
-                                format!(
-                                    "{} {}%",
-                                    d.model.name(),
-                                    d.live.lock().input.battery_percent
-                                )
-                            })
-                            .collect();
-                        format!("DSZ — {}", parts.join(", "))
-                    };
+                    let (current, description) = crate::tray_battery::snapshot(&engine);
+                    let mut previous = null_mut();
+                    if current != battery {
+                        let icon = make_hicon(current);
+                        if !icon.is_null() {
+                            previous = nid.hIcon;
+                            nid.hIcon = icon;
+                            battery = current;
+                        }
+                    }
+                    let tip = format!("{} — {description}", crate::APP_TITLE);
                     set_tip(&mut nid, &tip);
                     Shell_NotifyIconW(NIM_MODIFY, &nid);
+                    if !previous.is_null() { DestroyIcon(previous); }
                 }
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
             Shell_NotifyIconW(NIM_DELETE, &nid);
+            if !nid.hIcon.is_null() { DestroyIcon(nid.hIcon); }
         })
         .unwrap();
 }

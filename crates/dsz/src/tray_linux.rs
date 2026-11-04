@@ -86,8 +86,8 @@ pub fn hide_main_window() { visibility().lock().hide(); }
 
 pub use crate::icon_art::icon_rgba;
 
-fn argb_icon(size: usize) -> Vec<u8> {
-    icon_rgba(size).chunks_exact(4).flat_map(|pixel| [pixel[3], pixel[0], pixel[1], pixel[2]]).collect()
+fn argb_icon(size: usize, battery: Option<crate::tray_battery::Battery>) -> Vec<u8> {
+    crate::tray_battery::icon_rgba(size, battery).chunks_exact(4).flat_map(|pixel| [pixel[3], pixel[0], pixel[1], pixel[2]]).collect()
 }
 
 pub fn notify(title: &str, text: &str) {
@@ -116,15 +116,12 @@ impl ksni::Tray for DualWaveTray {
     fn title(&self) -> String { crate::APP_TITLE.into() }
     fn status(&self) -> ksni::Status { ksni::Status::Active }
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![ksni::Icon { width: 32, height: 32, data: argb_icon(32) }]
+        vec![ksni::Icon { width: 32, height: 32, data: argb_icon(32, crate::tray_battery::snapshot(&self.engine).0) }]
     }
     fn activate(&mut self, _x: i32, _y: i32) { show_main_window(); }
     fn secondary_activate(&mut self, _x: i32, _y: i32) { show_main_window(); }
     fn tool_tip(&self) -> ksni::ToolTip {
-        let devices = self.engine.device_list();
-        let description = devices.iter().map(|device| {
-            format!("{} {}%", device.model.name(), device.live.lock().input.battery_percent)
-        }).collect::<Vec<_>>().join(", ");
+        let description = crate::tray_battery::snapshot(&self.engine).1;
         ksni::ToolTip { title: crate::APP_TITLE.into(), description, ..Default::default() }
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
@@ -234,7 +231,7 @@ mod tests {
     #[test]
     fn icon_uses_status_notifier_network_argb_byte_order() {
         let rgba = icon_rgba(32);
-        let argb = argb_icon(32);
+        let argb = argb_icon(32, None);
         assert_eq!(argb.len(), 32 * 32 * 4);
         for (rgba, argb) in rgba.chunks_exact(4).zip(argb.chunks_exact(4)) {
             assert_eq!(argb, [rgba[3], rgba[0], rgba[1], rgba[2]]);

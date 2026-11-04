@@ -23,6 +23,7 @@ mod hid;
 mod hid;
 mod i18n;
 mod icon_art;
+mod tray_battery;
 #[cfg(windows)]
 mod install;
 #[cfg(target_os = "linux")]

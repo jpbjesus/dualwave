@@ -271,6 +271,25 @@ impl App {
         }
     }
 
+    fn touchpad_override(&self, profile: &Profile) -> Option<bool> {
+        self.device().filter(|device| self.engine.profile_name_for(device) == profile.name)
+            .and_then(|device| device.toggles.lock().touchpad)
+    }
+
+    fn effective_touchpad_mode(&self, profile: &Profile) -> crate::profile::TouchMode {
+        use crate::profile::TouchMode;
+        self.touchpad_override(profile)
+            .map(|on| if on { TouchMode::Mouse } else { TouchMode::Passthrough })
+            .unwrap_or(profile.touchpad.mode)
+    }
+
+    fn set_touchpad_mode(&self, profile: &mut Profile, mode: crate::profile::TouchMode) {
+        profile.touchpad.mode = mode;
+        for device in self.engine.device_list() {
+            if self.engine.profile_name_for(&device) == profile.name { device.toggles.lock().touchpad = None; }
+        }
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui, dev: Option<&Arc<Device>>) {
         ui.horizontal(|ui| {
             ui.set_min_height(40.0);
@@ -741,3 +760,31 @@ fn tray_available() -> bool {
 
 #[cfg(test)]
 mod layout_tests;
+
+#[cfg(test)]
+mod touchpad_mode_tests {
+    use super::*;
+    use crate::profile::{Profile, TouchMode};
+
+    #[test]
+    fn mouse_switch_shows_a_button_override_and_can_turn_it_off() {
+        let dir = std::env::temp_dir().join(format!("dualwave-touch-switch-{}",std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let device = Device::for_test(ds_proto::Connection::Bluetooth,"A0-00-00-00-00-72");
+        engine.devices.write().push(device.clone());
+        let name = engine.profiles.add(Profile::named("Touch switch"));
+        engine.set_device_profile(&device,&name);
+        let app = App::new(engine.clone());
+        let mut profile = (*engine.profiles.find(&name).unwrap()).clone();
+        device.toggles.lock().touchpad = Some(true);
+        assert_eq!(app.effective_touchpad_mode(&profile),TouchMode::Mouse);
+        let unrelated = Profile::named("Different editor profile");
+        assert_eq!(app.effective_touchpad_mode(&unrelated),TouchMode::Passthrough);
+        app.set_touchpad_mode(&mut profile,TouchMode::Passthrough);
+        assert_eq!(device.toggles.lock().touchpad,None);
+        assert_eq!(app.effective_touchpad_mode(&profile),TouchMode::Passthrough);
+        drop(app);
+        drop(engine);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
