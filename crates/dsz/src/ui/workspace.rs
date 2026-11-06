@@ -448,7 +448,7 @@ impl App {
                 let profile_names = self.engine.profiles.names();
                 if let Some(record) = super::pages::mappings::action_editor(ui, &mut edited, index.unwrap_or(usize::MAX), &profile_names, &p.name,
                     p.virtual_out.kind != VirtualKind::Off, p.virtual_out.kind == VirtualKind::Xbox360,
-                    self.engine.companion.can_hide(), recording, true) { recording = record; }
+                    self.engine.companion.can_hide(), recording, true, &self.engine) { recording = record; }
                 if !matches!(edited.action, Action::Key { .. }) { recording = false; }
                 if edited.action != before || edited.mode != before_mode {
                     apply_action(p, self.selected_button, self.quick_gesture, edited.action);

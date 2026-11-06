@@ -48,6 +48,8 @@ pub struct Engine {
     /// off until it closes.
     pub game_dismissed: Mutex<HashMap<String, Vec<u32>>>,
     pub game_status: RwLock<crate::games::GameStatus>,
+    #[cfg(target_os = "linux")]
+    pub(crate) focus_monitor: Mutex<crate::focus_linux::Watcher>,
     pub(crate) game_selection: Mutex<()>,
     manual_profile_revision: AtomicU64,
     game_discovery_requested: AtomicBool,
@@ -56,6 +58,8 @@ pub struct Engine {
     /// `default_on_start`).
     session_assigned: Mutex<std::collections::HashSet<String>>,
     pub audio: Arc<AudioHub>,
+    #[cfg(target_os = "linux")]
+    pub(crate) media_players: crate::mpris::Service,
     pub udp: Mutex<UdpStatus>,
     pub dsu: crate::dsu::Server,
     pub toasts: Mutex<Vec<Toast>>,
@@ -128,11 +132,15 @@ impl Engine {
             fallback_exe: RwLock::new(None),
             game_dismissed: Mutex::new(HashMap::new()),
             game_status: RwLock::new(Default::default()),
+            #[cfg(target_os = "linux")]
+            focus_monitor: Mutex::new(Default::default()),
             game_selection: Mutex::new(()),
             manual_profile_revision: AtomicU64::new(0),
             game_discovery_requested: AtomicBool::new(false),
             session_assigned: Mutex::new(Default::default()),
             audio: AudioHub::new(),
+            #[cfg(target_os = "linux")]
+            media_players: Default::default(),
             udp: Mutex::new(UdpStatus::default()),
             dsu: Default::default(),
             toasts: Mutex::new(Vec::new()),
@@ -331,6 +339,19 @@ impl Engine {
             .take()
             .map(|(_, exe)| exe)
             .or_else(|| self.fallback_exe.write().take());
+        if dismissed.is_none() && cfg!(target_os = "linux") && {
+            let settings = self.settings.read();
+            settings.auto_profiles && settings.focused_game_only
+        } {
+            // Opening our UI removes game focus before its manual picker can run.
+            let status = self.game_status.read().clone();
+            let mut dismissed = self.game_dismissed.lock();
+            for game in &status.games {
+                let pids: Vec<u32> = status.instances.iter().filter(|(_, name)| name.eq_ignore_ascii_case(&game.exe))
+                    .map(|(pid, _)| *pid).collect();
+                if !pids.is_empty() { dismissed.insert(game.exe.to_ascii_lowercase(), pids); }
+            }
+        }
         if let Some(exe) = dismissed {
             log::info!(
                 "profile \"{name}\" picked while {exe} runs: game profile off until it closes"
@@ -349,6 +370,34 @@ impl Engine {
         device.kick();
     }
 
+    pub fn favorite_profile_names(&self) -> Vec<String> {
+        let names = self.profiles.names();
+        let mut favorites = Vec::new();
+        for name in &self.settings.read().favorite_profiles {
+            if names.contains(name) && !favorites.contains(name) { favorites.push(name.clone()); }
+        }
+        favorites
+    }
+
+    pub fn profile_menu_names(&self) -> Vec<String> {
+        let mut names = self.favorite_profile_names();
+        for name in self.profiles.names() {
+            if !names.contains(&name) { names.push(name); }
+        }
+        names
+    }
+
+    pub fn set_profile_favorite(&self, name: &str, favorite: bool) {
+        if favorite && self.profiles.find(name).is_none() { return; }
+        let mut settings = self.settings.write();
+        let already = settings.favorite_profiles.iter().any(|n| n == name);
+        if favorite == already { return; }
+        if favorite { settings.favorite_profiles.push(name.into()); }
+        else { settings.favorite_profiles.retain(|n| n != name); }
+        drop(settings);
+        self.settings_changed();
+    }
+
     pub fn cycle_profile(&self, device: &Device, delta: i32) {
         let names = self.profiles.names();
         if names.is_empty() {
@@ -365,6 +414,11 @@ impl Engine {
 
     pub fn rename_profile_refs(&self, old: &str, new: &str) {
         let mut s = self.settings.write();
+        for name in &mut s.favorite_profiles {
+            if name == old { *name = new.to_string(); }
+        }
+        let mut seen = std::collections::HashSet::new();
+        s.favorite_profiles.retain(|name| seen.insert(name.clone()));
         for v in s.device_profiles.values_mut() {
             if v == old {
                 *v = new.to_string();
@@ -578,6 +632,10 @@ impl Engine {
     /// Stop everything and leave controllers calm. Waits briefly.
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Release);
+        #[cfg(target_os = "linux")]
+        self.media_players.stop();
+        #[cfg(target_os = "linux")]
+        self.focus_monitor.lock().observe(false);
         for d in self.device_list() {
             d.stop.store(true, Ordering::Release);
         }
@@ -603,6 +661,47 @@ impl Device {
 #[cfg(all(test, target_os = "linux"))]
 mod recovery_tests {
     use super::*;
+    #[test]
+    fn favorites_order_menus_without_changing_selection_or_cycle_order() {
+        let dir = std::env::temp_dir().join(format!("dualwave-favorites-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let names = engine.profiles.names();
+        assert_eq!(engine.profile_menu_names(), names);
+        let revision = engine.manual_profile_revision();
+        let default = engine.settings.read().default_profile.clone();
+        engine.set_profile_favorite(&names[1], true);
+        engine.set_profile_favorite(&names[1], true);
+        engine.set_profile_favorite("Missing", true);
+        assert_eq!(engine.favorite_profile_names(), [names[1].clone()]);
+        assert_eq!(engine.profile_menu_names()[0], names[1]);
+        assert_eq!(engine.profiles.names(), names, "cycling retains the original store order");
+        assert_eq!(engine.manual_profile_revision(), revision);
+        assert_eq!(engine.settings.read().default_profile, default);
+        engine.flush();
+        assert_eq!(Engine::new(dir.clone()).favorite_profile_names(), [names[1].clone()]);
+        engine.set_profile_favorite(&names[1], false);
+        assert_eq!(engine.profile_menu_names(), names);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn favorite_renames_follow_the_profile_and_deleted_names_do_not_become_favorites() {
+        let dir = std::env::temp_dir().join(format!("dualwave-favorites-rename-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        engine.set_profile_favorite("DualSense", true);
+        engine.profiles.rename("DualSense", "Game").unwrap();
+        engine.rename_profile_refs("DualSense", "Game");
+        assert_eq!(engine.favorite_profile_names(), ["Game"]);
+        assert!(engine.profiles.delete("Game"));
+        engine.set_profile_favorite("Game", false);
+        engine.rename_profile_refs("Game", "Xbox");
+        assert!(engine.favorite_profile_names().is_empty());
+        assert!(engine.settings.read().favorite_profiles.is_empty());
+        let legacy: Settings = serde_json::from_str("{}").unwrap();
+        assert!(legacy.favorite_profiles.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn transient_enumeration_misses_do_not_disconnect_but_departed_nodes_are_retired() {
         let dir = std::env::temp_dir().join(format!("dualwave-presence-{}", std::process::id()));

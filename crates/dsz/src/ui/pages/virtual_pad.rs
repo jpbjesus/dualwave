@@ -430,11 +430,14 @@ impl App {
                             toggle_row(
                                 ui,
                                 crate::i18n::tr("Game haptics"),
-                                crate::i18n::tr("The game's haptic audio, to the actuators over Bluetooth"),
+                                crate::i18n::tr("The game's haptic audio, to the actuators over Bluetooth or USB"),
                                 &mut vo.game_haptics,
                             );
-                            #[cfg(windows)]
                             toggle_row(ui, crate::i18n::tr("Game haptics over USB"), crate::i18n::tr("Play on the wired controller's own sound device"), &mut vo.usb_game_haptics);
+                            #[cfg(target_os = "linux")]
+                            if vo.usb_game_haptics {
+                                muted(ui, crate::i18n::tr("Requires direct access to this controller's four-channel USB sound device. Close other audio clients using it. Hardware validation pending."));
+                            }
                             if vo.game_haptics {
                                 slider_row(
                                     ui,

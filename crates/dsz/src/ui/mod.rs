@@ -350,7 +350,8 @@ impl App {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let names = self.engine.profiles.names();
+                let names = self.engine.profile_menu_names();
+                let favorites = self.engine.favorite_profile_names();
                 let active = match dev {
                     // What the controller is using, so a game's profile can be
                     // switched away from.
@@ -362,7 +363,14 @@ impl App {
                     .width(200.0)
                     .selected_text(RichText::new(&active).strong())
                     .show_ui(ui, |ui| {
-                        for n in &names {
+                        for (i, n) in names.iter().enumerate() {
+                            if !favorites.is_empty() {
+                                if i == 0 { ui.label(crate::i18n::tr("Favorites")); }
+                                else if i == favorites.len() {
+                                    ui.separator();
+                                    ui.label(crate::i18n::tr("Other profiles"));
+                                }
+                            }
                             ui.selectable_value(&mut chosen, n.clone(), n);
                         }
                     });
@@ -380,7 +388,7 @@ impl App {
                 if let Some((p, exe)) = &*self.engine.game_override.read() {
                     if self.engine.settings.read().auto_profiles {
                         widgets::pill(ui, &format!("{exe} → {p}"), violet_color()).on_hover_text(
-                            crate::i18n::tr("A game rule is active. Its profile is in use until the game closes."),
+                            crate::i18n::tr("A game rule is active. Its profile is currently in use."),
                         );
                     }
                 }

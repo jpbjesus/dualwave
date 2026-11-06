@@ -59,6 +59,10 @@ features = [
 ]
 
 [target.'cfg(target_os = "linux")'.dependencies]
+alsa = "0.9"
+x11rb = "0.13"
+zbus = "5"
+tempfile = "3"
 libc = "0.2"
 ksni = { version = "0.3", features = ["blocking"] }
 sha2 = "0.10"

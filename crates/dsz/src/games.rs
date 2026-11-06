@@ -1,6 +1,6 @@
 //! Per-game profiles: watch running processes, switch controllers to the
 //! game's profile while it runs, and switch back when it exits. The most
-//! recently started game wins.
+//! recently started game wins unless optional window-focus selection is enabled.
 //!
 //! Games without a rule are checked once for native DualSense support
 //! (`dsdetect`); while one runs, controllers use the DualSense profile.
@@ -34,7 +34,7 @@ impl GameTarget {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SelectionReason { #[default] Assigned, Rule, Native, Fallback, Manual, Disabled, MissingProfile }
+pub enum SelectionReason { #[default] Assigned, Rule, Native, Fallback, Manual, Disabled, MissingProfile, FocusUnavailable }
 
 impl SelectionReason {
     pub fn label(self) -> &'static str {
@@ -42,6 +42,7 @@ impl SelectionReason {
             Self::Assigned => "Assigned profile", Self::Rule => "Game rule", Self::Native => "Native DualSense support",
             Self::Fallback => "Fallback controller", Self::Manual => "Manual choice for this session",
             Self::Disabled => "Automatic switching is off", Self::MissingProfile => "Game profile is missing",
+            Self::FocusUnavailable => "Window focus unavailable",
         }
     }
 }
@@ -49,16 +50,41 @@ impl SelectionReason {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DetectedGame { pub exe: String, pub native: bool }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FocusState { #[default] NotRequested, Unavailable, Known(Option<u32>) }
+impl FocusState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NotRequested => "Not checked", Self::Unavailable => "Window focus unavailable",
+            Self::Known(None) => "Focused application not identified", Self::Known(Some(_)) => "Window focus available",
+        }
+    }
+}
+
+fn focused_top<'a>(stack: &'a [String], procs: &[(u32, String)], focus: FocusState) -> Option<&'a str> {
+    match focus {
+        FocusState::NotRequested => stack.last().map(String::as_str),
+        FocusState::Known(Some(pid)) => {
+            let (_, exe) = procs.iter().find(|(p, _)| *p == pid)?;
+            stack.iter().find(|name| name.eq_ignore_ascii_case(exe)).map(String::as_str)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct GameStatus {
     pub exe: Option<String>,
     pub reason: SelectionReason,
+    pub focus: FocusState,
     pub games: Vec<DetectedGame>,
     pub instances: Vec<(u32, String)>,
 }
 
 #[derive(Clone, Default)]
 struct GameObservation {
+    focus: FocusState,
     auto: bool,
     manual_revision: u64,
     target: Option<GameTarget>,
@@ -69,7 +95,9 @@ struct GameObservation {
 fn implicit_game_process(exe: &str) -> bool {
     !matches!(exe.to_ascii_lowercase().as_str(), "wine" | "wine64" | "wine-preloader" | "wine64-preloader" | "wineserver"
         | "steam" | "steam.exe" | "steamwebhelper" | "steamwebhelper.exe" | "services.exe" | "explorer.exe"
-        | "winedevice.exe" | "plugplay.exe" | "rpcss.exe" | "conhost.exe" | "rundll32.exe")
+        | "winedevice.exe" | "plugplay.exe" | "rpcss.exe" | "conhost.exe" | "rundll32.exe"
+        | "pressure-vessel-wrap" | "pressure-vessel-adverb" | "pv-bwrap" | "bwrap" | "srt-bwrap"
+        | "steam-runtime-launch-client" | "steam-runtime-launcher-service" | "steam-runtime-supervisor" | "reaper" | "proton")
 }
 
 fn order_by_start(stack: &mut [String], procs: &[(u32, String)], mut started: impl FnMut(u32) -> Option<std::time::SystemTime>) {
@@ -85,9 +113,14 @@ fn order_by_start(stack: &mut [String], procs: &[(u32, String)], mut started: im
 fn apply_observation(engine: &Engine, scan: GameObservation) {
     let _selection = engine.game_selection.lock();
     let auto = scan.auto && engine.settings.read().auto_profiles;
-    let observed_exe = scan.target.as_ref().map(|t| t.exe().to_string());
-    let mut target = if auto { scan.target } else { None };
-    let mut reason = if auto { SelectionReason::Assigned } else { SelectionReason::Disabled };
+    let focus_only = cfg!(target_os = "linux") && auto && engine.settings.read().focused_game_only;
+    let focus_changed = focus_only != (scan.focus != FocusState::NotRequested);
+    let focus = if focus_changed { FocusState::Unavailable } else { scan.focus };
+    let observed_exe = scan.target.as_ref().filter(|_| !focus_changed).map(|t| t.exe().to_string());
+    let mut target = if auto && !focus_changed { scan.target } else { None };
+    let mut reason = if !auto { SelectionReason::Disabled }
+        else if focus == FocusState::Unavailable { SelectionReason::FocusUnavailable }
+        else { SelectionReason::Assigned };
     {
         let mut dismissed = engine.game_dismissed.lock();
         dismissed.retain(|exe, pids| scan.running.iter().any(|(pid, name)| name.eq_ignore_ascii_case(exe)
@@ -124,9 +157,9 @@ fn apply_observation(engine: &Engine, scan: GameObservation) {
     let prev_override = engine.game_override.read().clone();
     let prev_fallback = engine.fallback_exe.read().clone();
     let exe = observed_exe.or_else(|| {
-        scan.games.last().map(|g| g.exe.clone())
+        (focus == FocusState::NotRequested).then(|| scan.games.last().map(|g| g.exe.clone())).flatten()
     });
-    *engine.game_status.write() = GameStatus { exe, reason, games: scan.games, instances: scan.running };
+    *engine.game_status.write() = GameStatus { exe, reason, focus, games: scan.games, instances: scan.running };
     if next_override == prev_override && next_fallback == prev_fallback { return; }
     match &target {
         Some(GameTarget::Profile { profile, exe }) => {
@@ -371,16 +404,21 @@ pub fn run(engine: Arc<Engine>) {
             .collect();
         let ds_exes: Vec<&str> = ds_games.iter().map(|(n, _)| n.as_str()).collect();
         let plain_exes: Vec<&str> = plain_games.iter().map(String::as_str).collect();
+        // File discovery can be slow; observe focus only after it finishes.
+        #[cfg(target_os = "linux")]
+        let focus = engine.focus_monitor.lock().observe(!engine.shutdown.load(Ordering::Acquire) && auto && engine.settings.read().focused_game_only);
+        #[cfg(not(target_os = "linux"))]
+        let focus = FocusState::NotRequested;
         let target = pick_target(
             auto,
-            stack.last().map(String::as_str),
+            focused_top(&stack, &procs, focus),
             &rules_top,
             &ds_exes,
             &ds_profile,
             engine.profiles.exists(&ds_profile),
             &plain_exes,
         );
-        apply_observation(&engine, GameObservation { auto, manual_revision, target, running: procs, games: detected });
+        apply_observation(&engine, GameObservation { focus, auto, manual_revision, target, running: procs, games: detected });
         let wait = if rules.is_empty() && !auto_ds && !fallback_on {
             3000
         } else {
@@ -396,6 +434,7 @@ mod tests {
 
     fn observation(engine: &Engine, exe: &str, profile: &str) -> GameObservation {
         GameObservation {
+            focus: FocusState::NotRequested,
             auto: true,
             manual_revision: engine.manual_profile_revision(),
             target: Some(GameTarget::Profile { profile: profile.into(), exe: exe.into() }),
@@ -500,6 +539,111 @@ mod tests {
     }
 
     #[test]
+    fn focus_selection_uses_the_exact_pid_and_never_a_background_fallback() {
+        let stack = vec!["first.exe".into(), "second.exe".into()];
+        let procs = vec![(10, "first.exe".into()), (20, "second.exe".into()), (30, "desktop".into())];
+        assert_eq!(focused_top(&stack, &procs, FocusState::NotRequested), Some("second.exe"));
+        assert_eq!(focused_top(&stack, &procs, FocusState::Known(Some(10))), Some("first.exe"));
+        for focus in [FocusState::Unavailable, FocusState::Known(None), FocusState::Known(Some(30)), FocusState::Known(Some(99))] {
+            assert_eq!(focused_top(&stack, &procs, focus), None);
+        }
+    }
+
+    #[test]
+    fn runtime_helpers_are_not_implicit_games_but_explicit_rules_still_work() {
+        for name in ["pressure-vessel-wrap", "pressure-vessel-adverb", "pv-bwrap", "bwrap", "steam-runtime-launch-client", "reaper", "proton"] {
+            assert!(!implicit_game_process(name), "{name}");
+        }
+        assert!(pick_target(true, Some("pressure-vessel-wrap"), &[("pressure-vessel-wrap", "Xbox")], &[], "DualSense", true, &[]).is_some());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn desktop_manual_choice_keeps_running_games_manual_but_allows_a_new_process() {
+        let dir = std::env::temp_dir().join(format!("dualwave-focus-desktop-manual-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let device = crate::device::Device::for_test(ds_proto::Connection::Bluetooth, "");
+        engine.set_device_profile(&device, "Xbox");
+        engine.settings.write().focused_game_only = true;
+        let mut scan = observation(&engine, "game.exe", "DualSense");
+        scan.running.push((43, "other.exe".into()));
+        scan.games.push(DetectedGame { exe: "other.exe".into(), native: false });
+        scan.games.push(DetectedGame { exe: "gone.exe".into(), native: false });
+        scan.focus = FocusState::Known(None);
+        scan.target = None;
+        apply_observation(&engine, scan.clone());
+        engine.set_device_profile(&device, "Xbox");
+        assert_eq!(engine.game_dismissed.lock().get("game.exe"), Some(&vec![42]));
+        assert_eq!(engine.game_dismissed.lock().get("other.exe"), Some(&vec![43]));
+        assert!(!engine.game_dismissed.lock().contains_key("gone.exe"));
+        scan.manual_revision = engine.manual_profile_revision();
+        for (pid, exe) in [(42, "game.exe"), (43, "other.exe")] {
+            scan.focus = FocusState::Known(Some(pid));
+            scan.target = Some(GameTarget::Profile { exe: exe.into(), profile: "DualSense".into() });
+            apply_observation(&engine, scan.clone());
+            assert_eq!(engine.profile_name_for(&device), "Xbox");
+            assert_eq!(engine.game_status.read().reason, SelectionReason::Manual);
+        }
+        scan.running = vec![(44, "game.exe".into()), (43, "other.exe".into())];
+        scan.focus = FocusState::Known(Some(44));
+        scan.target = Some(GameTarget::Profile { exe: "game.exe".into(), profile: "DualSense".into() });
+        apply_observation(&engine, scan);
+        assert_eq!(engine.profile_name_for(&device), "DualSense");
+        assert!(engine.game_dismissed.lock().contains_key("other.exe"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn leaving_game_focus_restores_assignment_and_manual_priority_survives_return() {
+        let dir = std::env::temp_dir().join(format!("dualwave-focus-selection-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let device = crate::device::Device::for_test(ds_proto::Connection::Bluetooth, "");
+        engine.set_device_profile(&device, "Xbox");
+        engine.settings.write().focused_game_only = true;
+        let mut scan = observation(&engine, "game.exe", "DualSense");
+        scan.focus = FocusState::Known(Some(42));
+        apply_observation(&engine, scan.clone());
+        assert_eq!(engine.profile_name_for(&device), "DualSense");
+        let mut desktop = scan.clone();
+        desktop.focus = FocusState::Known(None);
+        desktop.target = None;
+        apply_observation(&engine, desktop.clone());
+        assert_eq!(engine.profile_name_for(&device), "Xbox");
+        assert!(engine.game_status.read().exe.is_none());
+        apply_observation(&engine, scan.clone());
+        engine.set_device_profile(&device, "Xbox");
+        apply_observation(&engine, desktop);
+        scan.manual_revision = engine.manual_profile_revision();
+        apply_observation(&engine, scan);
+        assert_eq!(engine.profile_name_for(&device), "Xbox");
+        assert_eq!(engine.game_status.read().reason, SelectionReason::Manual);
+        let old: crate::settings::Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.focused_game_only);
+        engine.settings.write().auto_profiles = false;
+        apply_observation(&engine, GameObservation::default());
+        assert_eq!(engine.game_status.read().focus, FocusState::NotRequested);
+        assert_eq!(engine.game_status.read().reason, SelectionReason::Disabled);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn enabling_focus_during_a_scan_rejects_its_background_target() {
+        let dir = std::env::temp_dir().join(format!("dualwave-focus-mode-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let device = crate::device::Device::for_test(ds_proto::Connection::Bluetooth, "");
+        engine.set_device_profile(&device, "Xbox");
+        let scan = observation(&engine, "game.exe", "DualSense");
+        engine.settings.write().focused_game_only = true;
+        apply_observation(&engine, scan);
+        assert!(engine.game_override.read().is_none());
+        assert_eq!(engine.game_status.read().reason, SelectionReason::FocusUnavailable);
+        assert_eq!(engine.profile_name_for(&device), "Xbox");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn process_start_time_decides_priority_instead_of_rule_order() {
         let mut stack = vec!["new.exe".to_string(), "old.exe".to_string()];
         let procs = vec![(20, "old.exe".to_string()), (10, "new.exe".to_string())];
@@ -536,7 +680,7 @@ mod tests {
             order_by_start(&mut stack, &running, crate::platform::process_started);
             let target = pick_target(true, stack.last().map(String::as_str),
                 &[("first.exe", "DualSense"), ("second.exe", "Xbox")], &[], "DualSense", true, &[]);
-            GameObservation { auto: true, manual_revision: engine.manual_profile_revision(), target, running, games: Vec::new() }
+            GameObservation { focus: FocusState::NotRequested, auto: true, manual_revision: engine.manual_profile_revision(), target, running, games: Vec::new() }
         };
         apply_observation(&engine, scan(&[first.0.id(), second.0.id()]));
         assert_eq!(engine.game_status.read().exe.as_deref(), Some("second.exe"));

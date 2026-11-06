@@ -604,6 +604,25 @@ impl MediaKey {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlayerCommand { #[default] PlayPause, Next, Previous, Stop, VolumeUp, VolumeDown }
+impl PlayerCommand {
+    pub const ALL: [Self; 6] = [Self::PlayPause, Self::Next, Self::Previous, Self::Stop, Self::VolumeUp, Self::VolumeDown];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PlayPause => "Play / pause", Self::Next => "Next track", Self::Previous => "Previous track",
+            Self::Stop => "Stop", Self::VolumeUp => "Volume up", Self::VolumeDown => "Volume down",
+        }
+    }
+}
+
+pub fn valid_player_target(name: &str) -> bool {
+    name.len() <= 255 && name.strip_prefix("org.mpris.MediaPlayer2.").is_some_and(|suffix| {
+        suffix.split('.').all(|part| !part.is_empty() && !part.as_bytes()[0].is_ascii_digit()
+            && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[derive(Default)]
@@ -632,6 +651,12 @@ pub enum Action {
     ScrollDown,
     Media {
         key: MediaKey,
+    },
+    Player {
+        #[serde(default)]
+        player: String,
+        #[serde(default)]
+        command: PlayerCommand,
     },
     NextProfile,
     PreviousProfile,
@@ -993,7 +1018,7 @@ pub struct VirtualOutput {
     pub game_leds: bool,
     /// Game haptics: the virtual DualSense's actuator channels.
     pub game_haptics: bool,
-    /// Opt-in playback on the physical USB sound card (Windows only).
+    /// Opt-in playback on the physical USB sound card.
     pub usb_game_haptics: bool,
     /// Percent, 0..=200; past 100 a limiter holds the peaks.
     pub game_haptics_level: u8,
@@ -1524,6 +1549,19 @@ mod tests {
         assert_eq!(back.speaker_amp, SpeakerAmp::Loudest);
         let v: VirtualOutput = serde_json::from_str(r#"{"game_haptics_level":180}"#).unwrap();
         assert_eq!(v.game_haptics_level, 180);
+    }
+
+    #[test]
+    fn selected_player_actions_round_trip_without_changing_existing_media_actions() {
+        let old: Action = serde_json::from_str(r#"{"kind":"media","key":"PlayPause"}"#).unwrap();
+        assert_eq!(old, Action::Media { key: MediaKey::PlayPause });
+        let selected = Action::Player { player: "org.mpris.MediaPlayer2.vlc".into(), command: PlayerCommand::PlayPause };
+        assert_eq!(serde_json::from_str::<Action>(&serde_json::to_string(&selected).unwrap()).unwrap(), selected);
+        assert_eq!(serde_json::to_value(&old).unwrap(), serde_json::json!({"kind":"media","key":"PlayPause"}));
+        assert!(valid_player_target("org.mpris.MediaPlayer2.chromium.instance2"));
+        for name in ["", "org.mpris.MediaPlayer2.", "org.freedesktop.DBus", ":1.23", "org.mpris.MediaPlayer2.123", "org.mpris.MediaPlayer2.bad/name"] {
+            assert!(!valid_player_target(name), "{name}");
+        }
     }
 
     #[test]

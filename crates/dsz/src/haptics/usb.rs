@@ -2,21 +2,18 @@
 //! Game haptics and the separate USB playback opt-in are on.
 //!
 //! Over Bluetooth the streamer turns the virtual DualSense's actuator
-//! channels into haptics reports. On a cable the controller is a Windows
+//! channels into haptics reports. On a cable the controller is a USB
 //! sound device with four channels, the last two its actuators, which is
 //! where a game writes them on a wired DualSense. Without this the game's
 //! haptic audio stops at the virtual pad, and a wired controller gets only
 //! the game's classic rumble. This plays the actuator channels on the
-//! controller's own playback endpoint (found by its device container, so
-//! never another controller's or a virtual pad's), at the profile's
-//! Haptics level. The speaker channels are left silent, as before.
+//! controller's own playback endpoint (found by its device container on Windows
+//! or exact USB ancestry on Linux, excluding other controllers and virtual
+//! pads), at the profile's Haptics level. The speaker channels are left silent, as before.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
-#[cfg(windows)]
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
-#[cfg(windows)]
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -26,17 +23,19 @@ use parking_lot::Mutex;
 use super::dsp::{full_clip, resample_window, Limiter};
 use super::game::{GameReader, PcmSource, WINDOW};
 use super::streamer::{haptic_drive, HAPTICS_CEILING, LEVEL_MAX};
-#[cfg(windows)]
 use crate::device::Device;
-#[cfg(windows)]
 use crate::engine::{Engine, ProfileCache};
 use crate::profile::{VirtualKind, VirtualOutput};
 
+#[cfg(target_os = "linux")]
+#[path = "usb_linux.rs"]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux::Output;
+
 /// How often the profile and the game's audio endpoint are looked at.
-#[cfg(windows)]
 const POLL: Duration = Duration::from_millis(250);
 /// Wait before trying the controller's sound device again after a failure.
-#[cfg(windows)]
 const RETRY: Duration = Duration::from_secs(10);
 
 /// Whether the actuator channels should play on a wired controller now.
@@ -69,7 +68,6 @@ fn shape(x: f32, level: u8, drive: f32) -> f32 {
 struct Shared {
     source: Mutex<Option<Arc<dyn PcmSource>>>,
     level: AtomicU8,
-    #[cfg(windows)]
     failed: AtomicBool,
     /// Peak of the last window per actuator, f32 bits (for the meters).
     peak: [AtomicU32; 2],
@@ -157,7 +155,6 @@ impl Render {
 }
 
 /// Why the controller's sound card couldn't be opened.
-#[cfg(windows)]
 enum OpenError {
     /// Set to fewer than the 4 channels the actuators need: the one case
     /// the user can fix, so it gets a toast too.
@@ -165,14 +162,12 @@ enum OpenError {
     Other(String),
 }
 
-#[cfg(windows)]
 impl From<String> for OpenError {
     fn from(e: String) -> Self {
         OpenError::Other(e)
     }
 }
 
-#[cfg(windows)]
 impl std::fmt::Display for OpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -264,13 +259,11 @@ impl Output {
 
 /// Owned by the existing control writer; no worker exists until a game
 /// actually opens its audio and this profile explicitly enables USB playback.
-#[cfg(windows)]
 pub struct Worker {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-#[cfg(windows)]
 impl Worker {
     pub fn sync(slot: &mut Option<Self>, engine: &Arc<Engine>, device: &Arc<Device>, vo: &VirtualOutput) {
         let active = if vo.usb_game_haptics && !device.is_bluetooth() && !device.model.is_dualshock4() {
@@ -293,7 +286,6 @@ impl Worker {
     }
 }
 
-#[cfg(windows)]
 impl Drop for Worker {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
@@ -307,7 +299,6 @@ impl Drop for Worker {
 /// Runs for a DualSense on USB until it disconnects. Does nothing unless
 /// the profile's Game haptics is on and a game has the virtual DualSense's
 /// audio open.
-#[cfg(windows)]
 fn run(engine: &Arc<Engine>, device: &Arc<Device>, stop: &AtomicBool) {
     let mut cache = ProfileCache::default();
     let shared = Arc::new(Shared {
@@ -347,7 +338,7 @@ fn run(engine: &Arc<Engine>, device: &Arc<Device>, stop: &AtomicBool) {
                             log::warn!("game haptics over USB: can't play on the controller: {e}");
                             if let OpenError::Channels(_) = e {
                                 engine.warn_toast(crate::i18n::tr(
-                                    "Game haptics over USB need the controller's sound device set to 4 channels (Quadraphonic)",
+                                    if cfg!(target_os = "linux") { "Game haptics over USB require a four-channel 48 kHz playback device" } else { "Game haptics over USB need the controller's sound device set to 4 channels (Quadraphonic)" },
                                 ));
                             }
                             warned = true;
@@ -361,7 +352,7 @@ fn run(engine: &Arc<Engine>, device: &Arc<Device>, stop: &AtomicBool) {
             *shared.source.lock() = None;
         }
         if out.is_some() && shared.failed.load(Ordering::Acquire) {
-            // The sound card went away or Windows reset it: open it again.
+            // The sound card went away or was reset: open it again.
             out = None;
             retry_at = Instant::now() + Duration::from_secs(1);
         }
@@ -418,13 +409,11 @@ mod tests {
         Arc::new(Shared {
             source: Mutex::new(Some(Arc::new(Tone { frames: Mutex::new(frames) }) as Arc<dyn PcmSource>)),
             level: AtomicU8::new(level),
-            #[cfg(windows)]
             failed: AtomicBool::new(false),
             peak: [AtomicU32::new(0), AtomicU32::new(0)],
         })
     }
 
-    #[cfg(windows)]
     #[test]
     fn stopped_usb_worker_clears_meters_without_opening_audio() {
         let dir = std::env::temp_dir().join(format!("dualwave-usb-stop-{}", std::process::id()));
@@ -432,6 +421,33 @@ mod tests {
         let device = Device::for_test(ds_proto::Connection::Usb, "A0-00-00-00-00-61");
         for meter in &device.haptic_level { meter.store(200, Ordering::Relaxed); }
         run(&engine, &device, &AtomicBool::new(true));
+        assert!(device.haptic_level.iter().all(|m| m.load(Ordering::Relaxed) == 0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn default_usb_profile_never_creates_a_worker_even_with_game_audio() {
+        let dir = std::env::temp_dir().join(format!("dualwave-usb-default-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let device = Device::for_test(ds_proto::Connection::Usb, "");
+        *device.game_audio.lock() = Some(Arc::new(Tone { frames: Mutex::new(48_000) }));
+        device.virt.status.lock().game_audio_open = true;
+        let vo = VirtualOutput { kind: VirtualKind::DualSense, ..Default::default() };
+        let mut worker = None;
+        Worker::sync(&mut worker, &engine, &device, &vo);
+        assert!(worker.is_none());
+        let mut profile = crate::profile::Profile::named("USB baseline");
+        profile.virtual_out = vo;
+        let state = crate::composer::Composer::new().compose(&profile, &ds_proto::InputState::default(),
+            &device.overrides.lock(), &device.feedback.lock(), &device.toggles.lock(), false, 0.0, Instant::now());
+        assert_eq!(state.build(ds_proto::Connection::Usb, &mut [0u8; 78]), &[
+            0x02, 0x0F, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x02, 0x00, 0x04, 0x24, 0x66, 0xC7,
+        ]);
+
+        assert_eq!(device.game_audio.lock().as_ref().unwrap().filled_frames(), 48_000);
         assert!(device.haptic_level.iter().all(|m| m.load(Ordering::Relaxed) == 0));
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -491,7 +507,6 @@ mod tests {
         let none = Arc::new(Shared {
             source: Mutex::new(None),
             level: AtomicU8::new(100),
-            #[cfg(windows)]
             failed: AtomicBool::new(false),
             peak: [AtomicU32::new(0), AtomicU32::new(0)],
         });

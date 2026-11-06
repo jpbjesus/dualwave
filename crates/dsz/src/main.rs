@@ -14,7 +14,10 @@ mod dsdetect;
 mod dsu;
 mod engine;
 mod flight;
+mod flick_calibration;
 mod games;
+#[cfg(target_os = "linux")]
+mod focus_linux;
 mod haptics;
 #[cfg(windows)]
 mod hid;
@@ -35,6 +38,8 @@ mod inputsim;
 #[path = "inputsim_linux.rs"]
 mod inputsim;
 mod pipeline;
+#[cfg(target_os = "linux")]
+mod mpris;
 #[cfg(windows)]
 mod platform;
 #[cfg(target_os = "linux")]

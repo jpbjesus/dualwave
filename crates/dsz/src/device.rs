@@ -204,6 +204,7 @@ pub struct Device {
     pub overrides: Mutex<Overrides>,
     pub feedback: Mutex<Feedback>,
     pub toggles: Mutex<Toggles>,
+    pub flick_calibration: Mutex<Option<crate::flick_calibration::Turn>>,
     /// A profile in use only while a mapping's buttons are held.
     pub held_profile: Mutex<Option<crate::engine::HeldProfile>>,
     pub stream_tx: Sender<StreamPacket>,
@@ -980,6 +981,7 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
         overrides: Mutex::new(Overrides::default()),
         feedback: Mutex::new(Feedback::default()),
         toggles: Mutex::new(Toggles::default()),
+        flick_calibration: Mutex::new(None),
         held_profile: Mutex::new(None),
         stream_tx: tx,
         stream_rx: rx,
@@ -1458,7 +1460,6 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
     let mut stream_since = 0u32;
     let mut last_rate = Instant::now();
     let mut profile_cache = crate::engine::ProfileCache::default();
-    #[cfg(windows)]
     let mut usb_haptics = None;
     let mut meter: Option<Arc<crate::haptics::audio::Sub>> = None;
 
@@ -1545,7 +1546,6 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
         next_tick = now + if pcm { TICK_STREAMING } else { TICK };
 
         let profile = profile_cache.get(engine, device);
-        #[cfg(windows)]
         crate::haptics::usb::Worker::sync(&mut usb_haptics, engine, device, &profile.virtual_out);
         if profile.lighting.mode == crate::profile::LightMode::Audio {
             let source = profile.haptics.device.as_str();
@@ -1718,6 +1718,7 @@ impl Device {
             overrides: Mutex::new(Overrides::default()),
             feedback: Mutex::new(Feedback::default()),
             toggles: Mutex::new(Toggles::default()),
+            flick_calibration: Mutex::new(None),
             held_profile: Mutex::new(None),
             stream_tx,
             stream_rx,
@@ -1887,6 +1888,33 @@ mod microphone_tests {
         d.set_microphone(true, false, 100, crate::profile::MicrophoneSource::Auto);
         assert!(!d.microphone.recording());
         assert!(d.next_mute_state(false));
+    }
+
+    #[test]
+    fn flick_calibration_keeps_controller_output_bytes_unchanged() {
+        let d = Device::for_test(Connection::Bluetooth, "");
+        assert!(d.flick_calibration.lock().is_none());
+        let profile = crate::profile::Profile::named("Flick baseline");
+        let input = InputState::default();
+        let now = Instant::now();
+        let report = || {
+            let state = crate::composer::Composer::new().compose(&profile, &input,
+                &d.overrides.lock(), &d.feedback.lock(), &d.toggles.lock(), false, 0.0, now);
+            state.build(Connection::Bluetooth, &mut [0u8; 78]).to_vec()
+        };
+        let before = report();
+        assert_eq!(before, [
+            0x31, 0x02, 0x0F, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x07, 0x00, 0x00, 0x02, 0x00, 0x04, 0x24, 0x66, 0xC7, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x34, 0xD0, 0x87, 0x02,
+        ]);
+        *d.flick_calibration.lock() = crate::flick_calibration::Turn::new(&profile.name, true, 4320.0, now);
+        assert_eq!(report(), before);
+        assert!(d.stream_rx.is_empty());
+        assert_eq!(d.stats.writes.load(Ordering::Relaxed), 0);
     }
 
     #[test]

@@ -31,8 +31,10 @@ boost options require an explicit profile change. DSZ 0.4.5 adds gyro bias
 recovery, safer Quick Charge matching, Xbox fallback for missing default
 profiles and a full-range haptic boost above 100%. Quick Charge and startup
 profile choices retain their existing saved keys and defaults in DualWave.
-Wired game haptics from 0.4.5 are Windows-only and require the new opt-in
-**Game haptics over USB** setting; the Linux playback backend is not implemented.
+Wired game haptics require the opt-in **Game haptics over USB** setting.
+The Linux backend uses the physical controller's four-channel ALSA playback
+device, selected by its USB ancestry; hardware validation is pending. Existing
+profiles with this option already enabled now use the Linux backend.
 
 **Status:** alpha. Availability in the interface does not imply validation on
 every controller, firmware, Bluetooth adapter or game. See
@@ -48,25 +50,74 @@ consult its release notes before downloading.
 | Adaptive triggers | Independent L2/R2 resistance, release points, vibration and per-zone effects |
 | Headphone audio | Bluetooth stereo playback through the 3.5 mm jack, routing and volume |
 | Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
-| Haptics | Game and system audio, button feedback, trigger texture and rumble conversion |
+| Haptics | Game and system audio, button feedback, trigger texture and rumble conversion; optional virtual DualSense game haptics to the physical USB controller on Linux (hardware validation pending) |
 | Agent configuration | Opt-in local CLI and stdio MCP for Codex, Claude and other agents; edit profiles, actions and macros while the app is open, with revision checks to protect recent edits |
 | Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; a clickable controller, keycap previews, shortcut presets, key capture and visual macro steps with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
-| Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third; optional flick stick with calibrated pixels per full turn, horizontal rotation and a 100 ms initial turn |
+| Media players | Optional Linux actions for one selected running MPRIS player: play/pause, next/previous track, stop and player volume in 5% steps; no fallback to other players or automatic player launch |
+| Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third; optional flick stick with calibrated pixels per full turn, horizontal rotation and a 100 ms initial turn; a temporary 360° sensitivity test with a five-second delay |
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
 | Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP |
 | Controller power | Turn off the connected Bluetooth controller directly from the home page |
 | Upstream 0.4.5 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
-| Profiles and games | Executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
+| Profiles and games | Favorite profiles first in the profile list and selector, and in a separate leading group in the Linux tray; optional foreground-game selection on KDE Plasma 6 and X11; executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
 | Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance and reduced motion |
 | Desktop integration | Controller tray icon with a proportional battery overlay, charging/full indicators and percentage on hover (lowest known charge when multiple controllers are connected); startup preferences and device naming; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
-| Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report |
+| Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report; live touchpad/gyro mouse and physical input isolation states, with steps to check duplicate mouse input from Linux or Steam |
 
 Flick stick is selected per stick in **Motion & touch**. Set **Pixels per full turn**
 for the game's mouse sensitivity and disable mouse acceleration in the game.
+**Test 360° turn** waits five seconds so you can return to the game, then moves
+the mouse horizontally for one second using the current pixels per full turn.
+Keep the sticks still and use a fixed visual reference: the view should return
+to its starting point. Adjust the value and repeat. **Cancel turn test**, a
+profile or sensitivity change, or an interruption in input cancels the test.
+The test requires a connected controller using the edited profile.
 Pair it with gyro mouse for vertical aiming. A virtual controller centers a
 stick used for flick turns; the physical stick remains visible to games unless
 physical input is isolated.
+
+In **Profiles**, select **Favorite** to keep a profile near the top of the list,
+profile selector and Linux tray menu. Marking a favorite does not apply it.
+Favorites are saved in app settings and follow profile renames; deleting a
+profile removes its favorite. Next/previous profile mappings keep their existing
+order. Profile exports do not include favorites; full settings backups do.
+
+On Linux, enable **Only the focused game** under **Profiles → Game profiles**
+to apply a game's existing executable rule, native DualSense profile or fallback
+only while its window is active. Switching to another application restores the
+assigned profile. Manual choices remain prioritized until the affected game
+closes. Choosing manually from the desktop takes priority for games already
+detected as running; newly started or restarted games can switch automatically.
+The option is off by default.
+
+KDE Plasma 6 on Wayland uses a temporary KWin script and authenticated session D-Bus updates
+containing only the active window's process ID; no titles or window contents are
+read. The observer is unloaded when focus selection is disabled or DualWave
+shuts down. X11 uses the active-window, local-host and process-ID properties. Windows without
+a local process identity keep the assigned profile. Other Wayland
+desktops may not expose this information; focus mode then keeps the assigned
+profile and shows **Window focus unavailable**, without choosing a background
+game through XWayland. Steam/Proton runtime helpers such as
+`pressure-vessel-wrap` are excluded from implicit game detection; explicit
+executable rules can still target them.
+
+For a couch/media setup on Linux, open **Buttons**, choose a button and select
+**More actions → Media player**. Open your player, press **Refresh players**,
+choose it and select the command. The destination is saved in that mapping;
+other buttons can use the same player or another one. For example, Cross can
+pause, L1/R1 can select the previous/next track, and D-pad up/down can adjust
+player volume. Existing touchpad mouse controls can handle desktop navigation.
+
+These actions control only the chosen running MPRIS destination. Closing it
+never redirects commands to another player or launches an application. The old
+**Media key** actions keep their global desktop behavior. Each player determines
+which commands it supports; browsers may not expose player volume, and some
+instance names change after restarting, requiring refresh and reselection.
+Volume increases stop at 100%; an existing boosted volume can be reduced in 5%
+steps. No player lookup or control worker starts until explicitly requested.
+Commands run off the controller reader thread, with bounded queueing and stale
+requests discarded. A full settings/profile backup preserves these mappings.
 
 Open **Buttons**, select a button on the controller drawing, then choose
 **Create macro** to build its sequence directly on the page. **All buttons**
@@ -285,7 +336,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 Example download for the current alpha release:
 
 ```sh
-release=v0.4.5-alpha.3
+release=v0.4.5-alpha.4
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -300,10 +351,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.5-alpha.3 --dry-run
-sh install-dualwave.sh --version v0.4.5-alpha.3
+sh install-dualwave.sh --version v0.4.5-alpha.4 --dry-run
+sh install-dualwave.sh --version v0.4.5-alpha.4
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.5-alpha.3 --format native --dry-run
+sh install-dualwave.sh --version v0.4.5-alpha.4 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```
@@ -371,6 +422,7 @@ controller, Bluetooth adapter or game has been tested.
 | Mappings and motion | Keys, mouse, controller buttons, gestures, gyro activation by touchpad zone, touchpad and stick modes | Native uinput backend implemented; hardware validation pending |
 | Directional stick reach | Independent 16-direction gains, guided calibration and virtual-output preview; disabled by default | Exhaustive neutral-position checks, saved-profile round trips and unchanged-report fixture; physical calibration validation pending |
 | Virtual controllers | Xbox 360, DualSense and DualShock 4 over native Linux USB/IP, with scoped privileged broker | Host attachment and game compatibility validation pending |
+| USB game haptics | Opt-in forwarding from the virtual DualSense to the matching physical four-channel ALSA playback device | Endpoint-selection, channel-routing and idle-worker tests pass; controller, firmware and game validation pending |
 | Exclusive physical input | Scoped evdev grabs and kernel raw-state redirection; device nodes remain visible | Routing/build tests; hardware validation pending |
 | Upstream 0.4.4 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Detected-game association, per-game rules, start-time priority, manual session priority, selection reasons and Wine/Proton process discovery | Selection lifecycle, relaunch, duplicate-rule, pointer interaction and layout tests; real game sessions pending |
@@ -388,8 +440,13 @@ controller, Bluetooth adapter or game has been tested.
 - Headphones must be connected before playback starts. Headset microphone
   selection after reinsertion, reconnect behavior and simultaneous Steam/game
   use need further validation.
-- USB audio uses the controller's existing USB audio device, outside this
-  Bluetooth bridge.
+- USB game haptics require **Game haptics** and **Game haptics over USB** in
+  **Virtual controller**, plus a game writing audio to the virtual DualSense.
+  Playback goes directly to the same physical controller's four-channel 48 kHz
+  ALSA hardware device. Speaker channels stay silent. Other audio clients must
+  release that device; an occupied, missing or ambiguous endpoint fails without
+  falling back to desktop speakers or another controller. No desktop audio
+  profile or default is changed. DualSense/Edge USB hardware validation is pending.
 - AppImages are built against the build host's glibc/graphics stack. Compatibility
   with older distributions is not claimed. Other PipeWire Linux systems can
   build from source, but automatic system configuration is CachyOS-specific.
@@ -696,6 +753,9 @@ DSZ's protocol code was written from public documentation and code with open lic
 
 | Source | License | Used for |
 |---|---|---|
+| [MPRIS 2.2 specification](https://specifications.freedesktop.org/mpris/latest/) | Public interface specification | Explicit running-player selection, playback capabilities and per-player volume over session D-Bus |
+| [KWin scripting API](https://develop.kde.org/docs/plasma/kwin/api/) and [EWMH window properties](https://specifications.freedesktop.org/wm/latest/ar01s05.html) | Public API documentation | Optional foreground-window PID observations through KWin session D-Bus or X11 |
+| [ALSA PCM API](https://www.alsa-project.org/alsa-doc/alsa-lib/pcm.html) | Public API documentation; alsa-lib is LGPL-2.1-or-later | Nonblocking physical USB playback, exact hardware format selection and underrun recovery |
 | [DSZ 0.4.5](https://github.com/MaximumFreak/dsz/tree/v0.4.5) | MIT | Gyro bias recovery, Quick Charge validation, boosted haptic shaping and Windows USB actuator playback |
 | Linux [`hid-playstation`](https://github.com/torvalds/linux/blob/master/drivers/hid/hid-playstation.c) | GPL-2.0, read as documentation | Input and output report layouts, valid flags, status bits, CRC prefixes, feature reports, the DualShock 4 report, speaker and headset routing (volume, output path, preamp gain) and headset detection |
 | SDL [`SDL_hidapi_ps5.c`](https://github.com/libsdl-org/SDL/blob/main/src/joystick/hidapi/SDL_hidapi_ps5.c) | zlib | Edge Fn and paddle buttons, the connection-state byte, improved rumble emulation |

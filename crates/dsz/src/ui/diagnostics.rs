@@ -20,14 +20,32 @@ fn microphone_state(demand: bool, admitted: bool) -> State {
     if demand && admitted { State::Active } else { State::Ready }
 }
 
+struct PointerObservation { touchpad: State, gyro: State, physical: State }
+impl PointerObservation {
+    fn collect(dev: Option<&Device>) -> Self {
+        let mut out = Self { touchpad: State::NotChecked, gyro: State::NotChecked, physical: State::NotChecked };
+        let Some(d) = dev else { return out; };
+        if !matches!(*d.link.lock(), Link::Live) || d.dead.load(Ordering::Relaxed) || d.stop.load(Ordering::Relaxed) {
+            return out;
+        }
+        let live = d.snapshot();
+        out.touchpad = if live.touch_mouse_active { State::Active } else { State::Disabled };
+        out.gyro = if live.gyro_active && !live.gyro_stick { State::Active } else { State::Disabled };
+        let status = d.virt.status.lock();
+        out.physical = if status.hidden { State::Active }
+            else if status.hide_note.is_some() { State::Unavailable } else { State::Disabled };
+        out
+    }
+}
+
 struct Observation {
     link: State, driver: State, playback: State, microphone: State, virtual_output: State,
-    attempts: u32, input_hz: u32, retry_pending: bool,
+    attempts: u32, input_hz: u32, retry_pending: bool, pointer: PointerObservation,
 }
 impl Observation {
     fn collect(dev: Option<&Device>) -> Self {
         let mut out = Self { link: State::Waiting, driver: State::NotChecked, playback: State::NotChecked,
-            microphone: State::NotChecked, virtual_output: State::NotChecked, attempts: 0, input_hz: 0, retry_pending: false };
+            microphone: State::NotChecked, virtual_output: State::NotChecked, attempts: 0, input_hz: 0, retry_pending: false, pointer: PointerObservation::collect(dev) };
         let Some(d) = dev else { return out; };
         out.link = match &*d.link.lock() { Link::Live => State::Ready, Link::Opening => State::Waiting, _ => State::Unavailable };
         out.input_hz = d.stats.input_hz.load(Ordering::Relaxed);
@@ -56,9 +74,10 @@ impl Observation {
     /// Fixed vocabulary deliberately excludes identities, paths, profile names,
     /// daemon error strings and all captured audio/input samples.
     fn report(&self) -> String {
-        format!("DualWave {}\nPlatform: {}\nController: {}\nInput rate: {} Hz\nIsolated media: {}\nPlayback endpoint: {}\nMicrophone endpoint: {}\nVirtual controller: {}\nAudio connection attempts: {}\nAudio retry queued: {}\n",
+        format!("DualWave {}\nPlatform: {}\nController: {}\nInput rate: {} Hz\nIsolated media: {}\nPlayback endpoint: {}\nMicrophone endpoint: {}\nVirtual controller: {}\nAudio connection attempts: {}\nAudio retry queued: {}\nDualWave touchpad mouse: {}\nDualWave gyro mouse: {}\nPhysical input isolation: {}\nExternal pointer source: Not checked\n",
             env!("CARGO_PKG_VERSION"), std::env::consts::OS, self.link.label(), self.input_hz,
-            self.driver.label(), self.playback.label(), self.microphone.label(), self.virtual_output.label(), self.attempts, self.retry_pending)
+            self.driver.label(), self.playback.label(), self.microphone.label(), self.virtual_output.label(), self.attempts, self.retry_pending,
+            self.pointer.touchpad.label(), self.pointer.gyro.label(), self.pointer.physical.label())
     }
 }
 
@@ -95,6 +114,19 @@ impl App {
         diagnostic_row(ui, "Headphone endpoint", "Ready means available; Active means an application is sending playback.", facts.playback);
         diagnostic_row(ui, "Microphone endpoint", "Endpoint availability does not grant capture permission or remove mute.", facts.microphone);
         diagnostic_row(ui, "Virtual controller", "The actual output state; choosing a target alone does not make it available.", facts.virtual_output);
+        #[cfg(target_os = "linux")]
+        {
+            ui.add_space(12.0);
+            widgets::card(ui, tr("Mouse input sources"), tr("Check which controller features can move the pointer."), |ui| {
+                diagnostic_row(ui, "DualWave touchpad mouse", "Current touchpad mode, including temporary button toggles. Active means touchpad motion can move the pointer.", facts.pointer.touchpad);
+                diagnostic_row(ui, "DualWave gyro mouse", "Active means gyro motion can move the pointer. Gyro output to a stick is excluded.", facts.pointer.gyro);
+                diagnostic_row(ui, "Physical input exclusive", "Active means DualWave acquired physical input isolation. Device nodes remain visible.", facts.pointer.physical);
+                diagnostic_row(ui, "External mouse input", "Linux touchpad handling and Steam Input settings are not observed here.", State::NotChecked);
+                widgets::muted(ui, tr("To check touchpad input, turn off Touchpad as mouse in Motion & touch, then touch the pad. If the pointer still moves, fully exit Steam and test again. If it continues, check desktop touchpad settings and other controller tools."));
+                widgets::muted(ui, tr("Stick mouse modes, button mappings, macros and turn tests can also move the pointer. These rows show the applied controller state, not the profile being edited."));
+                if ui.button(tr("Motion & touch")).clicked() { self.page = Page::Input; self.detailed = true; }
+            });
+        }
         if let Some(d) = dev {
             let applied = self.engine.profile_name_for(d);
             widgets::row(ui, tr("Applied profile"), tr("The profile currently assigned to this controller."), |ui| { ui.add(egui::Label::new(&applied).truncate()).on_hover_text(&applied); });
@@ -129,6 +161,33 @@ impl App {
 mod tests {
     use super::*;
     #[test]
+    fn pointer_diagnostics_use_live_state_and_do_not_guess_external_sources() {
+        let offline = PointerObservation::collect(None);
+        assert_eq!(offline.touchpad, State::NotChecked);
+        assert_eq!(offline.gyro, State::NotChecked);
+        assert_eq!(offline.physical, State::NotChecked);
+        let d = Device::for_test(ds_proto::Connection::Bluetooth, "");
+        d.live.lock().touch_mouse_active = true;
+        d.live.lock().gyro_active = true;
+        let facts = PointerObservation::collect(Some(&d));
+        assert_eq!(facts.touchpad, State::Active);
+        assert_eq!(facts.gyro, State::Active);
+        assert_eq!(facts.physical, State::Disabled);
+        d.virt.status.lock().hide_note = Some("private driver error".into());
+        assert_eq!(PointerObservation::collect(Some(&d)).physical, State::Unavailable);
+        d.virt.status.lock().hide_note = None;
+        d.live.lock().gyro_stick = true;
+        d.virt.status.lock().hidden = true;
+        let facts = PointerObservation::collect(Some(&d));
+        assert_eq!(facts.gyro, State::Disabled);
+        assert_eq!(facts.physical, State::Active);
+        *d.link.lock() = Link::Quiet;
+        let facts = PointerObservation::collect(Some(&d));
+        assert_eq!(facts.touchpad, State::NotChecked, "stale live flags must not claim activity");
+        assert_eq!(facts.gyro, State::NotChecked);
+    }
+
+    #[test]
     fn diagnostics_actions_queue_recovery_and_keep_capture_permission() {
         let dir = std::env::temp_dir().join(format!("dualwave-diagnostics-actions-{}", std::process::id()));
         let mut app = App::new(crate::engine::Engine::new(dir.clone()));
@@ -151,6 +210,7 @@ mod tests {
         }
         assert!(d.native_audio_retry_pending());
         assert!(d.native_audio().is_none(), "render must not open PipeWire");
+        assert_eq!(d.stats.writes.load(Ordering::Relaxed), 0, "diagnostics must not send controller reports");
         assert!(!d.microphone.enabled());
         assert_eq!(d.native_audio_attempts.load(Ordering::Relaxed), 0);
         drop(app);
@@ -187,5 +247,7 @@ mod tests {
         let report = facts.report();
         for secret in ["01:23", "/home", "sensitive", "private"] { assert!(!report.contains(secret)); }
         assert!(report.contains("Playback endpoint: Unavailable"));
+        assert!(report.contains("DualWave touchpad mouse: Disabled"));
+        assert!(report.contains("External pointer source: Not checked"));
     }
 }

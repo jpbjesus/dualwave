@@ -122,3 +122,13 @@ fn settings_transaction_preserves_concurrent_background_bookkeeping() {
     assert!(!e.settings.read().show_tips);
     let _ = std::fs::remove_dir_all(&e.data_dir);
 }
+
+#[test]
+fn agent_player_mappings_require_an_explicit_valid_player_name() {
+    let mut mapping = Mapping { action: Action::Player { player: "org.mpris.MediaPlayer2.vlc".into(), command: PlayerCommand::PlayPause }, ..Default::default() };
+    assert!(validate_mapping(&mapping).is_ok());
+    for name in ["", "org.freedesktop.DBus", ":1.42", "org.mpris.MediaPlayer2.bad/name"] {
+        mapping.action = Action::Player { player: name.into(), command: PlayerCommand::Next };
+        assert!(validate_mapping(&mapping).is_err());
+    }
+}

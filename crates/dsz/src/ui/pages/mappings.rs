@@ -21,6 +21,7 @@ enum AKind {
     ScrollUp,
     ScrollDown,
     Media,
+    Player,
     Next,
     Prev,
     Gyro,
@@ -42,6 +43,7 @@ fn akind(a: &Action) -> AKind {
         Action::ScrollUp => AKind::ScrollUp,
         Action::ScrollDown => AKind::ScrollDown,
         Action::Media { .. } => AKind::Media,
+        Action::Player { .. } => AKind::Player,
         Action::NextProfile => AKind::Next,
         Action::PreviousProfile => AKind::Prev,
         Action::ToggleGyroMouse => AKind::Gyro,
@@ -55,7 +57,7 @@ fn akind(a: &Action) -> AKind {
     }
 }
 
-const KINDS: [(AKind, &str); 17] = [
+const KINDS: [(AKind, &str); 18] = [
     (AKind::None, "Nothing"),
     (AKind::Gamepad, "PlayStation button"),
     (AKind::Xbox, "Xbox button"),
@@ -65,6 +67,7 @@ const KINDS: [(AKind, &str); 17] = [
     (AKind::ScrollUp, "Scroll up"),
     (AKind::ScrollDown, "Scroll down"),
     (AKind::Media, "Media key"),
+    (AKind::Player, "Media player"),
     (AKind::Next, "Next profile"),
     (AKind::Prev, "Previous profile"),
     (AKind::Gyro, "Toggle gyro"),
@@ -94,8 +97,10 @@ fn key_label(vk: u16) -> String {
 pub(crate) fn action_editor(
     ui: &mut egui::Ui, m: &mut Mapping, i: usize, profile_names: &[String],
     p_name: &str, virtual_on: bool, xbox_on: bool, can_hide: bool,
-    recording: bool, original_label: bool,
+    recording: bool, original_label: bool, engine: &crate::engine::Engine,
 ) -> Option<bool> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = engine;
     let mut capture = None;
     let mut k = akind(&m.action);
     let before = k;
@@ -110,6 +115,7 @@ pub(crate) fn action_editor(
             .selected_text(crate::i18n::tr(if primary { "More actions" } else if original_label && k == AKind::None { "Original" } else { KINDS.iter().find(|x| x.0 == k).map_or("More actions", |x| x.1) }))
             .show_ui(ui, |ui| {
                 for (kind, label) in KINDS {
+                    if kind == AKind::Player && !cfg!(target_os = "linux") { continue; }
                     if matches!(kind, AKind::Key | AKind::Mouse | AKind::Gamepad | AKind::Macro) { continue; }
                     ui.selectable_value(&mut k, kind, crate::i18n::tr(if original_label && kind == AKind::None { "Original" } else { label }));
                 }
@@ -125,6 +131,7 @@ pub(crate) fn action_editor(
             AKind::ScrollUp => Action::ScrollUp,
             AKind::ScrollDown => Action::ScrollDown,
             AKind::Media => Action::Media { key: MediaKey::PlayPause },
+            AKind::Player => { m.mode = HoldStyle::Tap; Action::Player { player: String::new(), command: PlayerCommand::PlayPause } },
             AKind::Next => Action::NextProfile,
             AKind::Prev => Action::PreviousProfile,
             AKind::Gyro => Action::ToggleGyroMouse,
@@ -182,6 +189,33 @@ pub(crate) fn action_editor(
                                 ui.selectable_value(key, k, crate::i18n::tr(k.label()));
                             }
                         });
+                }
+                Action::Player { player, command } => {
+                    egui::ComboBox::from_id_salt(("map-player-command", i)).width(150.0)
+                        .selected_text(crate::i18n::tr(command.label())).show_ui(ui, |ui| {
+                            for value in PlayerCommand::ALL { ui.selectable_value(command, value, crate::i18n::tr(value.label())); }
+                        });
+                    #[cfg(target_os = "linux")]
+                    {
+                        let status = engine.media_players.snapshot();
+                        let label = status.players.iter().find(|p| p.name == *player).map(|p| p.label())
+                            .unwrap_or_else(|| if player.is_empty() { crate::i18n::tr("Choose a player").into() }
+                                else { player.strip_prefix("org.mpris.MediaPlayer2.").unwrap_or(player).to_string() });
+                        egui::ComboBox::from_id_salt(("map-player", i)).width(220.0).truncate().selected_text(label)
+                            .show_ui(ui, |ui| {
+                                for entry in &status.players { ui.selectable_value(player, entry.name.clone(), entry.label()).on_hover_text(&entry.name); }
+                            });
+                        if ui.add_enabled(!status.refreshing, egui::Button::new(crate::i18n::tr(if status.refreshing { "Searching for players…" } else { "Refresh players" }))).clicked() {
+                            engine.media_players.refresh();
+                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                        }
+                        if status.refreshing { ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)); }
+                        if status.players.is_empty() { muted(ui, crate::i18n::tr("Open a media player, then refresh the list.")); }
+                        if status.failed && status.failed_player.as_ref().is_none_or(|name| name == player) { note(ui, crate::i18n::tr("The player is unavailable or does not support this command."), warn_color()); }
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    { let _ = player; muted(ui, crate::i18n::tr("Selected-player control is available on Linux.")); }
+                    muted(ui, crate::i18n::tr("Controls only the selected player. If it closes, no other player receives the command. Volume changes in 5% steps."));
                 }
                 Action::Profile { name } => {
                     fit(ui, 170.0);
@@ -524,7 +558,7 @@ impl App {
                             }
                         });
                         ui.add_space(8.0);
-                        if let Some(record) = action_editor(ui, m, i, &profile_names, &p_name, virtual_on, xbox_on, can_hide, self.capture_key == Some(i), false) {
+                        if let Some(record) = action_editor(ui, m, i, &profile_names, &p_name, virtual_on, xbox_on, can_hide, self.capture_key == Some(i), false, &self.engine) {
                             capture = Some(if record { Some(i) } else { None });
                         }
                         if !matches!(m.action, Action::Macro { .. }) {
@@ -744,4 +778,28 @@ mod macro_tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod player_tests {
+    use super::*;
+    #[test]
+    fn player_editor_preserves_the_destination_without_automatic_discovery() {
+        let dir = std::env::temp_dir().join(format!("dualwave-player-editor-{}", std::process::id()));
+        let engine = crate::engine::Engine::new(dir.clone());
+        let ctx = egui::Context::default();
+        crate::ui::theme::install(&ctx, 1.0);
+        let action = Action::Player { player: "org.mpris.MediaPlayer2.vlc".into(), command: PlayerCommand::PlayPause };
+        let mut mapping = Mapping { action: action.clone(), ..Default::default() };
+        let output = ctx.run(egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 500.0))), ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| { action_editor(ui, &mut mapping, 0, &[], "Media", false, false, false, false, false, &engine); });
+        });
+        assert_eq!(mapping.action, action);
+        assert!(!engine.media_players.snapshot().refreshing);
+        assert!(engine.media_players.snapshot().players.is_empty());
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == crate::i18n::tr("Refresh players"))));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

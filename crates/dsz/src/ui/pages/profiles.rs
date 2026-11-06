@@ -131,6 +131,11 @@ impl App {
                 }
                 self.edit_pin = None;
             }
+            let favorite = engine.settings.read().favorite_profiles.contains(&prof.name);
+            if ui.selectable_label(favorite, crate::i18n::tr("Favorite"))
+                .on_hover_text(crate::i18n::tr(if favorite { "Remove from favorites" } else { "Add to favorites" })).clicked() {
+                engine.set_profile_favorite(&prof.name, !favorite);
+            }
             if button(ui, crate::i18n::tr("Edit")).clicked() {
                 self.edit_pin = Some(prof.name.clone());
                 self.page = crate::ui::Page::Overview;
@@ -265,7 +270,7 @@ impl App {
         });
         ui.add_space(10.0);
 
-        let all = engine.profiles.all();
+        let all: Vec<_> = engine.profile_menu_names().iter().filter_map(|name| engine.profiles.find(name)).collect();
         let width = ui.available_width();
         for prof in &all {
             let is_active = dev.is_some() && prof.name == active;
@@ -381,15 +386,16 @@ impl App {
                     );
 
                 });
-                if width >= 850.0 { self.profile_row_actions(ui, prof, dev, is_active, &engine); }
+                if width >= 950.0 { self.profile_row_actions(ui, prof, dev, is_active, &engine); }
             });
-            if width < 850.0 { self.profile_row_actions(ui, prof, dev, is_active, &engine); }
+            if width < 950.0 { self.profile_row_actions(ui, prof, dev, is_active, &engine); }
             if self.confirm_delete.as_deref() == Some(prof.name.as_str()) {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(crate::i18n::tr("Delete this profile?")).color(bad_color()));
                     if danger_button(ui, crate::i18n::tr("Delete")).clicked() {
                         if engine.profiles.delete(&prof.name) {
+                            engine.set_profile_favorite(&prof.name, false);
                             let first = engine.profiles.fallback_name();
                             engine.rename_profile_refs(&prof.name, &first);
                             if self.edit_pin.as_deref()
@@ -430,6 +436,16 @@ impl App {
                 let mut s = engine.settings.write();
                 let mut changed = false;
                 changed |= toggle_row(ui, crate::i18n::tr("Switch automatically"), "", &mut s.auto_profiles);
+                if cfg!(target_os = "linux") {
+                    changed |= toggle_row(ui, crate::i18n::tr("Only the focused game"),
+                        crate::i18n::tr("Use the assigned profile when no game is in focus. Manual choices keep priority until the game closes."), &mut s.focused_game_only);
+                    if s.focused_game_only {
+                        row(ui, crate::i18n::tr("Window focus"), crate::i18n::tr("Available on KDE Plasma 6 and X11. Other Wayland desktops may not expose focus."), |ui| {
+                            pill(ui, crate::i18n::tr(status.focus.label()), if status.focus == crate::games::FocusState::Unavailable { warn_color() } else { muted_color() });
+                        });
+                        muted(ui, crate::i18n::tr("On KDE Wayland, a temporary KWin observer reads only the active window's process ID. It is removed when this option is turned off or DualWave exits."));
+                    }
+                }
                 if let Some((p, exe)) = &*engine.game_override.read() {
                     note(ui, &crate::localized_format!("{exe} is running → \"{p}\"", "{exe} em execução → \"{p}\"", "{exe} en ejecución → \"{p}\""; "{exe} em execução → \"{p}\""), violet_color());
                 }
@@ -621,5 +637,43 @@ impl App {
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clicking_favorite_marks_the_profile_without_applying_it() {
+        let dir = std::env::temp_dir().join(format!("dualwave-favorite-ui-{}", std::process::id()));
+        let engine = crate::engine::Engine::new(dir.clone());
+        let mut app = App::new(engine.clone());
+        let profile = engine.profiles.find("DualSense").unwrap();
+        let default = engine.settings.read().default_profile.clone();
+        let ctx = egui::Context::default();
+        crate::ui::theme::install(&ctx, 1.0);
+        let render = |app: &mut App, events| ctx.run(egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 100.0))),
+            events, ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.profile_row_actions(ui, &profile, None, false, &engine));
+        });
+        let output = render(&mut app, Vec::new());
+        let position = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text == crate::i18n::tr("Favorite") => Some(text.pos + text.galley.rect.center().to_vec2()),
+            _ => None,
+        }).expect("favorite control visible");
+        for expected in [true, false] {
+            for pressed in [true, false] {
+                render(&mut app, vec![egui::Event::PointerMoved(position), egui::Event::PointerButton {
+                    pos: position, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            assert_eq!(engine.favorite_profile_names().contains(&profile.name), expected);
+            assert_eq!(engine.settings.read().default_profile, default);
+        }
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

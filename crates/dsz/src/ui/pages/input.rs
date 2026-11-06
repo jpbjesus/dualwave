@@ -973,6 +973,24 @@ impl App {
                         match s.mode {
                             StickMode::Flick => {
                                 slider_row(ui, crate::i18n::tr("Pixels per full turn"), "", &mut s.flick_pixels_per_turn, 100.0..=20000.0, " px");
+                                ui.add_enabled_ui(dev.is_some_and(|d| !d.dead.load(Ordering::Relaxed)
+                                    && self.engine.profile_name_for(d) == p.name), |ui| {
+                                    if let Some(device) = dev {
+                                        let mut calibration = device.flick_calibration.lock();
+                                        if calibration.is_some() {
+                                            if ui.button(crate::i18n::tr("Cancel turn test")).clicked() { *calibration = None; }
+                                        } else if ui.button(crate::i18n::tr("Test 360° turn")).clicked() {
+                                            if let Some(mut turn) = crate::flick_calibration::Turn::new(&p.name,
+                                                s.mode == StickMode::Flick, s.flick_pixels_per_turn, std::time::Instant::now()) {
+                                                turn.left = left;
+                                                *calibration = Some(turn);
+                                            }
+                                        }
+                                    } else {
+                                        let _ = ui.button(crate::i18n::tr("Test 360° turn"));
+                                    }
+                                });
+                                muted(ui, crate::i18n::tr("Return to the game within 5 seconds. Keep the sticks still. The view should make one full turn in 1 second. Adjust pixels per full turn and repeat."));
                                 muted(ui, crate::i18n::tr("Push toward an edge to turn, then rotate the stick. Use gyro mouse to aim vertically. Calibrate with the game's mouse acceleration off."));
                             }
                             StickMode::Mouse => {

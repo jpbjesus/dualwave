@@ -764,6 +764,12 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
         Action::ScrollUp => sim::wheel(120, false),
         Action::ScrollDown => sim::wheel(-120, false),
         Action::Media { key } => sim::key(key.vk(), true),
+        Action::Player { player, command } => {
+            #[cfg(target_os = "linux")]
+            engine.media_players.send(player, *command);
+            #[cfg(not(target_os = "linux"))]
+            { let _ = (player, command); engine.warn_toast(crate::i18n::tr("Selected-player control is available on Linux.")); }
+        }
         Action::NextProfile => engine.cycle_profile(device, 1),
         Action::PreviousProfile => engine.cycle_profile(device, -1),
         Action::ToggleGyroMouse => {
@@ -1023,6 +1029,20 @@ impl Pipeline {
         }
 
         let profile = self.cache.get(engine, device);
+        {
+            let mut calibration = device.flick_calibration.lock();
+            if let Some(turn) = calibration.as_mut() {
+                let stick = if turn.left { &profile.sticks.left } else { &profile.sticks.right };
+                let enabled = stick.mode == StickMode::Flick
+                    && !device.stop.load(Ordering::Relaxed) && !device.dead.load(Ordering::Relaxed);
+                match turn.step(&profile.name, enabled, stick.flick_pixels_per_turn, now) {
+                    Some(dx) if dx != 0 => sim::mouse_move(dx, 0),
+                    Some(_) => {},
+                    None => *calibration = None,
+                }
+            }
+        }
+
         // A button toggle is temporary. An explicit touchpad-mode edit or
         // a different profile takes precedence, while unrelated edits keep it.
         if self.built_for.as_ref().is_some_and(|b| b.name != profile.name || b.touchpad.mode != profile.touchpad.mode) {
@@ -1670,6 +1690,25 @@ mod turn_off_tests {
     fn step(rig: &mut Rig, prev: &InputState, now_s: &InputState, at: Instant) {
         rig.pipe
             .process(&rig.engine, &rig.device, now_s, prev, None, at);
+    }
+
+    #[test]
+    fn flick_test_starts_idle_and_profile_changes_cancel_pending_motion() {
+        let mut r = rig(Connection::Bluetooth, "", vec![]);
+        assert!(r.device.flick_calibration.lock().is_none());
+        let name = r.engine.profile_name_for(&r.device);
+        let mut profile = (*r.engine.profiles.find(&name).unwrap()).clone();
+        profile.sticks.right.mode = StickMode::Flick;
+        r.engine.profiles.update(profile);
+        let now = Instant::now();
+        *r.device.flick_calibration.lock() = crate::flick_calibration::Turn::new(&name, true, 4320.0, now);
+        let input = centered(&[]);
+        step(&mut r, &input, &input, now);
+        assert!(r.device.flick_calibration.lock().is_some());
+        let other = r.engine.profiles.add(Profile::named("Other flick profile"));
+        r.engine.set_device_profile(&r.device, &other);
+        step(&mut r, &input, &input, now + Duration::from_millis(10));
+        assert!(r.device.flick_calibration.lock().is_none());
     }
 
     #[test]

@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 use crate::engine::Engine;
-use crate::profile::{Action, MacroInput, Mapping, Profile};
+use crate::profile::{Action, MacroInput, Mapping, Profile, PlayerCommand};
 
 mod transport;
 mod mcp;
@@ -49,6 +49,7 @@ fn merge(target: &mut Value, patch: &Value) {
 fn validate_mapping(m: &Mapping) -> Result<(), String> {
     let key_ok = |vk: u16| (1..=254).contains(&vk);
     match &m.action {
+        Action::Player { player, .. } if !crate::profile::valid_player_target(player) => return Err("Select a valid MPRIS player destination".into()),
         Action::Run { .. } => return Err("Executable actions cannot be created through agent access".into()),
         Action::Key { vk, .. } if !key_ok(*vk) => return Err("Key code must be between 1 and 254".into()),
         Action::Macro { steps } => {
@@ -85,6 +86,7 @@ pub fn execute(e: &Engine, operation: &str, args: Value) -> Result<Value, String
         "describe" => Ok(json!({"tools":tools(),"default_profile":Profile::default(),"default_mapping":Mapping::default(),
             "buttons":ds_proto::input::Button::ALL.iter().map(|b| json!({"value":b,"label":b.short_name()})).collect::<Vec<_>>(),
             "keys":crate::inputsim::key_catalog().into_iter().map(|vk|json!({"vk":vk,"name":crate::inputsim::key_name(vk)})).collect::<Vec<_>>(),
+            "player_commands":PlayerCommand::ALL, "player_action_example":{"kind":"player","player":"org.mpris.MediaPlayer2.vlc","command":"PlayPause"},
             "writable_settings":WRITABLE_SETTINGS})),
         "list_devices" => Ok(json!({"devices":e.device_list().iter().map(|d| json!({"id":d.id,"name":d.info.product,"profile":e.profile_name_for(d)})).collect::<Vec<_>>()})),
         "list_profiles" => Ok(json!({"profiles":e.profiles.names(),"revision":e.profiles.revision()})),

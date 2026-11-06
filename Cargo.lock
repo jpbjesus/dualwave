@@ -991,15 +991,16 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "ds-proto"
-version = "0.4.5-alpha.3"
+version = "0.4.5-alpha.4"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "dsz"
-version = "0.4.5-alpha.3"
+version = "0.4.5-alpha.4"
 dependencies = [
+ "alsa",
  "cc",
  "cpal",
  "crossbeam-channel",
@@ -1016,13 +1017,16 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "windows-sys 0.59.0",
  "winresource",
+ "x11rb",
+ "zbus",
 ]
 
 [[package]]
 name = "dualwave"
-version = "0.4.5-alpha.3"
+version = "0.4.5-alpha.4"
 dependencies = [
  "cc",
  "ds-proto",

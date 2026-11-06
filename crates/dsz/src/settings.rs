@@ -97,6 +97,8 @@ pub struct Settings {
     pub minimize_to_tray: bool,
     /// Profile used by controllers with no assignment.
     pub default_profile: String,
+    /// Personal shortcuts, in the order they were added.
+    pub favorite_profiles: Vec<String>,
     /// Controller MAC -> profile name.
     pub device_profiles: BTreeMap<String, String>,
     /// Controller MAC -> friendly name.
@@ -107,6 +109,7 @@ pub struct Settings {
     pub agent_enabled: bool,
     pub udp_port: u16,
     pub auto_profiles: bool,
+    pub focused_game_only: bool,
     pub games: Vec<GameRule>,
     /// Power off a Bluetooth controller after this many idle minutes (0 = never).
     pub idle_off_minutes: u32,
@@ -173,12 +176,14 @@ impl Default for Settings {
             close_to_tray: true,
             minimize_to_tray: false,
             default_profile: DEFAULT_PROFILE.into(),
+            favorite_profiles: Vec::new(),
             device_profiles: BTreeMap::new(),
             device_names: BTreeMap::new(),
             udp_enabled: true,
             agent_enabled: false,
             udp_port: 6969,
             auto_profiles: true,
+            focused_game_only: false,
             games: Vec::new(),
             idle_off_minutes: 15,
             quick_charge: false,

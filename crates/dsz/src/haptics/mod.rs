@@ -31,7 +31,6 @@ pub mod opus;
 pub mod probe;
 pub mod streamer;
 pub mod synth;
-#[cfg(any(windows, test))]
 pub mod usb;
 
 /// One log line with the game feedback settings a controller plays with, so

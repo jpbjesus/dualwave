@@ -128,7 +128,8 @@ impl ksni::Tray for DualWaveTray {
         use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
         let current = self.engine.device_list().first().map(|device| self.engine.profile_name_for(device))
             .unwrap_or_else(|| self.engine.settings.read().default_profile.clone());
-        let profiles = self.engine.profiles.names().into_iter().take(50).map(|name| {
+        let favorite_count = self.engine.favorite_profile_names().len();
+        let mut profiles: Vec<ksni::MenuItem<Self>> = self.engine.profile_menu_names().into_iter().take(50).map(|name| {
             CheckmarkItem {
                 checked: name == current,
                 label: name.clone(),
@@ -146,6 +147,9 @@ impl ksni::Tray for DualWaveTray {
                 ..Default::default()
             }.into()
         }).collect();
+        if favorite_count > 0 && favorite_count < profiles.len() {
+            profiles.insert(favorite_count, ksni::MenuItem::Separator);
+        }
         vec![
             StandardItem {
                 label: crate::i18n::tr("Open DSZ").replace("DSZ", "DualWave"),
