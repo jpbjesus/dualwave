@@ -86,6 +86,7 @@ pub fn execute(e: &Engine, operation: &str, args: Value) -> Result<Value, String
         "describe" => Ok(json!({"tools":tools(),"default_profile":Profile::default(),"default_mapping":Mapping::default(),
             "buttons":ds_proto::input::Button::ALL.iter().map(|b| json!({"value":b,"label":b.short_name()})).collect::<Vec<_>>(),
             "keys":crate::inputsim::key_catalog().into_iter().map(|vk|json!({"vk":vk,"name":crate::inputsim::key_name(vk)})).collect::<Vec<_>>(),
+            "game_volume_actions":[{"kind":"game_volume_up"},{"kind":"game_volume_down"}],
             "player_commands":PlayerCommand::ALL, "player_action_example":{"kind":"player","player":"org.mpris.MediaPlayer2.vlc","command":"PlayPause"},
             "writable_settings":WRITABLE_SETTINGS})),
         "list_devices" => Ok(json!({"devices":e.device_list().iter().map(|d| json!({"id":d.id,"name":d.info.product,"profile":e.profile_name_for(d)})).collect::<Vec<_>>()})),

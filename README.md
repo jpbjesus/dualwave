@@ -52,6 +52,7 @@ consult its release notes before downloading.
 | Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
 | Haptics | Game and system audio, button feedback, trigger texture and rumble conversion; optional virtual DualSense game haptics to the physical USB controller on Linux (hardware validation pending) |
 | Agent configuration | Opt-in local CLI and stdio MCP for Codex, Claude and other agents; edit profiles, actions and macros while the app is open, with revision checks to protect recent edits |
+| Active game volume (Linux) | Opt-in actions adjust only the focused detected game and its child processes by 5 percentage points, preserving channel balance and mute; KDE Plasma Wayland or X11; PulseAudio/PipeWire-Pulse playback streams; no system-volume fallback, no change when focus or audio cannot be identified |
 | Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; a clickable controller, keycap previews, shortcut presets, key capture and visual macro steps with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
 | Media players | Optional Linux actions for one selected running MPRIS player: play/pause, next/previous track, stop and player volume in 5% steps; no fallback to other players or automatic player launch |
 | Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third; optional flick stick with calibrated pixels per full turn, horizontal rotation and a 100 ms initial turn; a temporary 360° sensitivity test with a five-second delay |
@@ -336,7 +337,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 Example download for the current alpha release:
 
 ```sh
-release=v0.4.5-alpha.4
+release=v0.4.5-alpha.5
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -351,10 +352,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.5-alpha.4 --dry-run
-sh install-dualwave.sh --version v0.4.5-alpha.4
+sh install-dualwave.sh --version v0.4.5-alpha.5 --dry-run
+sh install-dualwave.sh --version v0.4.5-alpha.5
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.5-alpha.4 --format native --dry-run
+sh install-dualwave.sh --version v0.4.5-alpha.5 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```
@@ -467,7 +468,7 @@ cargo build --release --locked -p dsz -p dualwave
 <summary>Dependency example: CachyOS / Arch Linux</summary>
 
 ```sh
-sudo pacman -S --needed base-devel rust pipewire libpipewire opus
+sudo pacman -S --needed base-devel rust pipewire libpipewire libpulse opus
 ```
 
 Package names and system integration differ between distributions.
@@ -544,6 +545,15 @@ This appends a mapping without replacing the others. Choose the button you want;
 `remove_mapping` with an index to remove one. For shells where JSON quoting is
 awkward, save the arguments to a UTF-8 file and use
 `dsz --agent set_mapping --file arguments.json`.
+
+On Linux, mapping actions `{"kind":"game_volume_up"}` and
+`{"kind":"game_volume_down"}` change only the game in the foreground. They require
+a detected game (or an enabled game rule), identifiable playback process PIDs,
+and a running PulseAudio or PipeWire-Pulse server. Proton helpers are included
+only when they descend from the focused game's detected process. Unidentified
+or sandboxed audio processes are left alone. Raises stop at 100%; existing
+boosted volumes can still be lowered. Muted streams stay muted. These actions
+are separate from media keys, which continue to control system volume.
 
 `create_profile` optionally copies a `source`. `patch_profile` merges objects and
 replaces arrays; unknown fields are rejected. Profile edits affect controllers
@@ -753,6 +763,7 @@ DSZ's protocol code was written from public documentation and code with open lic
 
 | Source | License | Used for |
 |---|---|---|
+| [PulseAudio introspection and volume API](https://freedesktop.org/software/pulseaudio/doxygen/introspect.html) and [process properties](https://freedesktop.org/software/pulseaudio/doxygen/proplist_8h.html) | Public API documentation; libpulse is LGPL-2.1-or-later | Per-game playback volume through native PulseAudio/PipeWire-Pulse, matched by process PID |
 | [MPRIS 2.2 specification](https://specifications.freedesktop.org/mpris/latest/) | Public interface specification | Explicit running-player selection, playback capabilities and per-player volume over session D-Bus |
 | [KWin scripting API](https://develop.kde.org/docs/plasma/kwin/api/) and [EWMH window properties](https://specifications.freedesktop.org/wm/latest/ar01s05.html) | Public API documentation | Optional foreground-window PID observations through KWin session D-Bus or X11 |
 | [ALSA PCM API](https://www.alsa-project.org/alsa-doc/alsa-lib/pcm.html) | Public API documentation; alsa-lib is LGPL-2.1-or-later | Nonblocking physical USB playback, exact hardware format selection and underrun recovery |

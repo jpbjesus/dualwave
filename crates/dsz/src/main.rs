@@ -40,6 +40,8 @@ mod inputsim;
 mod pipeline;
 #[cfg(target_os = "linux")]
 mod mpris;
+#[cfg(target_os = "linux")]
+mod game_volume;
 #[cfg(windows)]
 mod platform;
 #[cfg(target_os = "linux")]

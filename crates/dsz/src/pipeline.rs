@@ -770,6 +770,18 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
             #[cfg(not(target_os = "linux"))]
             { let _ = (player, command); engine.warn_toast(crate::i18n::tr("Selected-player control is available on Linux.")); }
         }
+        Action::GameVolumeUp | Action::GameVolumeDown => {
+            #[cfg(target_os = "linux")]
+            {
+                engine.request_game_discovery();
+                let status = engine.game_status.read();
+                let pids = status.instances.iter().filter(|(_, exe)| status.games.iter().any(|game| game.exe.eq_ignore_ascii_case(exe)))
+                    .map(|(pid, _)| *pid).collect();
+                engine.game_volume.send(matches!(a, Action::GameVolumeUp), pids);
+            }
+            #[cfg(not(target_os = "linux"))]
+            engine.warn_toast(crate::i18n::tr("Active game volume is available on Linux."));
+        }
         Action::NextProfile => engine.cycle_profile(device, 1),
         Action::PreviousProfile => engine.cycle_profile(device, -1),
         Action::ToggleGyroMouse => {

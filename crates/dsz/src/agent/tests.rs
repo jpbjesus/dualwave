@@ -132,3 +132,25 @@ fn agent_player_mappings_require_an_explicit_valid_player_name() {
         assert!(validate_mapping(&mapping).is_err());
     }
 }
+
+#[test]
+fn active_game_volume_actions_are_discoverable_and_configurable() {
+    let e = engine("game-volume");
+    let description = execute(&e, "describe", json!({})).unwrap();
+    assert_eq!(description["game_volume_actions"], json!([{"kind":"game_volume_up"}, {"kind":"game_volume_down"}]));
+    let name = e.profiles.names()[0].clone();
+    let before = e.profiles.find(&name).unwrap();
+    for (button, kind) in [("DpadUp", "game_volume_up"), ("DpadDown", "game_volume_down")] {
+        execute(&e, "set_mapping", json!({"profile":name,"expected_revision":e.profiles.revision(),
+            "mapping":{"button":button,"with":["Create"],"mode":"Turbo","mute":true,"action":{"kind":kind}}})).unwrap();
+    }
+    let profile = e.profiles.find(&name).unwrap();
+    assert_eq!(profile.mappings.len(), before.mappings.len() + 2);
+    assert_eq!(profile.lighting, before.lighting);
+    assert_eq!(profile.mappings[before.mappings.len()].action, Action::GameVolumeUp);
+    assert_eq!(profile.mappings[before.mappings.len() + 1].action, Action::GameVolumeDown);
+    e.flush();
+    let store = crate::profile::ProfileStore::load(&e.data_dir.join("profiles"));
+    assert_eq!(*store.find(&name).unwrap(), *profile);
+    let _ = std::fs::remove_dir_all(&e.data_dir);
+}

@@ -22,6 +22,8 @@ enum AKind {
     ScrollDown,
     Media,
     Player,
+    GameVolumeUp,
+    GameVolumeDown,
     Next,
     Prev,
     Gyro,
@@ -44,6 +46,8 @@ fn akind(a: &Action) -> AKind {
         Action::ScrollDown => AKind::ScrollDown,
         Action::Media { .. } => AKind::Media,
         Action::Player { .. } => AKind::Player,
+        Action::GameVolumeUp => AKind::GameVolumeUp,
+        Action::GameVolumeDown => AKind::GameVolumeDown,
         Action::NextProfile => AKind::Next,
         Action::PreviousProfile => AKind::Prev,
         Action::ToggleGyroMouse => AKind::Gyro,
@@ -57,7 +61,7 @@ fn akind(a: &Action) -> AKind {
     }
 }
 
-const KINDS: [(AKind, &str); 18] = [
+const KINDS: [(AKind, &str); 20] = [
     (AKind::None, "Nothing"),
     (AKind::Gamepad, "PlayStation button"),
     (AKind::Xbox, "Xbox button"),
@@ -68,6 +72,8 @@ const KINDS: [(AKind, &str); 18] = [
     (AKind::ScrollDown, "Scroll down"),
     (AKind::Media, "Media key"),
     (AKind::Player, "Media player"),
+    (AKind::GameVolumeUp, "Active game volume up"),
+    (AKind::GameVolumeDown, "Active game volume down"),
     (AKind::Next, "Next profile"),
     (AKind::Prev, "Previous profile"),
     (AKind::Gyro, "Toggle gyro"),
@@ -115,7 +121,7 @@ pub(crate) fn action_editor(
             .selected_text(crate::i18n::tr(if primary { "More actions" } else if original_label && k == AKind::None { "Original" } else { KINDS.iter().find(|x| x.0 == k).map_or("More actions", |x| x.1) }))
             .show_ui(ui, |ui| {
                 for (kind, label) in KINDS {
-                    if kind == AKind::Player && !cfg!(target_os = "linux") { continue; }
+                    if matches!(kind, AKind::Player | AKind::GameVolumeUp | AKind::GameVolumeDown) && !cfg!(target_os = "linux") { continue; }
                     if matches!(kind, AKind::Key | AKind::Mouse | AKind::Gamepad | AKind::Macro) { continue; }
                     ui.selectable_value(&mut k, kind, crate::i18n::tr(if original_label && kind == AKind::None { "Original" } else { label }));
                 }
@@ -132,6 +138,8 @@ pub(crate) fn action_editor(
             AKind::ScrollDown => Action::ScrollDown,
             AKind::Media => Action::Media { key: MediaKey::PlayPause },
             AKind::Player => { m.mode = HoldStyle::Tap; Action::Player { player: String::new(), command: PlayerCommand::PlayPause } },
+            AKind::GameVolumeUp => Action::GameVolumeUp,
+            AKind::GameVolumeDown => Action::GameVolumeDown,
             AKind::Next => Action::NextProfile,
             AKind::Prev => Action::PreviousProfile,
             AKind::Gyro => Action::ToggleGyroMouse,
@@ -156,6 +164,11 @@ pub(crate) fn action_editor(
                     .unwrap_or(XboxPadButton::Guide),
             },
         };
+    }
+    if matches!(m.action, Action::GameVolumeUp | Action::GameVolumeDown) {
+        muted(ui, crate::i18n::tr("Change only the focused game's volume by 5%."));
+        #[cfg(target_os = "linux")]
+        if engine.game_volume.failed() { ui.label(crate::i18n::tr("Could not control the active game's audio.")); }
     }
     if let Action::Macro { steps } = &mut m.action {
         if original_label {

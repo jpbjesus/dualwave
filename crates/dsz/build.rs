@@ -14,6 +14,10 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
         let pw = pkg_config::Config::new().atleast_version("0.3.65")
             .probe("libpipewire-0.3").expect("Install PipeWire development headers");
+        let pulse = pkg_config::Config::new().probe("libpulse").expect("Install PulseAudio development headers");
+        println!("cargo:rerun-if-changed=src/game_volume_linux.c");
+        cc::Build::new().file("src/game_volume_linux.c").includes(pulse.include_paths)
+            .flag("-std=gnu11").warnings(true).compile("dualwave_game_volume");
         println!("cargo:rerun-if-changed=src/haptics/pipewire_linux.c");
         cc::Build::new().file("src/haptics/pipewire_linux.c").includes(pw.include_paths)
             .flag("-std=gnu11").warnings(true).compile("dualwave_gui_pipewire");

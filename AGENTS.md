@@ -37,6 +37,9 @@ Protocol facts come from public documentation, captures, or code with open licen
 
 ## Profiles and settings
 
+- For requests to configure the running DualWave app, use its existing CLI/MCP first, rather than changing source code or configuring desktop shortcuts. See README's "Configure with agents (CLI and MCP)" section. Inspect `describe`, `list_devices` and the active profile before editing; preserve unrelated mappings and use revision checks.
+- In this workspace, `target/debug/dsz --agent <operation>` connects to the running app. `target/debug/dualwave` is the separate audio bridge, not the configuration CLI. Discover the environment through tools before asking the user for information available locally.
+- Media-key volume actions change system volume. Do not present them as volume control for the active game alone; verify that the requested target is supported before applying mappings.
 - Every saved struct is `#[serde(default)]`. A new field's default must keep today's behavior, so older files load unchanged.
 - Old profiles aren't migrated: no serde aliases or conversion code for renamed or removed fields. If a change alters what an existing setting does, say so in the PR so it reaches the release notes.
 

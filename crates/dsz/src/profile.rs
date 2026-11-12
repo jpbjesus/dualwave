@@ -658,6 +658,8 @@ pub enum Action {
         #[serde(default)]
         command: PlayerCommand,
     },
+    GameVolumeUp,
+    GameVolumeDown,
     NextProfile,
     PreviousProfile,
     ToggleGyroMouse,
@@ -1712,5 +1714,22 @@ mod tests {
         }
         let again: Profile = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
         assert_eq!(again, q);
+    }
+}
+
+#[cfg(test)]
+mod game_volume_tests {
+    use super::*;
+    #[test]
+    fn active_game_actions_round_trip_without_changing_old_profiles() {
+        for kind in ["game_volume_up", "game_volume_down"] {
+            let value = serde_json::json!({"kind": kind});
+            let action: Action = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(action).unwrap(), value);
+        }
+        let old: Profile = serde_json::from_str("{}").unwrap();
+        assert!(old.mappings.is_empty());
+        let media: Action = serde_json::from_str(r#"{"kind":"media","key":"VolumeDown"}"#).unwrap();
+        assert_eq!(media, Action::Media { key: MediaKey::VolumeDown });
     }
 }

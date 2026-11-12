@@ -1,6 +1,6 @@
 //! Optional desktop observations. No window titles, input capture or subprocesses.
 use std::io::Write;
-use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
+use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering}};
 use std::time::{Duration, Instant};
 use x11rb::{connection::Connection, protocol::xproto::{AtomEnum, ConnectionExt}, rust_connection::RustConnection};
 use crate::games::FocusState;
@@ -86,7 +86,9 @@ impl Kwin {
         let mut script = tempfile::Builder::new().prefix("dualwave-window-focus-").suffix(".js").tempfile().map_err(|e| e.to_string())?;
         write!(script, "function observe() {{ var w = workspace.activeWindow; callDBus({destination}, '/WindowFocus', 'org.dualwave.WindowFocus', 'Update', String(w ? w.pid : 0)); }} workspace.windowActivated.connect(observe); observe();").map_err(|e| e.to_string())?;
         script.flush().map_err(|e| e.to_string())?;
-        let monitor = Self { connection, owner, name: format!("dualwave-window-focus-{}", std::process::id()), pid, _script: script };
+        static NEXT_OBSERVER: AtomicU64 = AtomicU64::new(0);
+        let observer = NEXT_OBSERVER.fetch_add(1, Ordering::Relaxed);
+        let monitor = Self { connection, owner, name: format!("dualwave-window-focus-{}-{observer}", std::process::id()), pid, _script: script };
         let proxy = monitor.scripting()?;
         // Retire our observer left by a previous crashed instance, not user scripts.
         let _: bool = proxy.call("unloadScript", &(monitor.name.as_str(),)).map_err(|e| e.to_string())?;
@@ -174,6 +176,11 @@ mod tests {
             assert!(Instant::now() < deadline, "KWin did not report focus");
             std::thread::sleep(Duration::from_millis(20));
         }
+        let other = Kwin::new().unwrap();
+        assert_ne!(monitor.name, other.name);
+        assert!(monitor.poll().is_ok());
+        drop(other);
+        assert!(monitor.poll().is_ok(), "independent observers must not unload each other");
         let connection = monitor.connection.clone();
         let owner = monitor.owner.clone();
         let name = monitor.name.clone();

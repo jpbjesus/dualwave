@@ -314,6 +314,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn game_volume_mappings_preserve_controller_output_bytes() {
+        use crate::profile::{Action, Mapping};
+        let baseline = Profile::default();
+        let mut configured = baseline.clone();
+        for action in [Action::GameVolumeUp, Action::GameVolumeDown] {
+            configured.mappings.push(Mapping { action, enabled: false, ..Default::default() });
+        }
+        let now = Instant::now();
+        let report = |profile: &Profile| {
+            let output = Composer::new().compose(profile, &InputState::default(), &Overrides::default(),
+                &Feedback::default(), &Toggles::default(), false, 0.0, now);
+            let mut bytes = [0u8; ds_proto::BT_OUTPUT_LEN];
+            output.build(ds_proto::Connection::Bluetooth, &mut bytes).to_vec()
+        };
+        assert_eq!(report(&baseline), report(&configured));
+    }
+
+    #[test]
     fn battery_gauge_rounds_to_the_nearest_light() {
         let leds = |pct: u8| {
             let mut l = crate::profile::Lighting::default();

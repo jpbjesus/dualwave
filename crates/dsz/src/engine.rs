@@ -60,6 +60,8 @@ pub struct Engine {
     pub audio: Arc<AudioHub>,
     #[cfg(target_os = "linux")]
     pub(crate) media_players: crate::mpris::Service,
+    #[cfg(target_os = "linux")]
+    pub(crate) game_volume: crate::game_volume::Service,
     pub udp: Mutex<UdpStatus>,
     pub dsu: crate::dsu::Server,
     pub toasts: Mutex<Vec<Toast>>,
@@ -141,6 +143,8 @@ impl Engine {
             audio: AudioHub::new(),
             #[cfg(target_os = "linux")]
             media_players: Default::default(),
+            #[cfg(target_os = "linux")]
+            game_volume: Default::default(),
             udp: Mutex::new(UdpStatus::default()),
             dsu: Default::default(),
             toasts: Mutex::new(Vec::new()),
@@ -634,6 +638,8 @@ impl Engine {
         self.shutdown.store(true, Ordering::Release);
         #[cfg(target_os = "linux")]
         self.media_players.stop();
+        #[cfg(target_os = "linux")]
+        self.game_volume.stop();
         #[cfg(target_os = "linux")]
         self.focus_monitor.lock().observe(false);
         for d in self.device_list() {

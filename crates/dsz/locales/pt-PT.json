@@ -1040,5 +1040,10 @@
   "Open a media player, then refresh the list.": "Abre um leitor multimédia e atualiza a lista.",
   "The player is unavailable or does not support this command.": "O leitor está indisponível ou não suporta este comando.",
   "Controls only the selected player. If it closes, no other player receives the command. Volume changes in 5% steps.": "Controla apenas o leitor escolhido. Se fechar, nenhum outro leitor recebe o comando. O volume muda em passos de 5%.",
-  "Selected-player control is available on Linux.": "O controlo de um leitor escolhido está disponível no Linux."
+  "Selected-player control is available on Linux.": "O controlo de um leitor escolhido está disponível no Linux.",
+  "Active game volume up": "Aumentar volume do jogo ativo",
+  "Active game volume down": "Diminuir volume do jogo ativo",
+  "Change only the focused game's volume by 5%.": "Altera apenas o volume do jogo em primeiro plano em 5%.",
+  "Could not control the active game's audio.": "Não foi possível controlar o áudio do jogo ativo.",
+  "Active game volume is available on Linux.": "O volume do jogo ativo está disponível no Linux."
 }
