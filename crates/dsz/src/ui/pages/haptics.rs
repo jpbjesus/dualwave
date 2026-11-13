@@ -372,6 +372,36 @@ impl App {
                             crate::i18n::tr("Sends speaker sound to a headset in the controller's jack instead"),
                             &mut h.headset_when_plugged,
                         );
+                        ui.add_space(6.0);
+                        toggle_row(
+                            ui,
+                            crate::i18n::tr("Headphone equalizer"),
+                            crate::i18n::tr("Adjust headphones connected to the DualSense over Bluetooth"),
+                            &mut h.headset_eq.enabled,
+                        );
+                        if h.headset_eq.enabled {
+                            row(ui, crate::i18n::tr("Preset"), "", |ui| {
+                                let mut preset = h.headset_eq.preset();
+                                let before = preset;
+                                egui::ComboBox::from_id_salt("headset-eq-preset")
+                                    .selected_text(crate::i18n::tr(preset.map(|p| p.label()).unwrap_or("Custom")))
+                                    .show_ui(ui, |ui| {
+                                        for p in HeadsetEqPreset::ALL {
+                                            ui.selectable_value(&mut preset, Some(p), crate::i18n::tr(p.label()));
+                                        }
+                                    });
+                                if preset != before {
+                                    if let Some(preset) = preset { preset.apply(&mut h.headset_eq); }
+                                }
+                            });
+                            slider_row(ui, crate::i18n::tr("Bass"), "", &mut h.headset_eq.bass_db, -12.0..=12.0, " dB");
+                            slider_row(ui, crate::i18n::tr("Mids"), "", &mut h.headset_eq.mid_db, -12.0..=12.0, " dB");
+                            slider_row(ui, crate::i18n::tr("Treble"), "", &mut h.headset_eq.treble_db, -12.0..=12.0, " dB");
+                            if button(ui, crate::i18n::tr("Reset equalizer")).clicked() {
+                                HeadsetEqPreset::Flat.apply(&mut h.headset_eq);
+                            }
+                            muted(ui, crate::i18n::tr("Boosts lower the overall level automatically to avoid distortion."));
+                        }
                         if let Some(d) = dev {
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {

@@ -267,6 +267,42 @@ impl Default for TriggerHaptics {
     }
 }
 
+/// Headphone playback only; old profiles retain the exact unprocessed stream.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HeadsetEq {
+    pub enabled: bool,
+    pub bass_db: f32,
+    pub mid_db: f32,
+    pub treble_db: f32,
+}
+
+impl HeadsetEq {
+    pub fn gains(&self) -> [f32; 3] {
+        [self.bass_db, self.mid_db, self.treble_db]
+            .map(|gain| if gain.is_finite() { gain.clamp(-12.0, 12.0) } else { 0.0 })
+    }
+
+    pub fn preset(&self) -> Option<HeadsetEqPreset> {
+        HeadsetEqPreset::ALL.into_iter().find(|preset| preset.gains() == self.gains())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeadsetEqPreset { Flat, BassBoost, Voice }
+impl HeadsetEqPreset {
+    pub const ALL: [Self; 3] = [Self::Flat, Self::BassBoost, Self::Voice];
+    pub fn label(self) -> &'static str {
+        match self { Self::Flat => "Flat", Self::BassBoost => "More bass", Self::Voice => "Clear voices" }
+    }
+    pub fn gains(self) -> [f32; 3] {
+        match self { Self::Flat => [0.0, 0.0, 0.0], Self::BassBoost => [6.0, -1.0, 0.0], Self::Voice => [-3.0, 3.0, 1.0] }
+    }
+    pub fn apply(self, eq: &mut HeadsetEq) {
+        [eq.bass_db, eq.mid_db, eq.treble_db] = self.gains();
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Haptics {
@@ -298,6 +334,8 @@ pub struct Haptics {
     /// Send speaker audio to a headset in the controller's jack instead,
     /// while one is plugged in.
     pub headset_when_plugged: bool,
+    /// Optional stereo equalization for headphones on the Bluetooth stream.
+    pub headset_eq: HeadsetEq,
     /// Sound on a DualShock 4 over Bluetooth.
     pub ds4_audio: Ds4Audio,
 }
@@ -321,6 +359,7 @@ impl Default for Haptics {
             speaker_amp: SpeakerAmp::Normal,
             pc_audio_on_speaker: false,
             headset_when_plugged: true,
+            headset_eq: HeadsetEq::default(),
             ds4_audio: Ds4Audio::default(),
         }
     }
@@ -1775,5 +1814,35 @@ mod game_volume_tests {
         assert!(old.mappings.is_empty());
         let media: Action = serde_json::from_str(r#"{"kind":"media","key":"VolumeDown"}"#).unwrap();
         assert_eq!(media, Action::Media { key: MediaKey::VolumeDown });
+    }
+}
+
+#[cfg(test)]
+mod headset_eq_profile_tests {
+    use super::*;
+    #[test]
+    fn eq_presets_and_custom_gains_round_trip_without_changing_activation() {
+        let mut eq = HeadsetEq::default();
+        HeadsetEqPreset::BassBoost.apply(&mut eq);
+        assert!(!eq.enabled);
+        assert_eq!(eq.gains(), [6.0, -1.0, 0.0]);
+        assert_eq!(eq.preset(), Some(HeadsetEqPreset::BassBoost));
+        eq.enabled = true;
+        eq.treble_db = -2.0;
+        assert_eq!(eq.preset(), None);
+        let saved = serde_json::to_string(&eq).unwrap();
+        assert_eq!(serde_json::from_str::<HeadsetEq>(&saved).unwrap(), eq);
+        eq.bass_db = f32::NAN;
+        eq.mid_db = 1000.0;
+        eq.treble_db = f32::NEG_INFINITY;
+        assert_eq!(eq.gains(), [0.0, 12.0, 0.0]);
+    }
+
+    #[test]
+    fn old_profiles_keep_headset_equalization_disabled() {
+        let old: Profile = serde_json::from_str("{}").unwrap();
+        let haptics = serde_json::to_value(old.haptics).unwrap();
+        assert_eq!(haptics["headset_eq"]["enabled"], false);
+        assert_eq!(haptics["headset_eq"]["bass_db"], 0.0);
     }
 }

@@ -154,3 +154,24 @@ fn active_game_volume_actions_are_discoverable_and_configurable() {
     assert_eq!(*store.find(&name).unwrap(), *profile);
     let _ = std::fs::remove_dir_all(&e.data_dir);
 }
+
+#[test]
+fn headset_eq_updates_are_opt_in_and_preserve_other_audio_settings() {
+    let e = engine("headset-eq");
+    let name = e.profiles.names()[0].clone();
+    let before = e.profiles.find(&name).unwrap();
+    assert!(!before.haptics.headset_eq.enabled);
+    execute(&e, "patch_profile", json!({"profile":name,"expected_revision":e.profiles.revision(),
+        "patch":{"haptics":{"headset_eq":{"enabled":true,"bass_db":6.0,"mid_db":-1.0,"treble_db":0.0}}}})).unwrap();
+    let after = e.profiles.find(&name).unwrap();
+    assert!(after.haptics.headset_eq.enabled);
+    assert_eq!(after.haptics.headset_eq.preset(), Some(crate::profile::HeadsetEqPreset::BassBoost));
+    let mut expected = before.haptics.clone();
+    expected.headset_eq = after.haptics.headset_eq.clone();
+    assert_eq!(after.haptics, expected);
+    assert_eq!(after.mappings, before.mappings);
+    e.flush();
+    let saved = crate::profile::ProfileStore::load(&e.data_dir.join("profiles"));
+    assert_eq!(*saved.find(&name).unwrap(), *after);
+    let _ = std::fs::remove_dir_all(&e.data_dir);
+}

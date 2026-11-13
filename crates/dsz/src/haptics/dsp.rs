@@ -55,12 +55,44 @@ impl Biquad {
         )
     }
 
+    /// RBJ Audio EQ Cookbook peaking filter.
+    pub fn peaking(fs: f32, hz: f32, q: f32, db: f32) -> Self {
+        let a = 10.0f32.powf(db / 40.0);
+        let (s, c) = (2.0 * PI * hz / fs).sin_cos();
+        let alpha = s / (2.0 * q);
+        Self::from(1.0 + alpha * a, -2.0 * c, 1.0 - alpha * a,
+            1.0 + alpha / a, -2.0 * c, 1.0 - alpha / a)
+    }
+
+    /// RBJ shelf with slope S=1; `high` selects the high shelf.
+    pub fn shelf(fs: f32, hz: f32, db: f32, high: bool) -> Self {
+        let a = 10.0f32.powf(db / 40.0);
+        let (s, c) = (2.0 * PI * hz / fs).sin_cos();
+        let beta = 2.0 * a.sqrt() * s / 2.0f32.sqrt();
+        let p = a + 1.0;
+        let m = a - 1.0;
+        if high {
+            Self::from(a * (p + m * c + beta), -2.0 * a * (m + p * c),
+                a * (p + m * c - beta), p - m * c + beta,
+                2.0 * (m - p * c), p - m * c - beta)
+        } else {
+            Self::from(a * (p - m * c + beta), 2.0 * a * (m - p * c),
+                a * (p - m * c - beta), p + m * c + beta,
+                -2.0 * (m + p * c), p + m * c - beta)
+        }
+    }
+
     /// Keep the state, change the coefficients (no click on a slider move).
     pub fn retune(&mut self, other: Biquad) {
         let (z1, z2) = (self.z1, self.z2);
         *self = other;
         self.z1 = z1;
         self.z2 = z2;
+    }
+
+    pub fn reset(&mut self) {
+        self.z1 = 0.0;
+        self.z2 = 0.0;
     }
 
     #[inline]

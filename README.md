@@ -63,6 +63,7 @@ consult its release notes before downloading.
 | Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
 | Haptics | Game and system audio, button feedback, trigger texture and rumble conversion; optional virtual DualSense game haptics to the physical USB controller on Linux (hardware validation pending) |
 | Agent configuration | Opt-in local CLI and stdio MCP for Codex, Claude and other agents; edit profiles, actions and macros while the app is open, with revision checks to protect recent edits |
+| Headphone equalizer | Optional per-profile bass, mids and treble controls (±12 dB), with Flat, More bass and Clear voices presets; automatic headroom and smooth adjustments on DualSense Bluetooth headphone playback; disabled by default, leaving haptics, microphone and the internal speaker unchanged |
 | Active game volume (Linux) | Opt-in actions adjust only the focused detected game and its child processes by 5 percentage points, preserving channel balance and mute; KDE Plasma Wayland or X11; PulseAudio/PipeWire-Pulse playback streams; no system-volume fallback, no change when focus or audio cannot be identified |
 | Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; a clickable controller, keycap previews, shortcut presets, key capture and visual macro steps with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
 | Media players | Optional Linux actions for one selected running MPRIS player: play/pause, next/previous track, stop and player volume in 5% steps; no fallback to other players or automatic player launch |
@@ -570,6 +571,16 @@ or sandboxed audio processes are left alone. Raises stop at 100%; existing
 boosted volumes can still be lowered. Muted streams stay muted. These actions
 are separate from media keys, which continue to control system volume.
 
+Headphone EQ is saved in `haptics.headset_eq`, with `enabled` (default `false`)
+and `bass_db`, `mid_db`, `treble_db` (default `0`, playback range −12 to +12 dB).
+For example, the More bass preset uses `6`, `-1`, `0`. The Audio page includes
+presets and individual controls; the same fields are writable with
+`patch_profile` and its revision check. EQ applies to all mixed headphone sources
+on the DualSense Bluetooth path. The internal speaker, USB audio, haptics and
+microphone bypass it. Positive boosts reduce the overall level automatically to
+leave headroom. Switching EQ off fades briefly back to the unprocessed stream;
+while inactive, the original PCM and encoded packets are unchanged.
+
 `create_profile` optionally copies a `source`. `patch_profile` merges objects and
 replaces arrays; unknown fields are rejected. Profile edits affect controllers
 already using that profile. `apply_profile` takes a `profile` and a connected
@@ -778,6 +789,7 @@ DSZ's protocol code was written from public documentation and code with open lic
 
 | Source | License | Used for |
 |---|---|---|
+| [W3C Audio EQ Cookbook](https://www.w3.org/TR/audio-eq-cookbook/) | W3C permissive document license | RBJ low/high shelf and peaking biquad formulas for optional stereo headphone equalization |
 | [PulseAudio introspection and volume API](https://freedesktop.org/software/pulseaudio/doxygen/introspect.html) and [process properties](https://freedesktop.org/software/pulseaudio/doxygen/proplist_8h.html) | Public API documentation; libpulse is LGPL-2.1-or-later | Per-game playback volume through native PulseAudio/PipeWire-Pulse, matched by process PID |
 | [MPRIS 2.2 specification](https://specifications.freedesktop.org/mpris/latest/) | Public interface specification | Explicit running-player selection, playback capabilities and per-player volume over session D-Bus |
 | [KWin scripting API](https://develop.kde.org/docs/plasma/kwin/api/) and [EWMH window properties](https://specifications.freedesktop.org/wm/latest/ar01s05.html) | Public API documentation | Optional foreground-window PID observations through KWin session D-Bus or X11 |

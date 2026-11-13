@@ -12,6 +12,7 @@
 //!        2 haptic blocks + 1024 speaker frames ─► 16:15 squeeze ─► 2 Opus frames ─► 0x39 report
 //! ```
 
+mod headset_eq;
 #[cfg(windows)]
 pub mod audio;
 #[cfg(target_os = "linux")]

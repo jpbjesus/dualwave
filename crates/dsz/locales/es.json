@@ -1087,5 +1087,15 @@
   "Game speaker over USB": "Altavoz del juego por USB",
   "Play the game's controller-speaker sound on the wired controller's own sound device": "Reproduce el sonido del altavoz del juego en el dispositivo de audio del mando conectado por cable",
   "This controller is on USB. Enable game haptics or speaker over USB on the Virtual controller page. Rumble and button clicks use classic rumble.": "Este mando usa USB. Activa la háptica o el altavoz del juego por USB en la página Mando virtual. La vibración y los clics usan vibración clásica.",
-  "Over USB, enable Game speaker over USB on the Virtual controller page. PC audio and the test need Bluetooth.": "Por USB, activa Altavoz del juego por USB en la página Mando virtual. El audio del PC y la prueba necesitan Bluetooth."
+  "Over USB, enable Game speaker over USB on the Virtual controller page. PC audio and the test need Bluetooth.": "Por USB, activa Altavoz del juego por USB en la página Mando virtual. El audio del PC y la prueba necesitan Bluetooth.",
+  "Headphone equalizer": "Ecualizador de auriculares",
+  "Adjust headphones connected to the DualSense over Bluetooth": "Ajusta los auriculares conectados al DualSense por Bluetooth",
+  "Flat": "Neutro",
+  "More bass": "Más graves",
+  "Clear voices": "Voces claras",
+  "Bass": "Graves",
+  "Mids": "Medios",
+  "Treble": "Agudos",
+  "Reset equalizer": "Restablecer ecualizador",
+  "Boosts lower the overall level automatically to avoid distortion.": "Los refuerzos reducen el volumen general automáticamente para evitar distorsión."
 }

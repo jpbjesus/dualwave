@@ -248,6 +248,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
     let mut speaker_limiter = Limiter::new(48_000.0, 0.15, SPEAKER_CEILING);
     let mut game_spk: Vec<[f32; 2]> = Vec::with_capacity(WINDOW);
     let mut squeeze = Squeeze::new();
+    let mut headset_eq = super::headset_eq::Equalizer::new();
     let mut pc_spk: Vec<[f32; 2]> = Vec::with_capacity(WINDOW);
     // Speaker audio for one report, before and after fitting to 960 frames.
     let mut spk: Vec<[f32; 2]> = Vec::with_capacity(BLOCKS * WINDOW);
@@ -447,6 +448,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
             was_media = media;
             if media {
                 squeeze = Squeeze::new();
+                headset_eq = super::headset_eq::Equalizer::new();
                 lead = device.speaker_lead.load(Ordering::Relaxed).clamp(1, 12) as usize;
                 fade_in = true;
             } else {
@@ -611,6 +613,8 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
             if native_speaker {
                 if let Some(audio) = native_audio.as_ref() { audio.mix_playback(&mut spk[at..]); }
             }
+            headset_eq.process(&h.headset_eq,
+                device.speaker_route.load(Ordering::Acquire) == SPEAKER_HEADSET, &mut spk[at..]);
             for f in &spk[at..] {
                 speaker_peak = speaker_peak.max(f[0].abs()).max(f[1].abs());
             }
