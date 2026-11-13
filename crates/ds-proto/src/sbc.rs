@@ -174,9 +174,8 @@ impl Encoder {
             bitslice -= 1;
             bitcount += slicecount;
             slicecount = 0;
-            for ch in 0..CHANNELS {
-                for band in 0..SUBBANDS {
-                    let need = self.scale[ch][band];
+            for channel in &self.scale {
+                for &need in channel {
                     if need > bitslice + 1 && need < bitslice + 16 {
                         slicecount += 1;
                     } else if need == bitslice + 1 {
@@ -227,13 +226,13 @@ impl Encoder {
         w.put(CONFIG as u32, 8);
         w.put(BITPOOL as u32, 8);
         w.put(0, 8);
-        for band in 0..SUBBANDS - 1 {
-            w.put(self.joined[band] as u32, 1);
+        for &joined in &self.joined[..SUBBANDS - 1] {
+            w.put(joined as u32, 1);
         }
         w.put(0, 1);
-        for ch in 0..CHANNELS {
-            for band in 0..SUBBANDS {
-                w.put(self.scale[ch][band] as u32, 4);
+        for channel in &self.scale {
+            for &scale in channel {
+                w.put(scale as u32, 4);
             }
         }
         for block in 0..BLOCKS {

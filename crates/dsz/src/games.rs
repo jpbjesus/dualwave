@@ -766,6 +766,7 @@ mod tests {
             order_by_start(&mut stack, &running, crate::platform::process_started);
             let target = pick_target(true, stack.last().map(String::as_str),
                 &[("first.exe", "DualSense"), ("second.exe", "Xbox")], &[], "DualSense", true, &[]);
+            assert!(pids.is_empty() || target.is_some(), "running game names must resolve: {running:?}, {stack:?}");
             GameObservation { focus: FocusState::NotRequested, auto: true, manual_revision: engine.manual_profile_revision(), target, running, games: Vec::new() }
         };
         apply_observation(&engine, scan(&[first.0.id(), second.0.id()]));
