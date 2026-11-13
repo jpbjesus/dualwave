@@ -133,9 +133,8 @@ impl Model {
                 r[1] = 0x14;
             }
             Model::DualSense => {
-                r[0] = 0x01;
-                r[1..5].copy_from_slice(&[0x80; 4]);
-                r[8] = 0x08;
+                // Zeroed touch identifiers mean fingers down, not idle.
+                r = ds_proto::virtual_pad::ds_usb_input(&ds_proto::virtual_pad::PadState::default(), None, false, 0);
             }
             Model::DualShock4 => {
                 let pad = ds_proto::virtual_pad::PadState::default();
@@ -167,6 +166,14 @@ impl DsSink {
         let m = self.mirror.lock();
         if model == Model::DualShock4 {
             return d::ds4::feature(id, m.calibration.as_deref(), &ds4_mac(tag));
+        }
+        #[cfg(target_os = "linux")]
+        if model == Model::DualSense && id == 0x09 {
+            // hid-playstation rejects a second device with the physical pad's
+            // MAC. Keep a distinct local identity for this virtual slot.
+            let mut report = m.answer(id)?;
+            report.get_mut(1..7)?.copy_from_slice(&[tag as u8, (tag >> 8) as u8, 0x59, 0x53, 0x44, 0x02]);
+            return Some(report);
         }
         m.answer(id)
     }
@@ -678,7 +685,6 @@ static DS4_TAGS: Mutex<BTreeSet<u16>> = Mutex::new(BTreeSet::new());
 
 /// Probes: start numbering pads at `first`, so a probe's pads don't share
 /// a serial (`DSZV<n>`) with the running app's.
-#[cfg(windows)]
 pub fn reserve_slots_below(first: u32) {
     SLOTS.lock().extend(1..first);
 }
@@ -2005,6 +2011,34 @@ mod tests {
         c.q.clear();
         c.admit(3, vec![384; 2], late, epoch);
         assert_eq!(c.q[0].due, late + Duration::from_millis(2));
+    }
+
+    #[test]
+    fn dualsense_idle_report_has_no_pressed_buttons_or_active_touches() {
+        let report = Model::DualSense.idle_input();
+        assert_eq!(&report[..11], &[1, 128, 128, 128, 128, 0, 0, 0, 8, 0, 0]);
+        assert_eq!(&report[33..41], &[0x80, 0, 0, 0, 0x80, 0, 0, 0]);
+        assert_eq!(report[54] & 0x08, 0x08);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dualsense_virtual_address_does_not_duplicate_the_physical_controller() {
+        let mut pairing = crate::virt::mirror::pairing_report(&[0x44, 0x46, 0x48, 0x19, 0xF4, 0x46]);
+        pairing[7..].fill(0xA7);
+        let mut mirror = crate::virt::mirror::Mirror::default();
+        mirror.pairing = Some(pairing.clone());
+        let sink = DsSink { on_output: Box::new(|_| {}), mirror: Arc::new(Mutex::new(mirror)) };
+        let answer = sink.feature(Model::DualSense, 0x09, 0x1234).unwrap();
+        assert_eq!(&answer[..7], &[0x09, 0x34, 0x12, 0x59, 0x53, 0x44, 0x02]);
+        assert_eq!(&answer[7..], &pairing[7..]);
+        assert_ne!(&answer[1..7], &pairing[1..7]);
+        assert_ne!(sink.feature(Model::DualSense, 0x09, 1), sink.feature(Model::DualSense, 0x09, 2));
+        assert_ne!(&answer[1..7], &ds4_mac(0x1234));
+        assert_eq!(sink.feature(Model::DualSense, 0x09, 0x1234).unwrap(), answer);
+        let unchanged = sink.mirror.lock().answer(0x05).unwrap();
+        assert_eq!(sink.feature(Model::DualSense, 0x05, 0x1234).unwrap(), unchanged);
+        assert_eq!(sink.mirror.lock().pairing.as_ref().unwrap(), &pairing);
     }
 
     #[test]

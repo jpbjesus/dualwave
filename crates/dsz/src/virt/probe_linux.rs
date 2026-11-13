@@ -21,9 +21,19 @@ pub fn probe(what: &str) {
         "status" | "" => return,
         _ => { eprintln!("Probe {what:?} is unavailable on Linux. Supported: status, usbip-ds, usbip-ds4, usbip-x360, default-audio, hidhide."); return; }
     };
+    // Keep a diagnostic pad separate from the running app's first slots.
+    usbip::reserve_slots_below(10);
+    let mut mirror = super::mirror::Mirror::default();
+    if model == usbip::Model::DualSense {
+        // The Linux driver requires this feature even for a neutral probe;
+        // no physical controller is opened to obtain firmware metadata.
+        let mut firmware = vec![0u8; super::mirror::FIRMWARE_LEN];
+        firmware[0] = 0x20;
+        mirror.firmware = Some(firmware);
+    }
     let sink = usbip::DsSink {
         on_output: Box::new(|bytes| log::debug!("virtual controller host output: {} bytes", bytes.len())),
-        mirror: Default::default(),
+        mirror: std::sync::Arc::new(parking_lot::Mutex::new(mirror)),
     };
     let started = Instant::now();
     match usbip::UsbPad::create(model, sink) {

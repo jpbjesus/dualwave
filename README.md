@@ -69,7 +69,7 @@ consult its release notes before downloading.
 | Media players | Optional Linux actions for one selected running MPRIS player: play/pause, next/previous track, stop and player volume in 5% steps; no fallback to other players or automatic player launch |
 | Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third; optional flick stick with calibrated pixels per full turn, horizontal rotation and a 100 ms initial turn; a temporary 360° sensitivity test with a five-second delay |
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
-| Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP |
+| Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP; virtual DualSense uses a distinct Linux identity so it can coexist with the physical controller |
 | Controller power | Turn off the connected Bluetooth controller directly from the home page |
 | Upstream 0.4.6–0.4.9 | Optional gyro angle catch-up, held-profile button presses, remembered game-profile choices, independent USB game-speaker playback, battery-range midpoint display, game-helper filtering, attach-race handling and Windows HidHide repair; Linux backends and existing defaults retained. Hardware validation pending |
 | Upstream 0.4.5 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
