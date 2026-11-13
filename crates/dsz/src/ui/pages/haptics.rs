@@ -376,7 +376,7 @@ impl App {
                         toggle_row(
                             ui,
                             crate::i18n::tr("Headphone equalizer"),
-                            crate::i18n::tr("Adjust headphones connected to the DualSense over Bluetooth"),
+                            crate::i18n::tr("Adjust headphones over Bluetooth or USB game audio"),
                             &mut h.headset_eq.enabled,
                         );
                         if h.headset_eq.enabled {

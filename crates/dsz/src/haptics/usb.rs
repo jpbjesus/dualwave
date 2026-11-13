@@ -108,6 +108,7 @@ struct Shared {
     speaker_level: AtomicU8,
     /// Stereo to a headset; otherwise a mono mix for the speaker.
     stereo: AtomicBool,
+    headset_eq: Mutex<crate::profile::HeadsetEq>,
     /// Peak of the last speaker window, f32 bits (for the meter).
     speaker_peak: AtomicU32,
     failed: AtomicBool,
@@ -128,6 +129,7 @@ impl Shared {
             level: AtomicU8::new(level),
             speaker_level: AtomicU8::new(0),
             stereo: AtomicBool::new(false),
+            headset_eq: Mutex::new(Default::default()),
             speaker_peak: AtomicU32::new(0),
             failed: AtomicBool::new(false),
             peak: [AtomicU32::new(0), AtomicU32::new(0)],
@@ -179,6 +181,8 @@ struct Render {
     prev_speaker: [f32; 2],
     speaker: Vec<[f32; 2]>,
     speaker_limiter: Limiter,
+    headset_eq: super::headset_eq::Equalizer,
+    eq_input: Vec<[f32; 2]>,
     rate: u32,
 }
 
@@ -194,6 +198,8 @@ impl Render {
             prev_speaker: [0.0; 2],
             speaker: Vec::with_capacity(2 * WINDOW),
             speaker_limiter: Limiter::new(rate as f32, 0.15, SPEAKER_CEILING),
+            headset_eq: super::headset_eq::Equalizer::new(),
+            eq_input: Vec::with_capacity(WINDOW),
             rate,
         }
     }
@@ -213,7 +219,12 @@ impl Render {
         let mut speaker_peak = 0f32;
         if let Some(w) = src.as_ref().and_then(|s| self.reader.take(s.as_ref(), WINDOW)) {
             if speaker_level > 0 {
-                resample_window(&mut self.prev_speaker, &w.speaker, &mut self.speaker);
+                // Filter at the source's 48 kHz before resampling for the
+                // output device. The actuator channels never enter the EQ.
+                self.eq_input.clear();
+                self.eq_input.extend_from_slice(&w.speaker);
+                self.headset_eq.process(&self.shared.headset_eq.lock(), stereo, &mut self.eq_input);
+                resample_window(&mut self.prev_speaker, &self.eq_input, &mut self.speaker);
                 let lvl = speaker_level.min(LEVEL_MAX) as f32 / 100.0;
                 for f in self.speaker.iter_mut() {
                     *f = [f[0] * lvl, f[1] * lvl];
@@ -457,6 +468,7 @@ fn run(engine: &Arc<Engine>, device: &Arc<Device>, stop: &AtomicBool) {
         was_open = game_open && src.is_some();
         let h = &profile.haptics;
         let speaker = speaker_on(vo, h.speaker_volume);
+        shared.headset_eq.lock().clone_from(&h.headset_eq);
         shared.level.store(if haptics_on(vo) { vo.game_haptics_level } else { 0 }, Ordering::Relaxed);
         shared.speaker_level.store(if speaker { vo.game_speaker_level } else { 0 }, Ordering::Relaxed);
         if wanted(vo, h.speaker_volume, src.is_some(), open) {
@@ -759,6 +771,47 @@ mod tests {
         assert!((last[0] - want / 2.0).abs() < 1e-3, "{last:?}");
         assert!(d.chunks(4).all(|f| f[2] == 0.0 && f[3] == 0.0));
         assert!(!device.usb_haptics.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn usb_headphone_eq_preserves_bypass_and_actuator_channels() {
+        struct StereoTone(Mutex<usize>);
+        impl PcmSource for StereoTone {
+            fn filled_frames(&self) -> usize { 48_000 - *self.0.lock() }
+            fn read(&self, out: &mut [i16]) -> usize {
+                let mut pos = self.0.lock();
+                let n = (out.len() / 4).min(48_000 - *pos);
+                for (i, frame) in out.chunks_mut(4).take(n).enumerate() {
+                    let t = (*pos + i) as f32 / 48_000.0;
+                    frame.copy_from_slice(&[(8000.0 * (t * 1000.0 * std::f32::consts::TAU).sin()) as i16,
+                        (8000.0 * (t * 60.0 * std::f32::consts::TAU).sin()) as i16, 8192, -4096]);
+                }
+                *pos += n;
+                n
+            }
+            fn drop_frames(&self, n: usize) { let mut pos = self.0.lock(); *pos += n.min(48_000 - *pos); }
+        }
+        let render = |eq: crate::profile::HeadsetEq, stereo, rate| {
+            let s = Arc::new(Shared::new(None, Some(Arc::new(StereoTone(Mutex::new(0)))), 100));
+            s.speaker_level.store(100, Ordering::Relaxed);
+            s.stereo.store(stereo, Ordering::Relaxed);
+            *s.headset_eq.lock() = eq;
+            let mut r = Render::new(s, rate);
+            let mut frames = vec![0.0; 4096 * 4];
+            r.fill(&mut frames, 4);
+            frames.into_iter().map(f32::to_bits).collect::<Vec<_>>()
+        };
+        let flat = crate::profile::HeadsetEq { enabled: true, ..Default::default() };
+        let boost = crate::profile::HeadsetEq { enabled: true, bass_db: 6.0, mid_db: -1.0, treble_db: 0.0 };
+        for rate in [44_100, 48_000] {
+            let baseline = render(Default::default(), true, rate);
+            assert_eq!(render(flat.clone(), true, rate), baseline);
+            assert_eq!(render(crate::profile::HeadsetEq { enabled: false, ..boost.clone() }, true, rate), baseline);
+            let eq = render(boost.clone(), true, rate);
+            assert!(eq.chunks_exact(4).zip(baseline.chunks_exact(4)).any(|(a, b)| a[..2] != b[..2]));
+            for (a, b) in eq.chunks_exact(4).zip(baseline.chunks_exact(4)) { assert_eq!(&a[2..], &b[2..]); }
+            assert_eq!(render(boost.clone(), false, rate), render(Default::default(), false, rate));
+        }
     }
 
     #[test]

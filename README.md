@@ -63,7 +63,7 @@ consult its release notes before downloading.
 | Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
 | Haptics | Game and system audio, button feedback, trigger texture and rumble conversion; optional virtual DualSense game haptics to the physical USB controller on Linux (hardware validation pending) |
 | Agent configuration | Opt-in local CLI and stdio MCP for Codex, Claude and other agents; edit profiles, actions and macros while the app is open, with revision checks to protect recent edits |
-| Headphone equalizer | Optional per-profile bass, mids and treble controls (±12 dB), with Flat, More bass and Clear voices presets; automatic headroom and smooth adjustments on DualSense Bluetooth headphone playback; disabled by default, leaving haptics, microphone and the internal speaker unchanged |
+| Headphone equalizer | Optional per-profile bass, mids and treble controls (±12 dB), with Flat, More bass and Clear voices presets; automatic headroom and smooth adjustments on DualSense Bluetooth headphone playback and opt-in USB game-speaker playback; disabled by default, leaving haptics, microphone and the internal speaker unchanged |
 | Active game volume (Linux) | Opt-in actions adjust only the focused detected game and its child processes by 5 percentage points, preserving channel balance and mute; KDE Plasma Wayland or X11; PulseAudio/PipeWire-Pulse playback streams; no system-volume fallback, no change when focus or audio cannot be identified |
 | Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; a clickable controller, keycap previews, shortcut presets, key capture and visual macro steps with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
 | Media players | Optional Linux actions for one selected running MPRIS player: play/pause, next/previous track, stop and player volume in 5% steps; no fallback to other players or automatic player launch |
@@ -351,7 +351,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 Example download for the current alpha release:
 
 ```sh
-release=v0.4.5-alpha.5
+release=v0.4.9-alpha.2
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -367,10 +367,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.5-alpha.5 --dry-run
-sh install-dualwave.sh --version v0.4.5-alpha.5
+sh install-dualwave.sh --version v0.4.9-alpha.2 --dry-run
+sh install-dualwave.sh --version v0.4.9-alpha.2
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.5-alpha.5 --format native --dry-run
+sh install-dualwave.sh --version v0.4.9-alpha.2 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```

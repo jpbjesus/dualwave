@@ -1089,7 +1089,7 @@
   "This controller is on USB. Enable game haptics or speaker over USB on the Virtual controller page. Rumble and button clicks use classic rumble.": "Este comando usa USB. Ative a háptica ou o altifalante do jogo por USB na página Comando virtual. A vibração e os cliques usam vibração clássica.",
   "Over USB, enable Game speaker over USB on the Virtual controller page. PC audio and the test need Bluetooth.": "Por USB, ative Altifalante do jogo por USB na página Comando virtual. O áudio do PC e o teste requerem Bluetooth.",
   "Headphone equalizer": "Equalizador dos auscultadores",
-  "Adjust headphones connected to the DualSense over Bluetooth": "Ajusta os auscultadores ligados ao DualSense por Bluetooth",
+  "Adjust headphones over Bluetooth or USB game audio": "Ajusta os auscultadores por Bluetooth ou áudio de jogo USB",
   "Flat": "Neutro",
   "More bass": "Mais graves",
   "Clear voices": "Vozes claras",
