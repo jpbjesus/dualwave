@@ -75,7 +75,7 @@ consult its release notes before downloading.
 | Upstream 0.4.5 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Favorite profiles first in the profile list and selector, and in a separate leading group in the Linux tray; optional foreground-game selection on KDE Plasma 6 and X11; executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
-| Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance, saved Classic/Arctic/Tidal/Iris/Ember color themes with previews, prominent physical Bluetooth/USB connection status and reduced motion |
+| Interface | Workspace with gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance, saved Classic/Arctic/Tidal/Iris/Ember color themes with previews, compact Bluetooth/USB status icon beside the controller power control and reduced motion |
 | Desktop integration | Controller tray icon with a proportional battery overlay, charging/full indicators and percentage on hover (lowest known charge when multiple controllers are connected); startup preferences and device naming; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
 | Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report; live touchpad/gyro mouse and physical input isolation states, with steps to check duplicate mouse input from Linux or Steam |
 
@@ -351,7 +351,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 Example download for the current alpha release:
 
 ```sh
-release=v0.4.9-alpha.3
+release=v0.4.9-alpha.4
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -367,10 +367,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.9-alpha.3 --dry-run
-sh install-dualwave.sh --version v0.4.9-alpha.3
+sh install-dualwave.sh --version v0.4.9-alpha.4 --dry-run
+sh install-dualwave.sh --version v0.4.9-alpha.4
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.9-alpha.3 --format native --dry-run
+sh install-dualwave.sh --version v0.4.9-alpha.4 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```

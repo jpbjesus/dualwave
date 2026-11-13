@@ -23,8 +23,6 @@ fn stat(ui: &mut egui::Ui, k: &str, v: impl Into<RichText>) {
 
 impl App {
     pub(crate) fn page_overview(&mut self, ui: &mut egui::Ui, p: &mut Profile, dev: Option<&Arc<Device>>) {
-        connection_banner(ui, dev.map(Arc::as_ref));
-        ui.add_space(12.0);
         #[cfg(target_os = "linux")]
         {
             self.connection_diagnostics(ui, dev);

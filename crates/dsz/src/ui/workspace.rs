@@ -157,8 +157,6 @@ impl App {
     }
 
     pub(super) fn page_workspace(&mut self, ui: &mut egui::Ui, p: &mut Profile, dev: Option<&Arc<Device>>) {
-        widgets::connection_banner(ui, dev.map(Arc::as_ref));
-        ui.add_space(12.0);
         let available = dev.is_some_and(|d| *d.link.lock() == Link::Live);
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr(if available { "Controller available" } else { "Controller offline" })).font(heading(23.0)).color(text_color()));
@@ -174,6 +172,7 @@ impl App {
                         std::thread::spawn(move || crate::platform::bt_disconnect(&mac));
                     }
                 }
+                if let Some(d) = dev { widgets::connection_icon(ui, d); }
                 if ui.add(egui::Button::new(RichText::new(&summary).size(12.0).color(muted_color())).frame(false)
                     .wrap_mode(egui::TextWrapMode::Truncate)).on_hover_text(format!("{}\n{}", summary, tr("Manage game profiles"))).clicked() {
                     self.page = super::Page::Profiles;

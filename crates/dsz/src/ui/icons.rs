@@ -82,3 +82,25 @@ pub(super) fn control(p: &egui::Painter, rect: Rect, label: &str, color: Color32
     }
     super::controller_view::playstation_icon(p, rect, color);
 }
+
+/// Lucide USB/Bluetooth geometry (ISC); see assets/Lucide-LICENSE.
+/// Sources: https://github.com/lucide-icons/lucide/tree/main/icons
+pub(super) fn transport(p: &egui::Painter, rect: Rect, bluetooth: bool, color: Color32) {
+    let scale = rect.width().min(rect.height()) / 24.0;
+    let at = |x: f32, y: f32| rect.center() + egui::vec2(x - 12.0, y - 12.0) * scale;
+    let stroke = Stroke::new(2.0 * scale, color);
+    let line = |points: &[(f32, f32)]| {
+        p.add(egui::Shape::line(points.iter().map(|&(x, y)| at(x, y)).collect(), stroke));
+    };
+    if bluetooth {
+        line(&[(7., 7.), (17., 17.), (12., 22.), (12., 2.), (17., 7.), (7., 17.)]);
+    } else {
+        p.circle_stroke(at(10., 7.), scale, stroke);
+        p.circle_stroke(at(4., 20.), scale, stroke);
+        line(&[(4.7, 19.3), (19., 5.)]);
+        line(&[(21., 3.), (18., 4.), (20., 6.), (21., 3.)]);
+        line(&[(9.26, 7.68), (5., 12.), (7., 17.)]);
+        line(&[(10., 14.), (15., 16.), (18.5, 12.5)]);
+        line(&[(18., 12.), (19., 11.), (20., 12.), (19., 13.), (18., 12.)]);
+    }
+}
