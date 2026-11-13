@@ -8,10 +8,55 @@ use eframe::egui::{
 
 static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-fn palette(light: u32, dark: u32) -> Color32 {
-    let c = if DARK.load(std::sync::atomic::Ordering::Relaxed) { dark } else { light };
-    Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
+static COLOR_THEME: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn hex(c: u32) -> Color32 { Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8) }
+
+fn theme_color(theme: crate::settings::ColorTheme, dark_mode: bool, light: u32, dark: u32) -> Color32 {
+    use crate::settings::ColorTheme;
+    let (bg, surface, accent, text, light_accent) = match theme {
+        ColorTheme::Classic => return hex(if dark_mode { dark } else { light }),
+        ColorTheme::Arctic => (0x101722, 0x1b2636, 0x75bfff, 0xedf5ff, 0x1765a8),
+        ColorTheme::Tidal => (0x101b1d, 0x1b2c30, 0x42d6be, 0xeaf5f2, 0x086c5b),
+        ColorTheme::Iris => (0x171520, 0x262235, 0xb7a0ff, 0xf1edf9, 0x6540b1),
+        ColorTheme::Ember => (0x1b1715, 0x2d2521, 0xff997a, 0xfaf0e8, 0xa43d23),
+    };
+    if !dark_mode {
+        return match light {
+            0x2855df | 0x6d3eb6 => hex(light_accent),
+            0xe7ecfa => mix(hex(0xffffff), hex(light_accent), 0.10),
+            _ => hex(light),
+        };
+    }
+    match dark {
+        0x11151c => hex(bg),
+        0x252d39 => hex(surface),
+        0x171c24 => mix(hex(bg), hex(surface), 0.55),
+        0x343e4e => mix(hex(surface), hex(text), 0.22),
+        0xedf1f7 => hex(text),
+        0xa4b0c1 => mix(hex(surface), hex(text), 0.70),
+        0x8ab4ff => hex(accent),
+        0x23365a => mix(hex(bg), hex(accent), 0.20),
+        0xb9a2ed => mix(hex(accent), hex(text), 0.20),
+        _ => hex(dark),
+    }
 }
+
+fn palette(light: u32, dark: u32) -> Color32 {
+    let theme = crate::settings::ColorTheme::ALL[COLOR_THEME.load(std::sync::atomic::Ordering::Relaxed)];
+    theme_color(theme, DARK.load(std::sync::atomic::Ordering::Relaxed), light, dark)
+}
+
+pub fn preview(theme: crate::settings::ColorTheme) -> [Color32; 3] {
+    [theme_color(theme, true, 0xf8f9fc, 0x11151c), theme_color(theme, true, 0xe7ecf3, 0x252d39), theme_color(theme, true, 0x2855df, 0x8ab4ff)]
+}
+
+pub fn set_palette(ctx: &egui::Context, theme: crate::settings::ColorTheme) {
+    if COLOR_THEME.swap(theme as usize, std::sync::atomic::Ordering::Relaxed) != theme as usize {
+        install_styles(ctx);
+    }
+}
+
 pub fn bg_color() -> Color32 { palette(0xf8f9fc, 0x11151c) }
 pub fn surface_color() -> Color32 { palette(0xf8f9fc, 0x11151c) }
 pub fn card_hi_color() -> Color32 { palette(0xe7ecf3, 0x252d39) }
@@ -136,6 +181,10 @@ pub fn install(ctx: &egui::Context, scale: f32) {
     ctx.set_zoom_factor(scale.clamp(0.75, 2.0));
 
     ctx.set_theme(egui::ThemePreference::System);
+    install_styles(ctx);
+}
+
+fn install_styles(ctx: &egui::Context) {
     for dark_mode in [false, true] {
         DARK.store(dark_mode, std::sync::atomic::Ordering::Relaxed);
         ctx.style_mut_of(if dark_mode { egui::Theme::Dark } else { egui::Theme::Light }, |s| {
@@ -292,5 +341,49 @@ mod motion_tests {
         assert!(!super::kde_reduced_motion("[Other]\nAnimationDurationFactor=0\n"));
         assert!(!super::kde_reduced_motion("[KDE]\nAnimationDurationFactor=0.5\n"));
         assert!(!super::kde_reduced_motion("[KDE]\nAnimationDurationFactor=broken\n"));
+    }
+}
+
+#[cfg(test)]
+mod color_theme_tests {
+    use super::*;
+    #[test]
+    fn themes_keep_readable_text_and_accent_controls() {
+        let luminance = |c: Color32| {
+            let linear = |x: u8| { let v = x as f32 / 255.0; if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) } };
+            0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+        };
+        for theme in crate::settings::ColorTheme::ALL {
+            for dark in [false, true] {
+                let color = |light, dim| theme_color(theme, dark, light, dim);
+                for (fg, bg) in [
+                    (color(0x192333, 0xedf1f7), color(0xf8f9fc, 0x11151c)),
+                    (color(0x526277, 0xa4b0c1), color(0xe7ecf3, 0x252d39)),
+                    (color(0xffffff, 0x11151c), color(0x2855df, 0x8ab4ff)),
+                ] {
+                    let (a, b) = (luminance(fg), luminance(bg));
+                    let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                    assert!(ratio >= 4.5, "{theme:?} dark={dark}: contrast {ratio}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn named_palettes_match_the_approved_dark_colors() {
+        use crate::settings::ColorTheme::*;
+        for (theme, bg, surface, accent, text) in [
+            (Arctic, 0x101722, 0x1b2636, 0x75bfff, 0xedf5ff),
+            (Tidal, 0x101b1d, 0x1b2c30, 0x42d6be, 0xeaf5f2),
+            (Iris, 0x171520, 0x262235, 0xb7a0ff, 0xf1edf9),
+            (Ember, 0x1b1715, 0x2d2521, 0xff997a, 0xfaf0e8),
+        ] {
+            assert_eq!(theme_color(theme, true, 0xf8f9fc, 0x11151c), hex(bg));
+            assert_eq!(theme_color(theme, true, 0xe7ecf3, 0x252d39), hex(surface));
+            assert_eq!(theme_color(theme, true, 0x2855df, 0x8ab4ff), hex(accent));
+            assert_eq!(theme_color(theme, true, 0x192333, 0xedf1f7), hex(text));
+        }
+        assert_eq!(theme_color(Classic, true, 0xf8f9fc, 0x11151c), hex(0x11151c));
+        assert_eq!(theme_color(Classic, false, 0x2855df, 0x8ab4ff), hex(0x2855df));
     }
 }

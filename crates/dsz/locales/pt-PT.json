@@ -1097,5 +1097,14 @@
   "Mids": "Médios",
   "Treble": "Agudos",
   "Reset equalizer": "Repor equalizador",
-  "Boosts lower the overall level automatically to avoid distortion.": "Os reforços reduzem o volume geral automaticamente para evitar distorção."
+  "Boosts lower the overall level automatically to avoid distortion.": "Os reforços reduzem o volume geral automaticamente para evitar distorção.",
+  "Classic": "Clássico",
+  "Color theme": "Tema de cores",
+  "Bluetooth connection": "Ligação Bluetooth",
+  "USB connection": "Ligação USB",
+  "No controller connected": "Nenhum comando ligado",
+  "Arctic": "Arctic",
+  "Tidal": "Tidal",
+  "Iris": "Iris",
+  "Ember": "Ember"
 }

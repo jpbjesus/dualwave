@@ -157,6 +157,8 @@ impl App {
     }
 
     pub(super) fn page_workspace(&mut self, ui: &mut egui::Ui, p: &mut Profile, dev: Option<&Arc<Device>>) {
+        widgets::connection_banner(ui, dev.map(Arc::as_ref));
+        ui.add_space(12.0);
         let available = dev.is_some_and(|d| *d.link.lock() == Link::Live);
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr(if available { "Controller available" } else { "Controller offline" })).font(heading(23.0)).color(text_color()));

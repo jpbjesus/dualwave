@@ -165,7 +165,7 @@ pub fn execute(e: &Engine, operation: &str, args: Value) -> Result<Value, String
     }
 }
 
-const WRITABLE_SETTINGS: &[&str] = &["language","appearance","reduced_motion","show_tips","ui_scale","idle_off_minutes","default_profile","auto_profiles"];
+const WRITABLE_SETTINGS: &[&str] = &["language","appearance","color_theme","reduced_motion","show_tips","ui_scale","idle_off_minutes","default_profile","auto_profiles"];
 
 pub fn tools() -> Vec<Value> {
     let string = json!({"type":"string"});
@@ -182,7 +182,7 @@ pub fn tools() -> Vec<Value> {
         ("remove_mapping","Remove the mapping at a zero-based index",json!({"profile":string,"expected_revision":integer,"index":integer}),vec!["profile","expected_revision","index"]),
         ("apply_profile","Apply an existing profile to one connected controller immediately",json!({"profile":string,"device_id":integer}),vec!["profile","device_id"]),
         ("get_settings","Read application settings and their revision",json!({}),vec![]),
-        ("patch_settings","Change language, appearance, reduced_motion, show_tips, ui_scale (0.8–1.6), idle_off_minutes (0–60), default_profile or auto_profiles",json!({"expected_revision":integer,"patch":object}),vec!["expected_revision","patch"]),
+        ("patch_settings","Change language, appearance, color_theme (Classic, Arctic, Tidal, Iris, Ember), reduced_motion, show_tips, ui_scale (0.8–1.6), idle_off_minutes (0–60), default_profile or auto_profiles",json!({"expected_revision":integer,"patch":object}),vec!["expected_revision","patch"]),
     ];
     definitions.into_iter().map(|(name,description,properties,required)| json!({"name":name,"description":description,
         "inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false},

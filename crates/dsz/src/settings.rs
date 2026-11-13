@@ -84,11 +84,28 @@ pub enum Appearance {
     Dark,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColorTheme {
+    #[default]
+    Classic,
+    Arctic,
+    Tidal,
+    Iris,
+    Ember,
+}
+impl ColorTheme {
+    pub const ALL: [Self; 5] = [Self::Classic, Self::Arctic, Self::Tidal, Self::Iris, Self::Ember];
+    pub fn label(self) -> &'static str {
+        match self { Self::Classic => "Classic", Self::Arctic => "Arctic", Self::Tidal => "Tidal", Self::Iris => "Iris", Self::Ember => "Ember" }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub language: crate::i18n::Language,
     pub appearance: Appearance,
+    pub color_theme: ColorTheme,
     pub reduced_motion: bool,
     pub start_with_windows: bool,
     pub start_minimized: bool,
@@ -180,6 +197,7 @@ impl Default for Settings {
         Settings {
             language: crate::i18n::Language::English,
             appearance: Appearance::System,
+            color_theme: ColorTheme::Classic,
             reduced_motion: false,
             start_with_windows: false,
             start_minimized: false,
@@ -342,5 +360,20 @@ mod tests {
             effective_virtual_kind(VirtualKind::Xbox360, false, true, FallbackPad::Off),
             VirtualKind::Xbox360
         );
+    }
+}
+
+#[cfg(test)]
+mod color_theme_tests {
+    use super::*;
+    #[test]
+    fn old_settings_keep_classic_and_themes_round_trip() {
+        let old: Settings = serde_json::from_str(r#"{"appearance":"Light"}"#).unwrap();
+        assert_eq!(old.color_theme, ColorTheme::Classic);
+        assert_eq!(old.appearance, Appearance::Light);
+        for theme in ColorTheme::ALL {
+            let settings = Settings { color_theme: theme, ..Default::default() };
+            assert_eq!(serde_json::from_str::<Settings>(&serde_json::to_string(&settings).unwrap()).unwrap().color_theme, theme);
+        }
     }
 }

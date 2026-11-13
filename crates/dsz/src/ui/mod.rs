@@ -615,13 +615,14 @@ impl eframe::App for App {
         let base = self.engine.profiles.get_or_first(&name);
         let mut profile: Profile = (*base).clone();
 
-        theme::sync(ctx);
         let settings = self.engine.settings.read().clone();
         ctx.set_theme(match settings.appearance {
             crate::settings::Appearance::System => egui::ThemePreference::System,
             crate::settings::Appearance::Light => egui::ThemePreference::Light,
             crate::settings::Appearance::Dark => egui::ThemePreference::Dark,
         });
+        theme::set_palette(ctx, settings.color_theme);
+        theme::sync(ctx);
         ctx.style_mut(|s| s.animation_time = if settings.reduced_motion || self.system_reduced_motion { 0.0 } else { 0.24 });
         egui::TopBottomPanel::top("navigation")
             .frame(egui::Frame::new().fill(bg_color()).inner_margin(egui::Margin::symmetric(24, 10)))

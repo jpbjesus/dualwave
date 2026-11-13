@@ -438,3 +438,45 @@ pub fn microphone_control(ui: &mut Ui, enabled: &mut bool, muted: &mut bool, lev
     }
     (main.on_hover_text(action), power.on_hover_text(power_action))
 }
+
+pub fn connection_banner(ui: &mut egui::Ui, device: Option<&crate::device::Device>) {
+    use crate::device::Link;
+    egui::Frame::new().fill(accent_soft_color()).inner_margin(14).show(ui, |ui| {
+        ui.set_min_width((ui.available_width() - 1.0).max(0.0));
+        ui.horizontal(|ui| {
+            if let Some(d) = device {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::hover());
+                let at = |x: f32, y: f32| rect.min + egui::vec2(x, y) * 2.0;
+                let line = |points: &[(f32, f32)]| {
+                    ui.painter().add(egui::Shape::line(points.iter().map(|&(x, y)| at(x, y)).collect(), egui::Stroke::new(2.0, accent_color())));
+                };
+                if d.is_bluetooth() {
+                    line(&[(8., 1.), (8., 15.)]);
+                    line(&[(3., 4.), (13., 11.), (8., 15.), (8., 1.), (13., 5.), (3., 12.)]);
+                } else {
+                    line(&[(8., 14.), (8., 2.)]);
+                    line(&[(5., 5.), (8., 2.), (11., 5.)]);
+                    line(&[(8., 10.), (3., 7.), (3., 4.)]);
+                    line(&[(8., 12.), (13., 9.), (13., 6.)]);
+                    ui.painter().circle_filled(at(8., 14.), 2.5, accent_color());
+                    ui.painter().circle_filled(at(3., 4.), 2.0, accent_color());
+                    ui.painter().rect_filled(egui::Rect::from_center_size(at(13., 6.), egui::vec2(4.0, 4.0)), 0.0, accent_color());
+                }
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    let title = if d.is_bluetooth() { "Bluetooth connection" } else { "USB connection" };
+                    ui.label(RichText::new(crate::i18n::tr(title)).font(heading(20.0)).color(text_color()));
+                    let link = d.link.lock();
+                    let (state, color) = match &*link {
+                        Link::Live => ("Connected", good_color()),
+                        Link::Opening => ("Connecting", muted_color()),
+                        _ => ("No signal", warn_color()),
+                    };
+                    ui.label(RichText::new(crate::i18n::tr(state)).color(color));
+                });
+            } else {
+                ui.label(RichText::new(crate::i18n::tr("No controller connected")).font(heading(20.0)).color(text_color()));
+            }
+        });
+    });
+}

@@ -43,6 +43,22 @@ impl App {
                             ui.selectable_value(&mut s.appearance, value, crate::i18n::tr(label));
                         }
                     });
+                    ui.add_space(8.0);
+                    ui.label(crate::i18n::tr("Color theme"));
+                    ui.horizontal_wrapped(|ui| {
+                        for theme in crate::settings::ColorTheme::ALL {
+                            ui.vertical(|ui| {
+                                if ui.selectable_label(s.color_theme == theme, crate::i18n::tr(theme.label())).clicked() {
+                                    s.color_theme = theme;
+                                }
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(72.0, 12.0), egui::Sense::hover());
+                                for (i, color) in crate::ui::theme::preview(theme).into_iter().enumerate() {
+                                    let min = rect.min + egui::vec2(i as f32 * 24.0, 0.0);
+                                    ui.painter().rect_filled(egui::Rect::from_min_size(min, egui::vec2(22.0, 12.0)), 2.0, color);
+                                }
+                            });
+                        }
+                    });
                     ui.checkbox(&mut s.reduced_motion, crate::i18n::tr("Reduce interface motion"));
                     let changed = *s != before;
                     drop(s);
