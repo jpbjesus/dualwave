@@ -5,9 +5,13 @@
 //! and Left Ctrl, for example) cannot release each other prematurely.
 
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(not(test))]
+use std::fs::OpenOptions;
 use std::io::{self, Write};
+#[cfg(not(test))]
 use std::os::fd::AsRawFd;
+#[cfg(not(test))]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -25,10 +29,15 @@ const REL_WHEEL: u16 = 8;
 const REL_WHEEL_HI_RES: u16 = 11;
 const REL_HWHEEL_HI_RES: u16 = 12;
 const BTN_LEFT: u16 = 0x110;
+#[cfg(not(test))]
 const UI_DEV_CREATE: libc::c_ulong = 0x5501;
+#[cfg(not(test))]
 const UI_DEV_DESTROY: libc::c_ulong = 0x5502;
+#[cfg(not(test))]
 const UI_SET_EVBIT: libc::c_ulong = 0x40045564;
+#[cfg(not(test))]
 const UI_SET_KEYBIT: libc::c_ulong = 0x40045565;
+#[cfg(not(test))]
 const UI_SET_RELBIT: libc::c_ulong = 0x40045566;
 
 #[repr(C)]
@@ -96,6 +105,13 @@ impl HeldInput {
 
 struct UinputDevice { file: File }
 impl UinputDevice {
+    #[cfg(test)]
+    fn create(_mouse: bool) -> io::Result<Self> {
+        // Unit tests exercise the output pipeline without creating desktop input devices.
+        Ok(Self { file: tempfile::tempfile()? })
+    }
+
+    #[cfg(not(test))]
     fn create(mouse: bool) -> io::Result<Self> {
         let file = OpenOptions::new().write(true).custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC).open("/dev/uinput")
             .or_else(|first| if first.kind() == io::ErrorKind::NotFound {
@@ -130,6 +146,7 @@ impl UinputDevice {
         Ok(device)
     }
 
+    #[cfg(not(test))]
     fn set_bit(&self, request: libc::c_ulong, code: u16) -> io::Result<()> {
         if unsafe { libc::ioctl(self.file.as_raw_fd(), request, code as libc::c_int) } < 0 {
             Err(io::Error::last_os_error())
@@ -152,6 +169,7 @@ impl Drop for UinputDevice {
     fn drop(&mut self) {
         // Removing a device also releases its state in every evdev consumer,
         // including when the process terminates without its shutdown handler.
+        #[cfg(not(test))]
         unsafe { libc::ioctl(self.file.as_raw_fd(), UI_DEV_DESTROY); }
     }
 }
@@ -175,6 +193,7 @@ impl InputState {
                 // Let udev/libinput discover the new device before its first
                 // event. initialize() allows the application to do this before
                 // starting controller readers rather than in a mapping tick.
+                #[cfg(not(test))]
                 std::thread::sleep(Duration::from_millis(250));
                 Ok(())
             }
@@ -397,6 +416,16 @@ pub fn vk_from_egui(k: eframe::egui::Key) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_devices_are_recording_files_and_never_desktop_input_devices() {
+        for mouse in [false, true] {
+            let mut device = UinputDevice::create(mouse).unwrap();
+            assert!(device.file.metadata().unwrap().is_file());
+            device.send(&[(EV_KEY, if mouse { BTN_LEFT } else { 30 }, 1)]).unwrap();
+            assert_eq!(device.file.metadata().unwrap().len(), 2 * std::mem::size_of::<libc::input_event>() as u64);
+        }
+    }
 
     #[test]
     fn translates_all_picker_and_media_keys_without_changing_profile_values() {

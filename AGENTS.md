@@ -11,6 +11,7 @@ Notes for anyone changing DSZ, people and coding agents alike. README.md describ
 ## Build and check
 
 - Windows with the MSVC Rust toolchain. `cargo test --workspace --locked` must pass, with no new compiler warnings.
+- Automated tests must never inject real keyboard/mouse input or open physical controller/audio devices. Linux unit tests use recording files instead of `/dev/uinput`; Windows unit tests must not call `SendInput`. When testing during desktop use, isolate device nodes and PipeWire/PulseAudio/session-bus endpoints. Keep the user's running app and game audio available.
 - The repo isn't rustfmt-formatted. Don't run rustfmt over files; format only the lines you change, like the code around them.
 - Debug builds can render a page to a bitmap without opening controllers: `DSZ_SNAPSHOT=<file.bmp>` with `--page <name>`, and `DSZ_DATA_DIR=<folder>` for a separate settings folder. Use this to check UI changes, including in Portuguese.
 

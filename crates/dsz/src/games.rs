@@ -9,7 +9,7 @@
 
 use crate::settings::FallbackPad;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -117,7 +117,10 @@ fn apply_observation(engine: &Engine, scan: GameObservation) {
     let focus_changed = focus_only != (scan.focus != FocusState::NotRequested);
     let focus = if focus_changed { FocusState::Unavailable } else { scan.focus };
     let observed_exe = scan.target.as_ref().filter(|_| !focus_changed).map(|t| t.exe().to_string());
-    let mut target = if auto && !focus_changed { scan.target } else { None };
+    let mut target = if auto && !focus_changed {
+        let settings = engine.settings.read();
+        with_pick(scan.target, settings.remember_game_picks, &settings.game_picks, |name| engine.profiles.exists(name))
+    } else { None };
     let mut reason = if !auto { SelectionReason::Disabled }
         else if focus == FocusState::Unavailable { SelectionReason::FocusUnavailable }
         else { SelectionReason::Assigned };
@@ -200,6 +203,73 @@ fn is_plain_game(likely: bool, dir: Option<&str>, ds_dirs: &HashSet<String>) -> 
     likely && !dir.is_some_and(|d| ds_dirs.contains(d))
 }
 
+/// Programs that start with a game without being one: the PlayStation PC
+/// SDK's overlay, and crash reporters. Some sit beside Sony's pad library,
+/// so they look like DualSense games, and starting after the game they
+/// would take its place as the newest game. Lowercase exe names.
+const HELPERS: &[&str] = &["pspcsdkui.exe", "pspcsdkappmgr.exe"];
+
+/// Parts of crash reporter names: Crashpad (`crashpad_handler.exe`), Unity
+/// (`UnityCrashHandler64.exe`), Unreal (`CrashReportClient.exe`), CrashRpt
+/// (`CrashSender1403.exe`), BugSplat (`BsSndRpt64.exe`). Lowercase.
+const CRASH_REPORTERS: &[&str] = &[
+    "crashpad",
+    "crashhandler",
+    "crash_handler",
+    "crashreport",
+    "crashsender",
+    "bssndrpt",
+];
+
+/// Where the PlayStation PC SDK installs its overlay and helpers, under
+/// ProgramData or AppData. Lowercase.
+const PSPC_SDK_DIR: &str = "\\sony interactive entertainment inc\\pspc_sdk\\";
+
+/// An overlay or crash reporter that runs alongside a game. It never
+/// counts as the game; a rule naming it still applies.
+pub fn is_helper(name: &str, path: Option<&str>) -> bool {
+    let n = name.to_ascii_lowercase();
+    HELPERS.contains(&n.as_str())
+        || CRASH_REPORTERS.iter().any(|c| n.contains(c))
+        || path.is_some_and(|p| {
+            p.to_ascii_lowercase()
+                .replace('/', "\\")
+                .contains(PSPC_SDK_DIR)
+        })
+}
+
+/// Scan a newly seen process without a rule. `dualsense` runs the
+/// DualSense check; helpers are not checked.
+fn check_process(
+    name: &str,
+    path: Option<std::path::PathBuf>,
+    dualsense: impl FnOnce(&std::path::Path) -> Option<String>,
+) -> Checked {
+    let text = path.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let dir = text.as_ref().and_then(|path| {
+        let path = path.to_ascii_lowercase().replace('/', "\\");
+        path.rsplit_once('\\').map(|(directory, _)| directory.to_string())
+    });
+    if is_helper(name, text.as_deref()) {
+        // Debug: every Chromium app (Discord, browsers) starts a crashpad_handler.
+        log::debug!(
+            "{name} runs alongside games (overlay or crash reporter): not counted as a game"
+        );
+        return Checked {
+            exe: name.to_string(),
+            dualsense: None,
+            likely: false,
+            dir,
+        };
+    }
+    Checked {
+        exe: name.to_string(),
+        dualsense: path.as_deref().and_then(dualsense),
+        likely: text.as_deref().is_some_and(is_likely_game),
+        dir,
+    }
+}
+
 /// `top` is the most recently started game still running.
 pub fn pick_target(
     auto: bool,
@@ -232,6 +302,30 @@ pub fn pick_target(
         });
     }
     None
+}
+
+/// The profile last picked by hand for the game replaces its rule's or the
+/// DualSense profile. Swapped in before the switch, so a launch goes
+/// straight to the pick instead of through the rule's profile first.
+pub fn with_pick(
+    target: Option<GameTarget>,
+    enabled: bool,
+    picks: &BTreeMap<String, String>,
+    exists: impl Fn(&str) -> bool,
+) -> Option<GameTarget> {
+    match target {
+        Some(GameTarget::Profile { profile, exe }) if enabled => {
+            let pick = picks
+                .get(&exe.to_ascii_lowercase())
+                .filter(|p| exists(p))
+                .cloned();
+            Some(GameTarget::Profile {
+                profile: pick.unwrap_or(profile),
+                exe,
+            })
+        }
+        other => other,
+    }
 }
 
 /// Store apps that are not games and often run all the time (a wallpaper,
@@ -322,19 +416,10 @@ pub fn run(engine: Arc<Engine>) {
                 }
                 if !implicit_game_process(name) { continue; }
                 checked.entry(*pid).or_insert_with(|| {
-                    let path = crate::platform::process_path(*pid);
-                    let dir = path
-                        .as_ref()
-                        .and_then(|p| p.parent())
-                        .map(|d| d.to_string_lossy().to_ascii_lowercase().replace('/', "\\"));
-                    Checked {
-                        exe: name.clone(),
-                        dualsense: path.as_ref().and_then(|p| engine.dsdetect.check(p)),
-                        likely: path
-                            .as_ref()
-                            .is_some_and(|p| is_likely_game(&p.to_string_lossy())),
-                        dir,
-                    }
+                    check_process(name, crate::platform::process_path(*pid), |p| {
+                        engine.dsdetect.check(p)
+                    })
+
                 });
             }
             let ds_dirs: HashSet<String> = checked
@@ -419,6 +504,7 @@ pub fn run(engine: Arc<Engine>) {
             &plain_exes,
         );
         apply_observation(&engine, GameObservation { focus, auto, manual_revision, target, running: procs, games: detected });
+
         let wait = if rules.is_empty() && !auto_ds && !fallback_on {
             3000
         } else {
@@ -751,6 +837,81 @@ mod tests {
     }
 
     #[test]
+    fn overlays_and_crash_reporters_are_helpers() {
+        for n in [
+            "pspcsdkui.exe",
+            "PsPcSdkUI.exe",
+            "crashpad_handler.exe",
+            "sentry_crashpad_handler.exe",
+            "UnityCrashHandler64.exe",
+            "UnityCrashHandler32.exe",
+            "CrashReportClient.exe",
+            "CrashSender1403.exe",
+            "BsSndRpt64.exe",
+        ] {
+            assert!(is_helper(n, None), "{n}");
+        }
+        assert!(is_helper(
+            "pspcsdkupdate.exe",
+            Some(r"C:\ProgramData\Sony Interactive Entertainment Inc\PSPC_SDK\S22\3.00.00.13\pspcsdkupdate.exe")
+        ));
+        // Games, their launchers, and other tools stay as they were.
+        for (n, p) in [
+            ("GhostOfTsushima.exe", r"D:\SteamLibrary\steamapps\common\Ghost of Tsushima DIRECTOR'S CUT\GhostOfTsushima.exe"),
+            ("GoWR.exe", r"D:\SteamLibrary\steamapps\common\God of War Ragnarok\GoWR.exe"),
+            ("HorizonForbiddenWest.exe", r"D:\SteamLibrary\steamapps\common\Horizon Forbidden West Complete Edition\HorizonForbiddenWest.exe"),
+            ("eldenring.exe", r"C:\Steam\steamapps\common\ELDEN RING\Game\eldenring.exe"),
+            ("start_protected_game.exe", r"C:\Steam\steamapps\common\ELDEN RING\Game\start_protected_game.exe"),
+            ("deadcells.exe", r"C:\Program Files (x86)\Steam\steamapps\common\Dead Cells\deadcells.exe"),
+            ("CrashBandicootNSaneTrilogy.exe", r"D:\SteamLibrary\steamapps\common\Crash Bandicoot N. Sane Trilogy\CrashBandicootNSaneTrilogy.exe"),
+            ("steam.exe", r"C:\Program Files (x86)\Steam\steam.exe"),
+        ] {
+            assert!(!is_helper(n, Some(p)), "{n}");
+            assert!(!is_helper(n, None), "{n}");
+        }
+    }
+
+    #[test]
+    fn games_are_checked_as_before() {
+        let path = r"D:\SteamLibrary\steamapps\common\Ghost of Tsushima DIRECTOR'S CUT\GhostOfTsushima.exe";
+        let c = check_process("ghostoftsushima.exe", Some(path.into()), |_| {
+            Some("ships libScePad.dll".into())
+        });
+        assert_eq!(c.dualsense.as_deref(), Some("ships libScePad.dll"));
+        assert!(c.likely);
+        assert_eq!(
+            c.dir.as_deref(),
+            Some(r"d:\steamlibrary\steamapps\common\ghost of tsushima director's cut")
+        );
+        let c = check_process(
+            "deadcells.exe",
+            Some(r"C:\Program Files (x86)\Steam\steamapps\common\Dead Cells\deadcells.exe".into()),
+            |_| None,
+        );
+        assert_eq!(c.dualsense, None);
+        assert!(c.likely);
+        let c = check_process("game.exe", Some(r"C:\Games\portable\game.exe".into()), |_| None);
+        assert!(!c.likely);
+        let c = check_process("elevated.exe", None, |_| panic!("no path to check"));
+        assert_eq!((c.dualsense, c.likely, c.dir), (None, false, None));
+    }
+
+    #[test]
+    fn helpers_beside_a_game_are_not_games() {
+        // Beside Sony's pad library, the overlay and crash handler would
+        // read as DualSense games, or as store games without it.
+        for (n, p) in [
+            ("crashpad_handler.exe", r"D:\SteamLibrary\steamapps\common\God of War Ragnarok\crashpad_handler.exe"),
+            ("pspcsdkui.exe", r"C:\ProgramData\Sony Interactive Entertainment Inc\PSPC_SDK\S22\3.00.00.13\PsPcSdkUI.exe"),
+            ("unitycrashhandler64.exe", r"C:\Steam\steamapps\common\Some Unity Game\UnityCrashHandler64.exe"),
+        ] {
+            let c = check_process(n, Some(p.into()), |_| panic!("{n} was checked"));
+            assert_eq!(c.dualsense, None, "{n}");
+            assert!(!c.likely, "{n}");
+        }
+    }
+
+    #[test]
     fn newest_game_picks_the_pad() {
         let rules = [("eldenring.exe", "Elden")];
         let ds = ["bg3.exe"];
@@ -836,5 +997,45 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_remembered_pick_replaces_the_games_profile() {
+        let picks: BTreeMap<String, String> = [
+            ("eldenring.exe".to_string(), "Mine".to_string()),
+            ("gone.exe".to_string(), "Deleted".to_string()),
+        ]
+        .into();
+        let exists = |p: &str| p != "Deleted";
+        let profile = |p: &str, exe: &str| {
+            Some(GameTarget::Profile {
+                profile: p.into(),
+                exe: exe.into(),
+            })
+        };
+        // Matched however the exe is spelled.
+        assert_eq!(
+            with_pick(profile("DualSense", "EldenRing.exe"), true, &picks, exists),
+            profile("Mine", "EldenRing.exe")
+        );
+        assert_eq!(
+            with_pick(profile("DualSense", "EldenRing.exe"), false, &picks, exists),
+            profile("DualSense", "EldenRing.exe"),
+            "Remember picks off"
+        );
+        assert_eq!(
+            with_pick(profile("Xbox", "gone.exe"), true, &picks, exists),
+            profile("Xbox", "gone.exe"),
+            "a deleted profile falls back to the rule"
+        );
+        assert_eq!(
+            with_pick(profile("Xbox", "other.exe"), true, &picks, exists),
+            profile("Xbox", "other.exe")
+        );
+        let fallback = Some(GameTarget::Fallback {
+            exe: "eldenring.exe".into(),
+        });
+        assert_eq!(with_pick(fallback.clone(), true, &picks, exists), fallback);
+        assert_eq!(with_pick(None, true, &picks, exists), None);
     }
 }

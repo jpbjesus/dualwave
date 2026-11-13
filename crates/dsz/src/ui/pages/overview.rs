@@ -143,7 +143,7 @@ impl App {
                     Link::Error(e) => (e.clone(), bad_color()),
                 };
                 stat(ui, crate::i18n::tr("Link"), RichText::new(lt).color(lc));
-                let bat = input.battery_percent;
+                let bat = input.battery_shown();
                 let bcol = if bat <= 15 {
                     bad_color()
                 } else if bat <= 30 {

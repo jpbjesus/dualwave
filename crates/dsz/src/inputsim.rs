@@ -18,15 +18,20 @@ fn held() -> &'static Mutex<HashMap<u32, u32>> {
 }
 
 fn send(inputs: &[INPUT]) {
-    if inputs.is_empty() {
-        return;
-    }
-    unsafe {
-        SendInput(
-            inputs.len() as u32,
-            inputs.as_ptr(),
-            std::mem::size_of::<INPUT>() as i32,
-        );
+    #[cfg(test)]
+    let _ = inputs;
+    #[cfg(not(test))]
+    {
+        if inputs.is_empty() {
+            return;
+        }
+        unsafe {
+            SendInput(
+                inputs.len() as u32,
+                inputs.as_ptr(),
+                std::mem::size_of::<INPUT>() as i32,
+            );
+        }
     }
 }
 

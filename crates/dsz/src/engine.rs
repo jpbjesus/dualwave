@@ -76,6 +76,11 @@ pub struct Engine {
     pub companion: crate::virt::companion::Companion,
 }
 
+/// How often HidHide's settings are checked against what DSZ set up. A
+/// check only reads three short lists from the driver.
+#[cfg(windows)]
+const HIDE_CHECK_EVERY: Duration = Duration::from_secs(5);
+
 /// A profile a controller uses only while a mapping's buttons are held.
 /// Kept on the device, never saved: a restart or a reconnect starts
 /// without it.
@@ -88,6 +93,9 @@ pub struct HeldProfile {
     pub hide: u32,
     /// Profile switched to on release; none goes back.
     pub then: Option<String>,
+    /// Buttons the held profile's own mappings see go down once, on its
+    /// first report (the mapping's "Also in that profile"). Taken then.
+    pub press: u32,
 }
 
 /// Cached profile for a hot loop: refetched only when something changed.
@@ -250,8 +258,9 @@ impl Engine {
         match held.then.filter(|p| self.profiles.exists(p)) {
             Some(next) => {
                 let next = self.profiles.get_or_first(&next).name.clone();
-                self.set_device_profile(device, &next);
+                self.switch_device_profile(device, &next, false);
                 self.toast(crate::localized_format!("Profile: {next}", "Perfil: {next}", "Perfil: {next}"; "Perfil: {next}"));
+
                 device.identify_light();
             }
             None => {
@@ -321,8 +330,15 @@ impl Engine {
     }
 
     pub fn set_device_profile(&self, device: &Device, name: &str) {
+        self.switch_device_profile(device, name, true);
+    }
+
+    /// `by_hand` is false for a held profile's release profile, which
+    /// follows from a mapping rather than a choice for the game.
+    fn switch_device_profile(&self, device: &Device, name: &str, by_hand: bool) {
         let _selection = self.game_selection.lock();
         self.manual_profile_revision.fetch_add(1, Ordering::AcqRel);
+
         // A pick made while a profile is held stays after the release.
         device.held_profile.lock().take();
         let mac = device.mac.lock().clone();
@@ -337,10 +353,11 @@ impl Engine {
         }
         // A manual pick beats a running game's profile, or its fallback
         // pad, until that game closes.
-        let dismissed = self
-            .game_override
-            .write()
-            .take()
+        let overridden = self.game_override.write().take();
+        if by_hand {
+            self.remember_game_pick(name, overridden.as_ref());
+        }
+        let dismissed = overridden
             .map(|(_, exe)| exe)
             .or_else(|| self.fallback_exe.write().take());
         if dismissed.is_none() && cfg!(target_os = "linux") && {
@@ -402,6 +419,54 @@ impl Engine {
         self.settings_changed();
     }
 
+    /// Save a pick made while a game's profile was in use, for the game's
+    /// next launch. `overridden` is the game's profile this pick replaced;
+    /// without one, a later pick in the same run (the game's profile
+    /// already off) updates the saved pick quietly.
+    fn remember_game_pick(&self, name: &str, overridden: Option<&(String, String)>) {
+        let dismissed = self.game_dismissed.lock().clone();
+        let status = self.game_status.read().clone();
+        let mut s = self.settings.write();
+        if !s.remember_game_picks { return; }
+        let (exe, first) = match overridden {
+            Some((profile, _)) if profile.eq_ignore_ascii_case(name) => return,
+            Some((_, exe)) => (exe.clone(), true),
+            None => {
+                // Opening the picker removes game focus; an ambiguous game
+                // must not inherit a pick meant for another running game.
+                let eligible: Vec<_> = status.games.iter().filter(|game| {
+                    (game.native || s.games.iter().any(|rule| rule.enabled && rule.exe.eq_ignore_ascii_case(&game.exe)))
+                        && status.instances.iter().any(|(_, exe)| exe.eq_ignore_ascii_case(&game.exe))
+                }).collect();
+                let exe = match eligible.as_slice() {
+                    [game] => game.exe.clone(),
+                    [] => {
+                        let candidates: Vec<_> = dismissed.keys().filter(|exe| s.game_picks.contains_key(*exe)).collect();
+                        match candidates.as_slice() { [exe] => (*exe).clone(), _ => return }
+                    }
+                    _ => return,
+                };
+                let first = !s.game_picks.contains_key(&exe.to_ascii_lowercase());
+                (exe, first)
+            },
+        };
+        let key = exe.to_ascii_lowercase();
+        if s.game_picks.get(&key).map(String::as_str) == Some(name) {
+            return;
+        }
+        s.game_picks.insert(key, name.to_string());
+        drop(s);
+        log::info!("profile \"{name}\" remembered for {exe}");
+        if first {
+            self.toast(crate::localized_format!(
+                "\"{name}\" remembered for {exe}",
+                "\"{name}\" salvo para {exe}",
+                "\"{name}\" guardado para {exe}"; "\"{name}\" memorizado para {exe}"
+            ));
+        }
+
+    }
+
     pub fn cycle_profile(&self, device: &Device, delta: i32) {
         let names = self.profiles.names();
         if names.is_empty() {
@@ -430,6 +495,11 @@ impl Engine {
         }
         if s.default_profile == old {
             s.default_profile = new.to_string();
+        }
+        for v in s.game_picks.values_mut() {
+            if v == old {
+                *v = new.to_string();
+            }
         }
         for g in s.games.iter_mut() {
             if g.profile == old {
@@ -492,6 +562,8 @@ impl Engine {
         let pad_nodes: Vec<String> =
             self.settings.read().helper_nodes.values().flatten().cloned().collect();
         self.hider.clear_stale_pads(&pad_nodes);
+        #[cfg(windows)]
+        self.repair_hidhide();
         let e = self.clone();
         std::thread::Builder::new()
             .name("hotplug".into())
@@ -577,6 +649,9 @@ impl Engine {
         let mut running: HashMap<String, std::thread::JoinHandle<()>> = HashMap::new();
         #[cfg(target_os = "linux")]
         let mut missing = HashMap::new();
+        #[cfg(windows)]
+        let mut last_hide_check = Instant::now();
+
         // Before any controller: the virtual pad takes the first free slot.
         self.pads.startup(&self);
         while !self.shutdown.load(Ordering::Acquire) {
@@ -608,6 +683,11 @@ impl Engine {
                 self.open_failures.lock().retain(|p, _| !live.contains(p));
             }
             self.pads.maintain(&self);
+            #[cfg(windows)]
+            if last_hide_check.elapsed() >= HIDE_CHECK_EVERY {
+                last_hide_check = Instant::now();
+                self.repair_hidhide();
+            }
             std::thread::sleep(Duration::from_millis(700));
         }
         for d in self.device_list() {
@@ -615,6 +695,25 @@ impl Engine {
         }
         for (_, h) in running {
             let _ = h.join();
+        }
+    }
+
+    /// Put back HidHide settings changed outside DSZ (see
+    /// [`crate::virt::Hider::repair`]) and say so.
+    #[cfg(windows)]
+    fn repair_hidhide(&self) {
+        let (allowed, pad_nodes) = {
+            let s = self.settings.read();
+            let nodes: Vec<String> = s.helper_nodes.values().flatten().cloned().collect();
+            (s.hidhide_control, nodes)
+        };
+        let warned = self.hider.health().warning.is_some();
+        let done = self.hider.repair(allowed, &pad_nodes);
+        if !done.is_empty() {
+            self.toast(crate::i18n::tr("HidHide was changed outside DSZ. DSZ put back what it needs."));
+        }
+        if let (false, Some(w)) = (warned, self.hider.health().warning) {
+            self.warn_toast(w);
         }
     }
 

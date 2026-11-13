@@ -22,7 +22,7 @@ For a standard DualSense connected over Bluetooth, it also provides headphone
 playback and microphone capture through PipeWire.
 
 The project is an independent fork of [DSZ](https://github.com/MaximumFreak/dsz).
-The current source integrates DSZ 0.4.5, including profiles active while a
+The current source integrates DSZ 0.4.9, including profiles active while a
 button is held, experimental DualShock 4 Bluetooth audio and a virtual microphone
 alongside Xbox 360 and DualShock 4 output. DualWave
 retains its Linux backends, interface and European Portuguese translations.
@@ -31,7 +31,12 @@ boost options require an explicit profile change. DSZ 0.4.5 adds gyro bias
 recovery, safer Quick Charge matching, Xbox fallback for missing default
 profiles and a full-range haptic boost above 100%. Quick Charge and startup
 profile choices retain their existing saved keys and defaults in DualWave.
-Wired game haptics require the opt-in **Game haptics over USB** setting.
+DSZ 0.4.6–0.4.9 also adds optional gyro angle catch-up, battery-color blending,
+idle lightbar dimming, remembered game-profile choices and button presses in
+held profiles, plus game-helper filtering and virtual-controller attach fixes.
+DualWave leaves these new behaviors off for existing profiles/settings.
+Wired game haptics require the opt-in **Game haptics over USB** setting;
+wired speaker/headphone playback has its own **Game speaker over USB** opt-in.
 The Linux backend uses the physical controller's four-channel ALSA playback
 device, selected by its USB ancestry; hardware validation is pending. Existing
 profiles with this option already enabled now use the Linux backend.
@@ -39,6 +44,12 @@ profiles with this option already enabled now use the Linux backend.
 **Status:** alpha. Availability in the interface does not imply validation on
 every controller, firmware, Bluetooth adapter or game. See
 [Compatibility](#compatibility) for the tested paths and current limitations.
+The factory DualSense profile now lets the PS press reach the game's pad while
+also invoking its Xbox-button mapping, following upstream; existing saved
+mappings are not changed. Battery percentages shown in the interface use the
+middle of the controller's 10% range; internal battery values, warning thresholds
+and controller output keep using the original range floor.
+
 The latest published package may precede changes shown in this source README;
 consult its release notes before downloading.
 
@@ -46,7 +57,7 @@ consult its release notes before downloading.
 
 | Feature | Configuration |
 | --- | --- |
-| Lighting | Static and animated lightbar effects, audio response, brightness, player LEDs and mute indicator |
+| Lighting | Static and animated lightbar effects, audio response, brightness, player LEDs and mute indicator; optional battery-color blend and dimming before idle power-off |
 | Adaptive triggers | Independent L2/R2 resistance, release points, vibration and per-zone effects |
 | Headphone audio | Bluetooth stereo playback through the 3.5 mm jack, routing and volume |
 | Microphone | Built-in, headset or automatic source; gain, capture permission, mute and physical Mute button |
@@ -59,6 +70,7 @@ consult its release notes before downloading.
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
 | Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP |
 | Controller power | Turn off the connected Bluetooth controller directly from the home page |
+| Upstream 0.4.6–0.4.9 | Optional gyro angle catch-up, held-profile button presses, remembered game-profile choices, independent USB game-speaker playback, battery-range midpoint display, game-helper filtering, attach-race handling and Windows HidHide repair; Linux backends and existing defaults retained. Hardware validation pending |
 | Upstream 0.4.5 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Favorite profiles first in the profile list and selector, and in a separate leading group in the Linux tray; optional foreground-game selection on KDE Plasma 6 and X11; executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API |
@@ -327,6 +339,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 
 ## Distribution
 
+
 | Format | Status | Scope |
 | --- | --- | --- |
 | AppImage | Published for Linux x86_64 | GUI, audio CLI, userspace libraries and source-only host-support package |
@@ -343,6 +356,7 @@ curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImag
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
 sha256sum -c DualWave-x86_64.AppImage.sha256
 chmod +x DualWave-x86_64.AppImage
+
 ```
 
 The source installer requires Python 3.12 or newer, downloads through HTTPS,
@@ -444,7 +458,8 @@ controller, Bluetooth adapter or game has been tested.
 - USB game haptics require **Game haptics** and **Game haptics over USB** in
   **Virtual controller**, plus a game writing audio to the virtual DualSense.
   Playback goes directly to the same physical controller's four-channel 48 kHz
-  ALSA hardware device. Speaker channels stay silent. Other audio clients must
+  ALSA hardware device. Speaker channels stay silent unless **Game speaker over USB**
+  is enabled separately (with **Game speaker** and a nonzero speaker volume). Other audio clients must
   release that device; an occupied, missing or ambiguous endpoint fails without
   falling back to desktop speakers or another controller. No desktop audio
   profile or default is changed. DualSense/Edge USB hardware validation is pending.
@@ -767,7 +782,7 @@ DSZ's protocol code was written from public documentation and code with open lic
 | [MPRIS 2.2 specification](https://specifications.freedesktop.org/mpris/latest/) | Public interface specification | Explicit running-player selection, playback capabilities and per-player volume over session D-Bus |
 | [KWin scripting API](https://develop.kde.org/docs/plasma/kwin/api/) and [EWMH window properties](https://specifications.freedesktop.org/wm/latest/ar01s05.html) | Public API documentation | Optional foreground-window PID observations through KWin session D-Bus or X11 |
 | [ALSA PCM API](https://www.alsa-project.org/alsa-doc/alsa-lib/pcm.html) | Public API documentation; alsa-lib is LGPL-2.1-or-later | Nonblocking physical USB playback, exact hardware format selection and underrun recovery |
-| [DSZ 0.4.5](https://github.com/MaximumFreak/dsz/tree/v0.4.5) | MIT | Gyro bias recovery, Quick Charge validation, boosted haptic shaping and Windows USB actuator playback |
+| [DSZ 0.4.9](https://github.com/MaximumFreak/dsz/tree/v0.4.9) | MIT | Gyro bias and angle catch-up, battery display and lighting, held-profile press behavior, remembered game choices, helper filtering, USB audio routing and virtual-device attach/repair fixes |
 | Linux [`hid-playstation`](https://github.com/torvalds/linux/blob/master/drivers/hid/hid-playstation.c) | GPL-2.0, read as documentation | Input and output report layouts, valid flags, status bits, CRC prefixes, feature reports, the DualShock 4 report, speaker and headset routing (volume, output path, preamp gain) and headset detection |
 | SDL [`SDL_hidapi_ps5.c`](https://github.com/libsdl-org/SDL/blob/main/src/joystick/hidapi/SDL_hidapi_ps5.c) | zlib | Edge Fn and paddle buttons, the connection-state byte, improved rumble emulation |
 | [pydualsense](https://github.com/flok/pydualsense) | MIT | The Bluetooth `0x31` layout, player LED patterns and brightness, motor power, custom trigger modes |

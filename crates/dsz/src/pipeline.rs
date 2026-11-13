@@ -122,6 +122,9 @@ struct Gyro {
     last_at: Option<Instant>,
     smooth: [f32; 2],
     rem: [f32; 2],
+    /// Angle catch-up: turning the stick couldn't give yet, in seconds of
+    /// full tilt per axis.
+    owed: [f32; 2],
 }
 
 impl Gyro {
@@ -140,6 +143,7 @@ impl Gyro {
             last_at: None,
             smooth: [0.0; 2],
             rem: [0.0; 2],
+            owed: [0.0; 2],
         }
     }
 
@@ -346,7 +350,58 @@ impl Gyro {
         let full = g.stick_speed.max(1.0);
         [h * gain / full, v * gain * g.vertical_ratio / full]
     }
+
+    /// Angle catch-up on the gyro's stick push `want` (share of full tilt,
+    /// unclamped) over `dt` seconds. A push past full tilt is clamped to
+    /// the rim and the rest owed; owed turning is added while there is room
+    /// under full tilt, so the game ends up turned as far as the
+    /// controller was, just later. Turning back cancels what is owed on
+    /// that axis, and at most `CATCHUP_MAX` seconds of full tilt are kept.
+    fn catch_up(&mut self, want: [f32; 2], dt: f32) -> [f32; 2] {
+        let len = |v: [f32; 2]| (v[0] * v[0] + v[1] * v[1]).sqrt();
+        if !(dt > 0.0) || !want.iter().all(|v| v.is_finite()) {
+            self.owed = [0.0; 2];
+            return want;
+        }
+        for k in 0..2 {
+            if want[k] * self.owed[k] < 0.0 && want[k].abs() > CATCHUP_CANCEL {
+                self.owed[k] = 0.0;
+            }
+        }
+        let m = len(want);
+        if m > 1.0 {
+            let out = [want[0] / m, want[1] / m];
+            for k in 0..2 {
+                self.owed[k] += (want[k] - out[k]) * dt;
+            }
+            let o = len(self.owed);
+            if o > CATCHUP_MAX {
+                self.owed = [self.owed[0] * CATCHUP_MAX / o, self.owed[1] * CATCHUP_MAX / o];
+            }
+            return out;
+        }
+        if self.owed == [0.0; 2] {
+            return want;
+        }
+        let total = [want[0] + self.owed[0] / dt, want[1] + self.owed[1] / dt];
+        let tm = len(total);
+        let out = if tm > 1.0 { [total[0] / tm, total[1] / tm] } else { total };
+        for k in 0..2 {
+            self.owed[k] -= (out[k] - want[k]) * dt;
+        }
+        if len(self.owed) < 1e-5 {
+            self.owed = [0.0; 2];
+        }
+        out
+    }
 }
+
+/// Angle catch-up keeps at most this many seconds of full tilt owed, so a
+/// wild swing can't keep the camera turning for long.
+const CATCHUP_MAX: f32 = 1.0;
+/// A push the other way (share of full tilt) past this drops what is owed
+/// on that axis: the player has turned back.
+const CATCHUP_CANCEL: f32 = 0.05;
 
 /// Turning speed (deg/s, after steadiness and smoothing) that still reads
 /// as a resting hand for the gyro stick.
@@ -860,7 +915,7 @@ fn action_up(a: &Action) {
 }
 
 /// Use the mapping's profile while its buttons stay down.
-fn hold_profile(engine: &Engine, device: &Device, m: &Mapping, name: &str, then: &str) {
+fn hold_profile(engine: &Engine, device: &Device, m: &Mapping, name: &str, then: &str, press: bool) {
     let mut buttons = 0u32;
     let mut hide = 0u32;
     for b in m.buttons() {
@@ -880,6 +935,7 @@ fn hold_profile(engine: &Engine, device: &Device, m: &Mapping, name: &str, then:
             buttons,
             hide,
             then: (!then.is_empty()).then(|| then.to_string()),
+            press: if press { buttons } else { 0 },
         },
     );
 }
@@ -1139,9 +1195,13 @@ impl Pipeline {
                     if !self.gyro_was_active {
                         self.gyro.rem = [0.0; 2];
                         self.gyro.smooth = [0.0; 2];
+                        self.gyro.owed = [0.0; 2];
                     }
                     if mode == GyroMode::RightStick {
                         gyro_stick = self.gyro.stick(&profile.gyro, dps);
+                        if profile.gyro.angle_catchup {
+                            gyro_stick = self.gyro.catch_up(gyro_stick, gdt);
+                        }
                     } else {
                         self.gyro.mouse(&profile.gyro, dps, gdt);
                     }
@@ -1207,8 +1267,13 @@ impl Pipeline {
             }
         }
 
-        // Mappings
-        let (mut suppress, inject, helper) = self.mappings(engine, device, &profile, &s, &prev, now);
+        // Mappings. A hold set to press in the held profile too: its
+        // buttons count as just pressed for the held profile's mappings,
+        // once, on the first report that uses it.
+        let fresh = device.held_profile.lock().as_mut().map_or(0, |h| std::mem::take(&mut h.press));
+        let mut map_prev = prev;
+        map_prev.buttons.0 &= !fresh;
+        let (mut suppress, inject, helper) = self.mappings(engine, device, &profile, &s, &map_prev, now);
         let held_hide = device.held_profile.lock().as_ref().map_or(0, |h| h.hide);
         self.held_hide = (self.held_hide | held_hide) & s.buttons.0;
         suppress |= self.held_hide;
@@ -1432,10 +1497,10 @@ impl Pipeline {
 
             if start {
                 rt.active = true;
-                if let Action::HoldProfile { name, then } = &m.action {
+                if let Action::HoldProfile { name, then, press } = &m.action {
                     // Held only as long as the buttons are: the behavior
                     // setting doesn't apply.
-                    hold_profile(engine, device, m, name, then);
+                    hold_profile(engine, device, m, name, then, *press);
                     continue;
                 }
                 match m.mode {
@@ -2072,9 +2137,19 @@ mod hold_profile_tests {
             action: Action::HoldProfile {
                 name: name.into(),
                 then: then.into(),
+                press: false,
             },
             ..Mapping::default()
         }
+    }
+
+    /// `hold`, with "Also in that profile" on.
+    fn hold_press(button: Button, with: &[Button], name: &str) -> Mapping {
+        let mut m = hold(button, with, name, "", true);
+        if let Action::HoldProfile { press, .. } = &mut m.action {
+            *press = true;
+        }
+        m
     }
 
     fn off(button: Button) -> Mapping {
@@ -2154,6 +2229,68 @@ mod hold_profile_tests {
         // And it works again.
         r.step(&[Button::Create]);
         assert_eq!(r.profile(), "Chord");
+        r.step(&[]);
+        assert_eq!(r.profile(), "Base");
+    }
+
+    #[test]
+    fn held_button_presses_in_the_held_profile_when_asked() {
+        let _g = gate();
+        let mut r = rig(vec![hold_press(Button::Create, &[], "Chord")]);
+        r.step(&[Button::Create]);
+        assert_eq!(r.profile(), "Chord");
+        assert!(take_offs().is_empty(), "Base's report doesn't press Chord's mapping");
+        // Chord's first report: its Create mapping sees the press, once.
+        r.step(&[Button::Create]);
+        assert_eq!(take_offs(), vec![MAC.to_string()]);
+        r.step(&[Button::Create]);
+        r.wait(600);
+        assert!(take_offs().is_empty());
+        // Chord's other mappings still need their own press.
+        r.step(&[Button::Create, Button::Cross]);
+        assert_eq!(take_offs(), vec![MAC.to_string()]);
+        r.step(&[]);
+        assert_eq!(r.profile(), "Base");
+        r.step(&[]);
+        assert!(take_offs().is_empty());
+        assert!(r.device.held_profile.lock().is_none());
+        // Each new hold presses again.
+        r.step(&[Button::Create]);
+        r.step(&[Button::Create]);
+        assert_eq!(take_offs(), vec![MAC.to_string()]);
+        r.step(&[]);
+        assert_eq!(r.profile(), "Base");
+    }
+
+    #[test]
+    fn held_combo_presses_in_the_held_profile_when_asked() {
+        let _g = gate();
+        // Chord turns off on Cross; holding Cross + L1 into Chord presses it.
+        let mut r = rig(vec![hold_press(Button::L1, &[Button::Cross], "Chord")]);
+        r.step(&[Button::Cross, Button::L1]);
+        assert_eq!(r.profile(), "Chord");
+        r.step(&[Button::Cross, Button::L1]);
+        assert_eq!(take_offs(), vec![MAC.to_string()]);
+        r.step(&[Button::Cross]);
+        assert_eq!(r.profile(), "Base");
+        r.step(&[]);
+        assert!(take_offs().is_empty());
+    }
+
+    #[test]
+    fn held_press_into_a_profile_that_holds_again_is_harmless() {
+        let _g = gate();
+        // Chord holds itself on the same button: no second hold, no loop.
+        let mut r = rig(vec![hold_press(Button::Create, &[], "Chord")]);
+        r.engine
+            .profiles
+            .update(plain("Chord", vec![hold_press(Button::Create, &[], "After")]));
+        r.step(&[Button::Create]);
+        assert_eq!(r.profile(), "Chord");
+        r.step(&[Button::Create]);
+        r.step(&[Button::Create]);
+        assert_eq!(r.profile(), "Chord");
+        assert_eq!(r.device.held_profile.lock().as_ref().map(|h| h.press), Some(0));
         r.step(&[]);
         assert_eq!(r.profile(), "Base");
     }
@@ -2270,6 +2407,93 @@ mod hold_profile_tests {
         assert_eq!(r.profile(), "Game", "no release profile after a pick");
     }
 
+    fn remembered(r: &Rig) -> Vec<String> {
+        r.engine
+            .toasts
+            .lock()
+            .iter()
+            .map(|t| t.text.clone())
+            .filter(|t| t.contains("remembered"))
+            .collect()
+    }
+
+    #[test]
+    fn a_pick_over_a_games_profile_is_remembered() {
+        let _g = gate();
+        let mut r = rig(vec![]);
+        r.engine.settings.write().remember_game_picks = true;
+        *r.engine.game_override.write() = Some(("Game".into(), "Game.exe".into()));
+        r.engine.bump_config();
+        r.step(&[]);
+        assert_eq!(r.profile(), "Game");
+        r.engine.set_device_profile(&r.device, "After");
+        assert_eq!(r.profile(), "After");
+        assert!(r.engine.game_dismissed.lock().contains_key("game.exe"));
+        let picks = || r.engine.settings.read().game_picks.clone();
+        assert_eq!(picks().get("game.exe").map(String::as_str), Some("After"));
+        assert_eq!(remembered(&r), vec!["\"After\" remembered for Game.exe"]);
+        // Another pick in the same run updates it, without another toast.
+        r.engine.set_device_profile(&r.device, "Chord");
+        assert_eq!(picks().get("game.exe").map(String::as_str), Some("Chord"));
+        assert_eq!(remembered(&r).len(), 1);
+        // With no game running, a pick is only the controller's.
+        r.engine.game_dismissed.lock().clear();
+        r.engine.set_device_profile(&r.device, "Base");
+        assert_eq!(picks().get("game.exe").map(String::as_str), Some("Chord"));
+        assert_eq!(picks().len(), 1);
+    }
+
+    #[test]
+    fn manual_pick_remembers_one_game_after_opening_the_ui_removes_focus() {
+        let _g = gate();
+        let r = rig(vec![]);
+        r.engine.settings.write().remember_game_picks = true;
+        r.engine.settings.write().focused_game_only = true;
+        {
+            let mut status = r.engine.game_status.write();
+            status.games = vec![crate::games::DetectedGame { exe: "Game.exe".into(), native: true }];
+            status.instances = vec![(10, "Game.exe".into())];
+        }
+        r.engine.set_device_profile(&r.device, "After");
+        assert_eq!(r.engine.settings.read().game_picks.get("game.exe").map(String::as_str), Some("After"));
+        {
+            let mut status = r.engine.game_status.write();
+            status.games.push(crate::games::DetectedGame { exe: "Other.exe".into(), native: true });
+            status.instances.push((20, "Other.exe".into()));
+        }
+        r.engine.set_device_profile(&r.device, "Chord");
+        assert_eq!(r.engine.settings.read().game_picks.get("game.exe").map(String::as_str), Some("After"));
+        assert_eq!(r.engine.settings.read().game_picks.len(), 1);
+    }
+
+    #[test]
+    fn a_held_profiles_release_isnt_remembered() {
+        let _g = gate();
+        let mut r = rig(vec![hold(Button::Create, &[], "Chord", "After", true)]);
+        r.engine.settings.write().remember_game_picks = true;
+        r.step(&[Button::Create]);
+        *r.engine.game_override.write() = Some(("Game".into(), "game.exe".into()));
+        r.engine.bump_config();
+        r.step(&[Button::Create]);
+        assert_eq!(r.profile(), "Chord");
+        r.step(&[]);
+        assert_eq!(r.profile(), "After");
+        assert!(r.engine.settings.read().game_picks.is_empty());
+        assert!(remembered(&r).is_empty());
+    }
+
+    #[test]
+    fn remember_picks_off_saves_nothing() {
+        let _g = gate();
+        let r = rig(vec![]);
+        r.engine.settings.write().remember_game_picks = false;
+        *r.engine.game_override.write() = Some(("Game".into(), "game.exe".into()));
+        r.engine.set_device_profile(&r.device, "After");
+        assert!(r.engine.game_dismissed.lock().contains_key("game.exe"));
+        assert!(r.engine.settings.read().game_picks.is_empty());
+        assert!(remembered(&r).is_empty());
+    }
+
     #[test]
     fn disconnect_while_held_drops_the_hold() {
         let _g = gate();
@@ -2303,6 +2527,7 @@ mod hold_profile_tests {
                 buttons: Button::Square.bit(),
                 hide: 0,
                 then: None,
+                press: 0,
             }
         ));
         assert_eq!(r.profile(), "Chord");
@@ -2410,6 +2635,65 @@ mod tests {
         // The gyro turning against the stick slows it down.
         let [x, _] = gyro_mix([0.6, 0.0], [-0.1, 0.0], 0.2, 1.0);
         assert!((x - 0.52).abs() < 1e-4);
+    }
+
+    #[test]
+    fn angle_catchup_is_off_by_default_and_old_profiles_load_without_it() {
+        assert!(!crate::profile::Gyro::default().angle_catchup);
+        let g: crate::profile::Gyro =
+            serde_json::from_str(r#"{"mode":"RightStick","stick_speed":90.0}"#).unwrap();
+        assert!(!g.angle_catchup);
+    }
+
+    #[test]
+    fn angle_catchup_plays_out_a_turn_past_full_tilt() {
+        let mut gyro = Gyro::new();
+        let dt = 0.004;
+        // 0.1 s at twice full tilt: the stick gives full tilt, and owes
+        // 0.1 s more of it.
+        for _ in 0..25 {
+            assert_eq!(gyro.catch_up([2.0, 0.0], dt), [1.0, 0.0]);
+        }
+        let mut given = 0.0;
+        let mut ticks = 0;
+        while gyro.owed != [0.0; 2] && ticks < 1000 {
+            let [x, y] = gyro.catch_up([0.0, 0.0], dt);
+            assert!(x <= 1.0 + 1e-6 && y == 0.0);
+            given += x * dt;
+            ticks += 1;
+        }
+        assert!((given - 0.1).abs() < 1e-3, "paid out {given}");
+        assert_eq!(gyro.catch_up([0.3, 0.0], dt), [0.3, 0.0], "nothing left owed");
+    }
+
+    #[test]
+    fn angle_catchup_leaves_turns_under_full_tilt_alone() {
+        let mut gyro = Gyro::new();
+        for v in [[0.0, 0.0], [0.5, -0.2], [-0.99, 0.0], [0.6, 0.8]] {
+            assert_eq!(gyro.catch_up(v, 0.004), v);
+        }
+        assert_eq!(gyro.owed, [0.0; 2]);
+    }
+
+    #[test]
+    fn angle_catchup_stops_when_turning_back_and_is_capped() {
+        let mut gyro = Gyro::new();
+        for _ in 0..25 {
+            gyro.catch_up([3.0, 0.0], 0.004);
+        }
+        assert!(gyro.owed[0] > 0.0);
+        let [x, _] = gyro.catch_up([-0.5, 0.0], 0.004);
+        assert_eq!(x, -0.5, "turning back cancels the catch-up");
+        assert_eq!(gyro.owed, [0.0; 2]);
+        // A long, wild swing keeps at most CATCHUP_MAX owed.
+        for _ in 0..2000 {
+            gyro.catch_up([0.0, 50.0], 0.004);
+        }
+        let o = (gyro.owed[0].powi(2) + gyro.owed[1].powi(2)).sqrt();
+        assert!((o - CATCHUP_MAX).abs() < 1e-4);
+        // Bad input or time drops it.
+        assert_eq!(gyro.catch_up([f32::NAN, 0.0], 0.004)[1], 0.0);
+        assert_eq!(gyro.owed, [0.0; 2]);
     }
 
     #[test]

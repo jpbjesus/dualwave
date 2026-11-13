@@ -19,7 +19,7 @@ pub fn snapshot(engine: &Engine) -> (Option<Battery>, String) {
     let mut selected: Option<Battery> = None;
     let descriptions = devices.iter().map(|device| {
         let input = device.live.lock().input;
-        let value = battery(input.battery_percent, input.battery_status, input.full);
+        let value = battery(input.battery_shown(), input.battery_status, input.full);
         // Show the lowest known charge; equal charges keep connection order.
         if let Some(value) = value {
             if selected.is_none_or(|current| value.percent < current.percent) { selected = Some(value); }
@@ -172,8 +172,8 @@ mod snapshot_tests {
         engine.settings.write().device_names.insert(high.mac.lock().clone(),"TV".into());
         engine.devices.write().extend([high.clone(),unknown.clone(),low.clone()]);
         let (selected,description) = snapshot(&engine);
-        assert_eq!(selected,Some(Battery {percent:20,status:BatteryStatus::Charging}));
-        assert!(description.contains("PC 20%") && description.contains("TV 90%"));
+        assert_eq!(selected,Some(Battery {percent:25,status:BatteryStatus::Charging}));
+        assert!(description.contains("PC 25%") && description.contains("TV 95%"));
         assert!(!description.contains("DualSense 0%"),"a short report must not invent an empty battery");
         high.live.lock().input.battery_percent = 20;
         assert_eq!(snapshot(&engine).0.unwrap().status,BatteryStatus::Charging,"connection id breaks ties");

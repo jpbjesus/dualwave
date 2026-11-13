@@ -298,6 +298,7 @@ pub fn start(engine: Arc<Engine>, on_show: impl Fn() + Send + Sync + 'static) {
                         }
                     }
                     let tip = format!("{} — {description}", crate::APP_TITLE);
+
                     set_tip(&mut nid, &tip);
                     Shell_NotifyIconW(NIM_MODIFY, &nid);
                     if !previous.is_null() { DestroyIcon(previous); }

@@ -111,8 +111,18 @@ pub struct Settings {
     pub auto_profiles: bool,
     pub focused_game_only: bool,
     pub games: Vec<GameRule>,
+    /// Save a profile picked by hand while a game runs in `game_picks`, and
+    /// use the saved picks.
+    pub remember_game_picks: bool,
+    /// Game exe (lowercase) -> the profile last picked by hand while it ran.
+    /// Used instead of the automatic choice the next time it starts.
+    pub game_picks: BTreeMap<String, String>,
     /// Power off a Bluetooth controller after this many idle minutes (0 = never).
     pub idle_off_minutes: u32,
+    /// Fade the lightbar out over the last minutes before an idle power-off
+    /// (see `composer::idle_fade`). Only does anything while
+    /// `idle_off_minutes` is set. Off by default to preserve existing reports.
+    pub idle_dim: bool,
     /// Quick Charge: drop a controller's Bluetooth link when the same
     /// controller (by MAC) is plugged in over USB, so only USB is left.
     pub quick_charge: bool,
@@ -185,7 +195,10 @@ impl Default for Settings {
             auto_profiles: true,
             focused_game_only: false,
             games: Vec::new(),
+            remember_game_picks: false,
+            game_picks: BTreeMap::new(),
             idle_off_minutes: 15,
+            idle_dim: false,
             quick_charge: false,
             ui_scale: 1.0,
             check_input_crc: true,
@@ -297,6 +310,16 @@ mod tests {
         assert!(parsed.quick_charge);
         let back: Settings = serde_json::from_str(&serde_json::to_string(&parsed).unwrap()).unwrap();
         assert!(back.quick_charge);
+    }
+
+    #[test]
+    fn idle_dim_is_off_for_older_settings_and_a_choice_is_kept() {
+        let parsed: Settings = serde_json::from_str(r#"{"idle_off_minutes":10}"#).unwrap();
+        assert!(!parsed.idle_dim);
+        assert_eq!(parsed.idle_off_minutes, 10);
+        let on = Settings { idle_dim: true, ..Settings::default() };
+        let back: Settings = serde_json::from_value(serde_json::to_value(&on).unwrap()).unwrap();
+        assert!(back.idle_dim);
     }
 
     #[test]
