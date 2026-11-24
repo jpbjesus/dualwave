@@ -50,7 +50,7 @@ impl App {
         page_header(
             ui,
             &name,
-            &crate::localized_format!("{} over {}  ·  profile \"{}\"", "{} por {}  ·  perfil \"{}\"", "{} por {}  ·  perfil \"{}\""; "{} por {}  ·  perfil \"{}\"",
+            &crate::localized_format!("{} over {}  ·  profile \"{}\"", "{} por {}  ·  perfil \"{}\"", "{} por {}  ·  perfil \"{}\"", "{} 通过 {}  ·  配置文件“{}”"; "{} por {}  ·  perfil \"{}\"",
                 d.model.name(),
                 if d.is_bluetooth() { "Bluetooth" } else { "USB" },
                 self.engine.profile_name_for(d)
@@ -62,9 +62,12 @@ impl App {
         let view_w = if wide { avail * 0.6 } else { avail };
         // Take each lock once, up front: a second lock of the same mutex
         // inside one expression waits on the first forever.
-        let overrides = d.overrides.lock().clone();
-        let toggles = *d.toggles.lock();
-        let link = d.link.lock().clone();
+        let override_leds = d.overrides.lock().player_leds;
+        let toggles = d.toggles.load();
+        let connected = {
+            let link = d.link.lock();
+            matches!(*link, Link::Live | Link::Quiet)
+        };
         let draw_view = |ui: &mut egui::Ui| {
             card(ui, "", "", |ui| {
                 let h = (view_w * 0.62).clamp(260.0, 520.0);
@@ -74,14 +77,14 @@ impl App {
                     &View {
                         input: &input,
                         lightbar,
-                        player_leds: overrides.player_leds.unwrap_or_else(|| {
+                        player_leds: override_leds.unwrap_or_else(|| {
                             crate::composer::profile_player_leds(&p.lighting, &input)
                         }),
                         mute_led: !matches!(p.lighting.mute_led, crate::profile::MuteLed::Off)
                             && (p.lighting.mute_led != crate::profile::MuteLed::Toggle
                                 || toggles.mute_engaged),
                         model: d.model,
-                        connected: link == Link::Live || link == Link::Quiet,
+                        connected,
                     },
                 );
                 ui.add_space(6.0);
@@ -133,6 +136,7 @@ impl App {
                 });
             });
         };
+        let battery_bars = self.engine.settings.read().battery_bars;
         let draw_stats = |ui: &mut egui::Ui| {
             card(ui, crate::i18n::tr("Status"), "", |ui| {
                 let link = d.link.lock().clone();
@@ -160,8 +164,20 @@ impl App {
                             ds_proto::BatteryStatus::Error => crate::i18n::tr(" · error"),
                             _ => "",
                         };
-                        ui.label(RichText::new(format!("{bat}%{status}")).color(text_color()));
-                        meter(ui, bat as f32 / 100.0, bcol, 90.0);
+                        if battery_bars {
+                            let status = status.trim_start_matches(" · ");
+                            ui.label(RichText::new(status).color(text_color()));
+                            let n = input.battery_bars();
+                            let col = match n {
+                                0 => bad_color(),
+                                1 => warn_color(),
+                                _ => good_color(),
+                            };
+                            bars_meter(ui, n, col, 90.0);
+                        } else {
+                            ui.label(RichText::new(format!("{bat}%{status}")).color(text_color()));
+                            meter(ui, bat as f32 / 100.0, bcol, 90.0);
+                        }
                     });
                 });
                 let s = &d.stats;
@@ -179,7 +195,7 @@ impl App {
                     stat(
                         ui,
                         crate::i18n::tr("Haptic stream"),
-                        crate::localized_format!("{} packets/s", "{} pacotes/s", "{} paquetes/s"; "{} pacotes/s", s.stream_hz.load(Ordering::Relaxed)),
+                        crate::localized_format!("{} packets/s", "{} pacotes/s", "{} paquetes/s", "{} 包/秒"; "{} pacotes/s", s.stream_hz.load(Ordering::Relaxed)),
                     );
                 }
                 stat(
@@ -195,25 +211,29 @@ impl App {
                 stat(
                     ui,
                     crate::i18n::tr("Recovered errors"),
-                    RichText::new(crate::localized_format!("{} write · {} CRC", "{} envios · {} CRC", "{} envío · {} CRC"; "{} envios · {} CRC",
+                    RichText::new(crate::localized_format!("{} write · {} CRC", "{} envios · {} CRC", "{} envío · {} CRC", "{} 写入 · {} CRC"; "{} envios · {} CRC",
                         s.write_errors.load(Ordering::Relaxed),
                         s.crc_errors.load(Ordering::Relaxed)
                     ))
                     .color(if errs > 0 { warn_color() } else { text_color() }),
                 );
                 ui.separator();
-                let mac = d.mac.lock().clone();
-                stat(
-                    ui,
-                    "MAC",
-                    RichText::new(if mac.is_empty() { "—".into() } else { mac }).monospace(),
-                );
-                let fw = d.firmware.lock().clone();
-                stat(
-                    ui,
-                    crate::i18n::tr("Firmware"),
-                    if fw.is_empty() { "—".to_string() } else { fw },
-                );
+                {
+                    let mac = d.mac.lock();
+                    stat(
+                        ui,
+                        "MAC",
+                        RichText::new(if mac.is_empty() { "—" } else { mac.as_str() }).monospace(),
+                    );
+                }
+                {
+                    let fw = d.firmware.lock();
+                    stat(
+                        ui,
+                        crate::i18n::tr("Firmware"),
+                        if fw.is_empty() { "—" } else { fw.as_str() },
+                    );
+                }
                 stat(
                     ui,
                     crate::i18n::tr("Gyro"),

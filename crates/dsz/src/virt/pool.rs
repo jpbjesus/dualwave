@@ -105,6 +105,7 @@ struct Parked {
     /// Its own nodes, hidden from all but explorer.exe and Game Bar.
     ids: Vec<String>,
     apps: Vec<std::path::PathBuf>,
+    apps_checked: Instant,
     since: Instant,
     checked: Instant,
     /// Hidden before Windows first saw it: nothing running then found it.
@@ -117,11 +118,13 @@ struct Parked {
 
 impl Parked {
     fn visible() -> Parked {
+        let now = Instant::now();
         Parked {
             ids: Vec::new(),
             apps: Vec::new(),
-            since: Instant::now(),
-            checked: Instant::now(),
+            apps_checked: now,
+            since: now,
+            checked: now,
             born_hidden: false,
             hidden_at: SystemTime::now(),
         }
@@ -266,9 +269,23 @@ fn plug_with(
         }),
         Model::Microphone => Box::new(|_| {}),
     };
+    let r = route.clone();
+    let refresh: Box<dyn Fn() + Send + Sync> = Box::new(move || {
+        let Some(d) = r.device() else { return };
+        // Copied out first: the two locks are never held together here.
+        let theirs = d.mirror.lock().clone();
+        let mut mine = r.mirror.lock();
+        mine.fill_from(&theirs);
+        let more = mine.incomplete();
+        drop(mine);
+        if more {
+            d.request_mirror();
+        }
+    });
     let sink = usbip::DsSink {
         on_output,
         mirror: route.mirror.clone(),
+        refresh: Some(refresh),
     };
     usbip::UsbPad::create_for(model, sink, mac, before_attach).map_err(|e| {
         log::warn!("virtual controller host attachment: {e}");
@@ -282,8 +299,8 @@ fn plug_with(
 /// Send the pad plugged in at startup's idle report again once Windows has
 /// it (ring LED lit), then at [`STARTUP_RELEASES`], while nobody drives it.
 /// An idle Xbox 360 pad otherwise sends one report in its life, and after
-/// some boots Explorer acted on a held Guide while XInput read the pad idle
-/// (research/STUCK-GUIDE-2026-10-14.md). A driven pad sends its own.
+/// some boots Explorer acted on a held Guide while XInput read the pad idle.
+/// A driven pad sends its own.
 fn startup_releases(pad: &Pad) {
     let start = Instant::now();
     while pad.target.xinput_slot().is_none() && start.elapsed() < STARTUP_RELEASES[0] {
@@ -482,7 +499,16 @@ impl Pool {
                 ids.push(id);
             }
         }
-        let apps = super::companion::readers();
+        let now = Instant::now();
+        let refresh_apps = parked.as_ref().is_none_or(|p| {
+            p.apps.is_empty() || now.saturating_duration_since(p.apps_checked) >= PARK_EVERY_LATE
+        });
+        let (apps, apps_checked) = if refresh_apps {
+            (super::companion::readers(), now)
+        } else {
+            let p = parked.as_ref().unwrap();
+            (p.apps.clone(), p.apps_checked)
+        };
         let same = parked.as_ref().is_some_and(|p| p.ids == ids && p.apps == apps);
         if !same {
             if let Err(e) = engine.hider.set_with_apps(key, ids.clone(), apps.clone()) {
@@ -506,8 +532,9 @@ impl Pool {
         *parked = Some(Parked {
             ids,
             apps,
+            apps_checked,
             since,
-            checked: Instant::now(),
+            checked: now,
             born_hidden,
             hidden_at,
         });
@@ -570,6 +597,7 @@ impl Pool {
             raw_check: Mutex::new(RawCheck::new()),
             parked: Mutex::new(Some(Parked {
                 apps: if hidden.is_empty() { Vec::new() } else { apps },
+                apps_checked: Instant::now(),
                 ids: hidden,
                 since: Instant::now(),
                 checked: Instant::now() - PARK_EVERY_LATE,
@@ -688,8 +716,14 @@ impl Pool {
     }
 
     /// Unplug everything (app exit).
+    /// Unplug every pad, on quitting. Each is detached now rather than when
+    /// its last handle drops: the process may exit first. An update made in
+    /// the first minute, while the startup pad's thread still held it, left
+    /// that pad plugged in with no one serving it, a dead controller that a
+    /// game took as the first player.
     pub fn clear(&self, engine: &Engine) {
         for p in self.list() {
+            p.target.detach_now();
             self.destroy(engine, &p);
         }
     }

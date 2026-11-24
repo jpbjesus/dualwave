@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::device::Device;
 use crate::haptics::audio::AudioHub;
@@ -74,6 +74,8 @@ pub struct Engine {
     pub pads: crate::virt::Pool,
     /// The helper Xbox pad for Xbox buttons on profiles without one.
     pub companion: crate::virt::companion::Companion,
+    /// Woken by `WM_DEVICECHANGE` (HID arrival/removal) or shutdown.
+    hotplug_wake: (Mutex<bool>, Condvar),
 }
 
 /// How often HidHide's settings are checked against what DSZ set up. A
@@ -161,7 +163,21 @@ impl Engine {
             open_failures: Mutex::new(HashMap::new()),
             pads: Default::default(),
             companion: Default::default(),
+            hotplug_wake: (Mutex::new(false), Condvar::new()),
         })
+    }
+
+    pub fn wake_hotplug(&self) {
+        *self.hotplug_wake.0.lock() = true;
+        self.hotplug_wake.1.notify_all();
+    }
+
+    fn wait_hotplug(&self, timeout: Duration) {
+        let mut woken = self.hotplug_wake.0.lock();
+        if !*woken {
+            self.hotplug_wake.1.wait_for(&mut woken, timeout);
+        }
+        *woken = false;
     }
 
     pub fn settings_revision(&self) -> u64 {
@@ -259,7 +275,7 @@ impl Engine {
             Some(next) => {
                 let next = self.profiles.get_or_first(&next).name.clone();
                 self.switch_device_profile(device, &next, false);
-                self.toast(crate::localized_format!("Profile: {next}", "Perfil: {next}", "Perfil: {next}"; "Perfil: {next}"));
+                self.toast(crate::localized_format!("Profile: {next}", "Perfil: {next}", "Perfil: {next}", "配置文件：{next}"; "Perfil: {next}"));
 
                 device.identify_light();
             }
@@ -458,10 +474,7 @@ impl Engine {
         drop(s);
         log::info!("profile \"{name}\" remembered for {exe}");
         if first {
-            self.toast(crate::localized_format!(
-                "\"{name}\" remembered for {exe}",
-                "\"{name}\" salvo para {exe}",
-                "\"{name}\" guardado para {exe}"; "\"{name}\" memorizado para {exe}"
+            self.toast(crate::localized_format!("\"{name}\" remembered for {exe}", "\"{name}\" salvo para {exe}", "\"{name}\" guardado para {exe}", "已为 {exe} 记住“{name}”"; "\"{name}\" memorizado para {exe}"
             ));
         }
 
@@ -477,7 +490,7 @@ impl Engine {
         let n = names.len() as i32;
         let next = names[((i + delta).rem_euclid(n)) as usize].clone();
         self.set_device_profile(device, &next);
-        self.toast(crate::localized_format!("Profile: {next}", "Perfil: {next}", "Perfil: {next}"; "Perfil: {next}"));
+        self.toast(crate::localized_format!("Profile: {next}", "Perfil: {next}", "Perfil: {next}", "配置文件：{next}"; "Perfil: {next}"));
         device.identify_light();
     }
 
@@ -517,7 +530,7 @@ impl Engine {
             self.settings_dirty.store(true, Ordering::Release);
         }
         self.devices.write().push(d.clone());
-        self.toast(crate::localized_format!("{} connected ({})", "{} conectado ({})", "{} conectado ({})"; "{} ligado ({})",
+        self.toast(crate::localized_format!("{} connected ({})", "{} conectado ({})", "{} conectado ({})", "{} 已连接（{}）"; "{} ligado ({})",
             d.model.name(),
             if d.is_bluetooth() { "Bluetooth" } else { "USB" }
         ));
@@ -528,7 +541,7 @@ impl Engine {
         if let Some(i) = v.iter().position(|d| d.id == id) {
             let d = v.remove(i);
             drop(v);
-            self.toast(crate::localized_format!("{} disconnected", "{} desconectado", "{} desconectado"; "{} desligado", d.model.name()));
+            self.toast(crate::localized_format!("{} disconnected", "{} desconectado", "{} desconectado", "{} 已断开"; "{} desligado", d.model.name()));
         }
     }
 
@@ -542,7 +555,7 @@ impl Engine {
         entry.0 = Instant::now();
         entry.1 += 1;
         if entry.1 == 1 {
-            self.warn_toast(crate::localized_format!("Couldn't open a controller ({e}). Another controller app or Steam Input may be holding it.", "Não foi possível abrir o controle ({e}). Outro aplicativo ou o Steam Input pode estar usando-o.", "No se pudo abrir el mando ({e}). Puede que otra aplicación o Steam Input lo esté usando."; "Não foi possível abrir o comando ({e}). Outra aplicação ou o Steam Input pode estar a utilizá-lo."
+            self.warn_toast(crate::localized_format!("Couldn't open a controller ({e}). Another controller app or Steam Input may be holding it.", "Não foi possível abrir o controle ({e}). Outro aplicativo ou o Steam Input pode estar usando-o.", "No se pudo abrir el mando ({e}). Puede que otra aplicación o Steam Input lo esté usando.", "无法打开手柄（{e}）。可能有其他手柄应用或 Steam Input 正在占用它。"; "Não foi possível abrir o comando ({e}). Outra aplicação ou o Steam Input pode estar a utilizá-lo."
             ));
         }
     }
@@ -602,7 +615,10 @@ impl Engine {
                         e.settings_save_later();
                     }
                     drop(e);
-                    std::thread::sleep(Duration::from_millis(if watcher.busy() { 100 } else { 500 }));
+                    #[cfg(windows)]
+                    watcher.wait();
+                    #[cfg(not(windows))]
+                    std::thread::sleep(Duration::from_secs(1));
                 }
             })
             .unwrap();
@@ -688,7 +704,17 @@ impl Engine {
                 last_hide_check = Instant::now();
                 self.repair_hidhide();
             }
-            std::thread::sleep(Duration::from_millis(700));
+            // Event-driven via WM_DEVICECHANGE on the tray window; use a short
+            // retry interval only while an open failure backoff is active.
+            #[cfg(windows)]
+            let wait = if !self.open_failures.lock().is_empty() {
+                Duration::from_millis(700)
+            } else {
+                HIDE_CHECK_EVERY
+            };
+            #[cfg(not(windows))]
+            let wait = Duration::from_millis(700);
+            self.wait_hotplug(wait);
         }
         for d in self.device_list() {
             d.stop.store(true, Ordering::Release);
@@ -741,6 +767,7 @@ impl Engine {
         self.game_volume.stop();
         #[cfg(target_os = "linux")]
         self.focus_monitor.lock().observe(false);
+        self.wake_hotplug();
         for d in self.device_list() {
             d.stop.store(true, Ordering::Release);
         }

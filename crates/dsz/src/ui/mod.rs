@@ -129,15 +129,21 @@ pub struct App {
     overflow_logged: std::collections::HashSet<Page>,
     virt_drivers: Option<(Instant, pages::virtual_pad::DriverInfo)>,
     game_test: Option<(u64, Arc<crate::haptics::game::TestSource>)>,
+    /// Cached editable copy of the profile on screen, refreshed only when the
+    /// selected profile name or `profiles.revision()` changes.
+    edit_buf: Option<(String, u64, Profile)>,
+    /// Fingerprint of visible live controller state/meters, for adaptive repaint pacing.
+    live_sig: u64,
+    last_live_change: Instant,
 }
 
 pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
-    let icon = egui::IconData {
-        rgba: crate::tray::icon_rgba(64),
-        width: 64,
-        height: 64,
-    };
+    #[cfg(not(windows))]
+    let icon = egui::IconData { rgba: crate::tray::icon_rgba(64), width: 64, height: 64 };
     let (size, min) = crate::platform::initial_window_size([1240.0, 800.0], [760.0, 520.0]);
+    let viewport = egui::ViewportBuilder::default();
+    #[cfg(not(windows))]
+    let viewport = viewport.with_icon(Arc::new(icon));
     crate::tray::start(engine.clone(), || {
         if let Some(c) = CTX.get() {
             c.request_repaint();
@@ -147,14 +153,15 @@ pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     crate::tray::set_start_hidden(start_hidden);
     let opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+        viewport: viewport
             .with_title(crate::APP_TITLE)
             .with_inner_size(size)
             .with_min_inner_size(min)
             // Starting minimized: never shown until the tray opens it (the
             // vendored eframe skips its first-frame show for this).
-            .with_visible(!start_hidden)
-            .with_icon(Arc::new(icon)),
+            // The window icon is loaded directly from the embedded `.ico`
+            // resource (ID 1) in `vendor/eframe/src/native/app_icon.rs`.
+            .with_visible(!start_hidden),
         centered: true,
         // Frames are paced by request_repaint_after; vsync makes the NVIDIA GL
         // driver busy-wait in SwapBuffers (a full core for a 60 fps UI).
@@ -248,14 +255,21 @@ impl App {
             window_sized: false,
             virt_drivers: None,
             game_test: None,
+            edit_buf: None,
+            live_sig: 0,
+            last_live_change: Instant::now(),
         }
     }
 
     fn device(&self) -> Option<Arc<Device>> {
-        let list = self.engine.device_list();
+        let devs = self.engine.device_list();
+        self.pick_device(&devs).cloned()
+    }
+
+    fn pick_device<'a>(&self, devs: &'a [Arc<Device>]) -> Option<&'a Arc<Device>> {
         self.selected
-            .and_then(|id| list.iter().find(|d| d.id == id).cloned())
-            .or_else(|| list.first().cloned())
+            .and_then(|id| devs.iter().find(|d| d.id == id))
+            .or_else(|| devs.first())
     }
 
     /// Name of the profile the pages edit.
@@ -273,7 +287,7 @@ impl App {
 
     fn touchpad_override(&self, profile: &Profile) -> Option<bool> {
         self.device().filter(|device| self.engine.profile_name_for(device) == profile.name)
-            .and_then(|device| device.toggles.lock().touchpad)
+            .and_then(|device| device.toggles.load().touchpad)
     }
 
     fn effective_touchpad_mode(&self, profile: &Profile) -> crate::profile::TouchMode {
@@ -286,7 +300,7 @@ impl App {
     fn set_touchpad_mode(&self, profile: &mut Profile, mode: crate::profile::TouchMode) {
         profile.touchpad.mode = mode;
         for device in self.engine.device_list() {
-            if self.engine.profile_name_for(&device) == profile.name { device.toggles.lock().touchpad = None; }
+            if self.engine.profile_name_for(&device) == profile.name { device.toggles.update(|t| t.touchpad = None); }
         }
     }
 
@@ -300,12 +314,24 @@ impl App {
             for d in &devs {
                 let sel = dev.map(|x| x.id == d.id).unwrap_or(false);
                 let live = d.live.lock().input;
-                let link = d.link.lock().clone();
+                let (dot, hover) = {
+                    let link = d.link.lock();
+                    match *link {
+                        Link::Live => (good_color(), crate::i18n::tr("Connected")),
+                        Link::Quiet => (
+                            warn_color(),
+                            crate::i18n::tr("No input recently (asleep, out of range, or interference)"),
+                        ),
+                        Link::Opening => (muted_color(), crate::i18n::tr("Connecting…")),
+                        Link::Error(_) => (bad_color(), crate::i18n::tr("Error")),
+                    }
+                };
                 let name = d.display_name(&self.engine);
                 let conn = if d.is_bluetooth() { "BT" } else { "USB" };
-                let mut text = format!("{name}  ·  {conn}  ·  {}%", live.battery_shown());
+                let bat = self.engine.settings.read().battery_label(&live);
+                let mut text = format!("{name}  ·  {conn}  ·  {bat}");
                 if let Some(k) = d.virt.active() {
-                    text.push_str(&crate::localized_format!("  ·  as {}", "  ·  como {}", "  ·  como {}"; "  ·  como {}", k.label()));
+                    text.push_str(&crate::localized_format!("  ·  as {}", "  ·  como {}", "  ·  como {}", "  ·  作为 {}"; "  ·  como {}", k.label()));
                 }
                 let font = egui::FontId::proportional(13.0);
                 let w = ui.fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), text_color()).size().x);
@@ -323,12 +349,6 @@ impl App {
                     Stroke::new(1.0_f32, if sel { accent_color() } else { border_color() }),
                     StrokeKind::Inside,
                 );
-                let dot = match link {
-                    Link::Live => good_color(),
-                    Link::Quiet => warn_color(),
-                    Link::Opening => muted_color(),
-                    Link::Error(_) => bad_color(),
-                };
                 p.circle_filled(rect.left_center() + egui::vec2(16.0, 0.0), 4.0, dot);
                 p.text(
                     rect.left_center() + egui::vec2(28.0, 0.0),
@@ -341,12 +361,7 @@ impl App {
                     self.selected = Some(d.id);
                     self.edit_pin = None;
                 }
-                resp.on_hover_text(match link {
-                    Link::Live => crate::i18n::tr("Connected"),
-                    Link::Quiet => crate::i18n::tr("No input recently (asleep, out of range, or interference)"),
-                    Link::Opening => crate::i18n::tr("Connecting…"),
-                    Link::Error(_) => crate::i18n::tr("Error"),
-                });
+                resp.on_hover_text(hover);
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -409,7 +424,7 @@ impl App {
             ui.horizontal(|ui| {
                 widgets::pill(
                     ui,
-                    &crate::localized_format!("Editing \"{editing}\" — not active on this controller", "Editando \"{editing}\" — inativo neste controle", "Editando \"{editing}\" — no está activo en este mando"; "A editar \"{editing}\" — inativo neste comando"),
+                    &crate::localized_format!("Editing \"{editing}\" — not active on this controller", "Editando \"{editing}\" — inativo neste controle", "Editando \"{editing}\" — no está activo en este mando", "正在编辑“{editing}” — 未在此手柄上生效"; "A editar \"{editing}\" — inativo neste comando"),
                     warn_color(),
                 );
                 if widgets::button(ui, crate::i18n::tr("Edit active profile")).clicked() {
@@ -425,8 +440,7 @@ impl App {
             ui.add_space(6.0);
         }
         if let Some(d) = dev {
-            let o = d.overrides.lock().clone();
-            if o.any() {
+            if d.overrides.lock().any() {
                 ui.horizontal(|ui| {
                     widgets::pill(ui, crate::i18n::tr("A game mod is overriding some settings (UDP)"), violet_color());
                     if widgets::button(ui, crate::i18n::tr("Clear overrides")).clicked() {
@@ -520,6 +534,9 @@ impl eframe::App for App {
         // serialize a visible frame's profile copy and save with those edits.
         let config_engine = self.engine.clone();
         let _config_edit = config_engine.config_edit.lock();
+        if crate::i18n::language() == crate::i18n::Language::ChineseSimplified {
+            theme::ensure_cjk(ctx);
+        }
         self.frames += 1;
         if crate::update::take_settings_request() {
             self.page = Page::Settings;
@@ -610,10 +627,15 @@ impl eframe::App for App {
             return;
         }
 
-        let dev = self.device();
+        let devs = self.engine.device_list();
+        let dev = self.pick_device(&devs).cloned();
         let name = self.editing_name(dev.as_ref());
+        let rev = self.engine.profiles.revision();
         let base = self.engine.profiles.get_or_first(&name);
-        let mut profile: Profile = (*base).clone();
+        let mut profile = match self.edit_buf.take() {
+            Some((cached_name, cached_rev, p)) if cached_name == base.name && cached_rev == rev => p,
+            _ => (*base).clone(),
+        };
 
         let settings = self.engine.settings.read().clone();
         ctx.set_theme(match settings.appearance {
@@ -697,9 +719,21 @@ impl eframe::App for App {
 
         // Publish edits (renames go through the store, not this path).
         self.sync_audio_meter(&profile);
-        let audio_bar = profile.lighting.mode == crate::profile::LightMode::Audio;
+        let animated_bar = matches!(
+            profile.lighting.mode,
+            crate::profile::LightMode::Rainbow
+                | crate::profile::LightMode::Breathing
+                | crate::profile::LightMode::Strobe
+                | crate::profile::LightMode::Audio
+        );
         if profile.name == base.name && profile != *base {
-            self.engine.profiles.update(profile);
+            self.engine.profiles.update(profile.clone());
+            let next_rev = self.engine.profiles.revision();
+            let cached_name = profile.name.clone();
+            self.edit_buf = Some((cached_name, next_rev, profile));
+        } else if profile.name == base.name {
+            let cached_name = profile.name.clone();
+            self.edit_buf = Some((cached_name, rev, profile));
         }
 
         // Hidden or minimized: schedule nothing. The engine runs on its own
@@ -732,9 +766,29 @@ impl eframe::App for App {
             return;
         }
         self.toasts(ctx);
-        let fast = (self.page.live() && dev.is_some())
-            || (audio_bar && matches!(self.page, Page::Lighting | Page::Overview));
-        repaint_in(ctx, if fast { 16 } else { 250 });
+        let anim_now = animated_bar && matches!(self.page, Page::Lighting | Page::Overview);
+        let fast = if anim_now {
+            true
+        } else if self.page.live() && dev.is_some() {
+            let sig = self.live_signature(dev.as_deref().unwrap());
+            if sig != self.live_sig {
+                self.live_sig = sig;
+                self.last_live_change = Instant::now();
+                true
+            } else {
+                self.last_live_change.elapsed() < Duration::from_millis(250)
+            }
+        } else {
+            false
+        };
+        let wait_ms = if fast {
+            16
+        } else if self.page.live() && dev.is_some() {
+            125
+        } else {
+            250
+        };
+        repaint_in(ctx, wait_ms);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -744,6 +798,46 @@ impl eframe::App for App {
 }
 
 impl App {
+    fn live_signature(&self, d: &Device) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let live = d.snapshot();
+        let i = &live.input;
+        i.buttons.0.hash(&mut h);
+        // Quantize sticks/triggers slightly so ±1 resting ADC jitter doesn't pin
+        // the UI at 60 fps while the controller sits untouched on a desk.
+        [
+            i.lx >> 2,
+            i.ly >> 2,
+            i.rx >> 2,
+            i.ry >> 2,
+            i.l2 >> 1,
+            i.r2 >> 1,
+        ]
+        .hash(&mut h);
+        for t in &i.touch {
+            (t.active, t.x >> 2, t.y >> 2).hash(&mut h);
+        }
+        (i.battery_shown(), i.battery_status as u8).hash(&mut h);
+        (live.calibrating, live.gyro_active, live.gyro_stick, live.touch_mouse_active).hash(&mut h);
+        [
+            (live.gyro_dps[0] / 3.0).round() as i32,
+            (live.gyro_dps[1] / 3.0).round() as i32,
+            (live.gyro_dps[2] / 3.0).round() as i32,
+        ]
+        .hash(&mut h);
+        let ord = std::sync::atomic::Ordering::Relaxed;
+        [
+            d.haptic_level[0].load(ord),
+            d.haptic_level[1].load(ord),
+            d.speaker_level.load(ord),
+            d.microphone.peak(),
+        ]
+        .hash(&mut h);
+        ((self.engine.audio.peak() * 100.0).round() as u32).hash(&mut h);
+        h.finish()
+    }
+
     fn sync_audio_meter(&mut self, profile: &Profile) {
         if profile.lighting.mode != crate::profile::LightMode::Audio {
             self.audio_meter = None;
@@ -785,12 +879,12 @@ mod touchpad_mode_tests {
         engine.set_device_profile(&device,&name);
         let app = App::new(engine.clone());
         let mut profile = (*engine.profiles.find(&name).unwrap()).clone();
-        device.toggles.lock().touchpad = Some(true);
+        device.toggles.update(|t| t.touchpad = Some(true));
         assert_eq!(app.effective_touchpad_mode(&profile),TouchMode::Mouse);
         let unrelated = Profile::named("Different editor profile");
         assert_eq!(app.effective_touchpad_mode(&unrelated),TouchMode::Passthrough);
         app.set_touchpad_mode(&mut profile,TouchMode::Passthrough);
-        assert_eq!(device.toggles.lock().touchpad,None);
+        assert_eq!(device.toggles.load().touchpad,None);
         assert_eq!(app.effective_touchpad_mode(&profile),TouchMode::Passthrough);
         drop(app);
         drop(engine);

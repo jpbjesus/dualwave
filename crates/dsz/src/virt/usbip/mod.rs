@@ -18,8 +18,10 @@
 //!
 //! Timing follows a real host controller. Isochronous URBs are reserved
 //! back to back on an absolute clock (one packet per millisecond) and each
-//! completes when its window ends, so the audio engine runs at real time;
-//! after a gap of a full packet the clock re-anchors instead of replaying.
+//! completes when its window ends, so the audio engine runs at real time.
+//! When the queue runs dry for a moment, the URBs that come next complete
+//! at once until the clock is back to now, so the time is made up rather
+//! than lost; after a longer gap the clock re-anchors instead.
 //! PCM is published as soon as a URB arrives. Input completes a pending
 //! interrupt URB the moment the physical report is processed.
 
@@ -47,7 +49,7 @@ use self::descriptors as d;
 use self::wire::{Command, Submit};
 #[cfg(windows)]
 use super::win;
-use crate::haptics::game::PcmSource;
+use crate::haptics::game::{ArrivalGaps, PcmSource};
 
 /// Which controller a virtual pad presents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,6 +158,10 @@ pub struct DsSink {
     /// a pad that outlives its controller answers with whichever controller
     /// drives it now.
     pub mirror: std::sync::Arc<parking_lot::Mutex<super::mirror::Mirror>>,
+    /// Called when a game asks a virtual DualSense for a report `mirror`
+    /// doesn't have: fills `mirror` with what the controller has read since,
+    /// and asks the controller to read the rest again.
+    pub refresh: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl DsSink {
@@ -163,6 +169,11 @@ impl DsSink {
     /// `tag` is this pad's identity tag, so a DualShock 4's MAC matches its
     /// USB serial.
     pub fn feature(&self, model: Model, id: u8, tag: u16) -> Option<Vec<u8>> {
+        if model == Model::DualSense && self.mirror.lock().lacks(id) {
+            if let Some(refresh) = &self.refresh {
+                refresh();
+            }
+        }
         let m = self.mirror.lock();
         if model == Model::DualShock4 {
             return d::ds4::feature(id, m.calibration.as_deref(), &ds4_mac(tag));
@@ -245,6 +256,12 @@ fn plugin_request(layout: PluginLayout, busid: &str, service: &str, host: &str) 
 }
 
 const MS: Duration = Duration::from_millis(1);
+/// How long an isochronous queue may run dry and the time still be made
+/// up. Windows holds only 10-20 ms of render URBs, so a PC that keeps the
+/// next one waiting a little longer would lose that much of the game's
+/// audio each time, and the speaker buffer drained a bit more each time
+/// (issue 49). Longer than this, and the stream had stopped.
+const MAKE_UP: Duration = Duration::from_millis(250);
 /// Resend the last input report when nothing new arrived for this long.
 const INPUT_KEEPALIVE: Duration = Duration::from_millis(8);
 /// About 200 ms of game PCM.
@@ -445,63 +462,229 @@ fn plug_in(_vhci_path: &str, busid: &str, addr: SocketAddr) -> io::Result<i32> {
 
 // ------------------------------------------------------------------ audio
 
+/// Fixed-capacity ring buffer of interleaved `i16` samples, replacing
+/// per-sample `VecDeque::push_back` / `drain`.
+struct SampleRing {
+    buf: Box<[i16]>,
+    head: usize,
+    len: usize,
+}
+
+impl SampleRing {
+    fn new(cap: usize) -> Self {
+        SampleRing {
+            buf: vec![0i16; cap].into_boxed_slice(),
+            head: 0,
+            len: 0,
+        }
+    }
+
+    fn cap(&self) -> usize {
+        self.buf.len()
+    }
+
+    fn clear(&mut self) {
+        self.head = 0;
+        self.len = 0;
+    }
+
+    fn drop_front(&mut self, n: usize) {
+        let n = n.min(self.len);
+        self.head = (self.head + n) % self.cap();
+        self.len -= n;
+    }
+
+    fn read_into(&mut self, dst: &mut [i16]) -> usize {
+        let n = dst.len().min(self.len);
+        if n == 0 {
+            return 0;
+        }
+        let cap = self.cap();
+        let first = n.min(cap - self.head);
+        dst[..first].copy_from_slice(&self.buf[self.head..self.head + first]);
+        if first < n {
+            dst[first..n].copy_from_slice(&self.buf[..n - first]);
+        }
+        self.head = (self.head + n) % cap;
+        self.len -= n;
+        n
+    }
+
+    fn push_pcm_le(&mut self, pcm: &[u8], samples: usize, gain: f32) {
+        if samples == 0 {
+            return;
+        }
+        let cap = self.cap();
+        // If incoming data exceeds capacity, keep only the tail that fits.
+        let skip = samples.saturating_sub(cap);
+        let take = samples - skip;
+        let over = (self.len + take).saturating_sub(cap);
+        if over > 0 {
+            self.drop_front(over);
+        }
+        let mut tail = (self.head + self.len) % cap;
+        let chunks = &pcm.as_chunks::<2>().0[skip..skip + take];
+        if gain == 1.0 {
+            let mut off = 0;
+            while off < take {
+                let run = (take - off).min(cap - tail);
+                for (dst, c) in self.buf[tail..tail + run]
+                    .iter_mut()
+                    .zip(&chunks[off..off + run])
+                {
+                    *dst = i16::from_le_bytes(*c);
+                }
+                tail += run;
+                if tail == cap {
+                    tail = 0;
+                }
+                off += run;
+            }
+        } else {
+            for (k, c) in chunks.iter().enumerate() {
+                let mut v = i16::from_le_bytes(*c);
+                if (skip + k) % d::RENDER_CHANNELS < 2 {
+                    v = (v as f32 * gain) as i16;
+                }
+                self.buf[tail] = v;
+                tail += 1;
+                if tail == cap {
+                    tail = 0;
+                }
+            }
+        }
+        self.len += take;
+    }
+}
+
 /// The game's 4-channel render stream, as the haptics streamer reads it.
 pub struct AudioRing {
-    q: Mutex<VecDeque<i16>>,
+    q: Mutex<SampleRing>,
     pub frames_in: AtomicU64,
+    /// When PCM last arrived, and the pauses between arrivals.
+    arrivals: Mutex<(Option<Instant>, ArrivalGaps)>,
+    /// How Windows queued the audio URBs, for the log (issue 49).
+    transport: Mutex<RenderStats>,
+    /// Times the stream was opened, closed or ended.
+    restarts: AtomicU64,
+}
+
+/// How the host queued render URBs during one game audio session.
+#[derive(Default)]
+struct RenderStats {
+    urbs: u64,
+    packets: (u32, u32),
+    /// URBs held, this one included, as each arrived.
+    depth: (usize, usize),
+    /// How far past now the queued audio reached as each URB arrived, ms.
+    lead: (u64, u64),
+    /// A URB came after the queue had run out, and of those, the ones
+    /// whose time was made up rather than the clock starting again.
+    ran_out: u64,
+    made_up: u64,
+    /// Completions sent more than 2 ms after their window ended, and the
+    /// latest, microseconds.
+    late: u64,
+    latest_us: u64,
+}
+
+impl RenderStats {
+    fn admitted(&mut self, packets: u32, depth: usize, lead: Duration, how: Admitted) {
+        let lead = lead.as_millis() as u64;
+        if self.urbs == 0 {
+            self.packets = (packets, packets);
+            self.depth = (depth, depth);
+            self.lead = (lead, lead);
+        }
+        self.urbs += 1;
+        self.packets = (self.packets.0.min(packets), self.packets.1.max(packets));
+        self.depth = (self.depth.0.min(depth), self.depth.1.max(depth));
+        self.lead = (self.lead.0.min(lead), self.lead.1.max(lead));
+        self.ran_out += (how != Admitted::OnTime) as u64;
+        self.made_up += (how == Admitted::MadeUp) as u64;
+    }
+
+    fn completed(&mut self, late: Duration) {
+        let us = late.as_micros() as u64;
+        if us > 2_000 {
+            self.late += 1;
+        }
+        self.latest_us = self.latest_us.max(us);
+    }
 }
 
 impl AudioRing {
     fn new() -> AudioRing {
         AudioRing {
-            q: Mutex::new(VecDeque::with_capacity(RING_FRAMES * d::RENDER_CHANNELS)),
+            q: Mutex::new(SampleRing::new(RING_FRAMES * d::RENDER_CHANNELS)),
             frames_in: AtomicU64::new(0),
+            arrivals: Mutex::new((None, ArrivalGaps::default())),
+            transport: Mutex::new(RenderStats::default()),
+            restarts: AtomicU64::new(0),
         }
     }
 
     /// Append little-endian PCM, with `gain` on the speaker channels.
     fn push(&self, pcm: &[u8], gain: f32) {
-        let mut q = self.q.lock();
-        let frames = pcm.len() / (2 * d::RENDER_CHANNELS);
-        for (i, c) in pcm
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .take(frames * d::RENDER_CHANNELS)
-            .enumerate()
         {
-            let mut v = i16::from_le_bytes([c[0], c[1]]);
-            if i % d::RENDER_CHANNELS < 2 && gain != 1.0 {
-                v = (v as f32 * gain) as i16;
+            let now = Instant::now();
+            let mut a = self.arrivals.lock();
+            if let Some(last) = a.0.replace(now) {
+                a.1.note(now - last);
             }
-            q.push_back(v);
         }
-        let over = q.len().saturating_sub(RING_FRAMES * d::RENDER_CHANNELS);
-        q.drain(..over);
+        let frames = pcm.len() / (2 * d::RENDER_CHANNELS);
+        self.q
+            .lock()
+            .push_pcm_le(pcm, frames * d::RENDER_CHANNELS, gain);
         self.frames_in.fetch_add(frames as u64, Ordering::Relaxed);
     }
 
     fn clear(&self) {
         self.q.lock().clear();
+        self.arrivals.lock().0 = None;
+        self.restarts.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 impl PcmSource for AudioRing {
     fn filled_frames(&self) -> usize {
-        self.q.lock().len() / d::RENDER_CHANNELS
+        self.q.lock().len / d::RENDER_CHANNELS
     }
     fn read(&self, out: &mut [i16]) -> usize {
         let mut q = self.q.lock();
-        let frames = (out.len() / d::RENDER_CHANNELS).min(q.len() / d::RENDER_CHANNELS);
-        for (o, v) in out.iter_mut().zip(q.drain(..frames * d::RENDER_CHANNELS)) {
-            *o = v;
-        }
+        let frames = (out.len() / d::RENDER_CHANNELS).min(q.len / d::RENDER_CHANNELS);
+        q.read_into(&mut out[..frames * d::RENDER_CHANNELS]);
         frames
     }
     fn drop_frames(&self, n: usize) {
-        let mut q = self.q.lock();
-        let n = (n * d::RENDER_CHANNELS).min(q.len());
-        q.drain(..n);
+        self.q.lock().drop_front(n * d::RENDER_CHANNELS);
+    }
+    fn take_arrival_gaps(&self) -> ArrivalGaps {
+        std::mem::take(&mut self.arrivals.lock().1)
+    }
+    fn restarts(&self) -> u64 {
+        self.restarts.load(Ordering::Relaxed)
+    }
+    fn log_transport(&self, log: bool) {
+        let t = std::mem::take(&mut *self.transport.lock());
+        if !log || t.urbs == 0 {
+            return;
+        }
+        log::debug!(
+            "game audio over USB: {} URB(s) of {}-{} ms, {}-{} held at once reaching {}-{} ms ahead, the queue ran out {} time(s) ({} made up), {} completion(s) over 2 ms late (latest {:.1} ms)",
+            t.urbs,
+            t.packets.0,
+            t.packets.1,
+            t.depth.0,
+            t.depth.1,
+            t.lead.0,
+            t.lead.1,
+            t.ran_out,
+            t.made_up,
+            t.late,
+            t.latest_us as f64 / 1000.0,
+        );
     }
 }
 
@@ -558,6 +741,17 @@ struct IsoJob {
     frame: u32,
 }
 
+/// How a URB found its isochronous queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Admitted {
+    OnTime,
+    /// The queue had run dry for less than `MAKE_UP`: it goes in where the
+    /// last window ended, in the past, and completes at once.
+    MadeUp,
+    /// The queue had been dry longer: the clock starts again from now.
+    Restarted,
+}
+
 #[derive(Default)]
 struct IsoClock {
     q: VecDeque<IsoJob>,
@@ -566,10 +760,12 @@ struct IsoClock {
 
 impl IsoClock {
     /// Reserve the next window for `lens.len()` one-millisecond packets.
-    fn admit(&mut self, seq: u32, lens: Vec<u32>, now: Instant, epoch: Instant) {
-        let start = match self.cursor {
-            Some(c) if c + MS >= now => c,
-            _ => now,
+    fn admit(&mut self, seq: u32, lens: Vec<u32>, now: Instant, epoch: Instant) -> Admitted {
+        let (start, how) = match self.cursor {
+            Some(c) if c + MS >= now => (c, Admitted::OnTime),
+            Some(c) if c + MAKE_UP >= now => (c, Admitted::MadeUp),
+            Some(_) => (now, Admitted::Restarted),
+            None => (now, Admitted::OnTime),
         };
         let due = start + MS * lens.len().max(1) as u32;
         self.cursor = Some(due);
@@ -581,6 +777,7 @@ impl IsoClock {
             due,
             frame,
         });
+        how
     }
 
     fn remove(&mut self, seq: u32) -> bool {
@@ -1217,6 +1414,10 @@ fn handshake(s: &Shared, st: &mut TcpStream) -> Option<TcpStream> {
 /// Serve one imported connection: read URBs until the driver goes away.
 /// A replug under way leaves the pad alive for the next connection.
 fn session(s: &Arc<Shared>, stream: TcpStream) {
+    // The game's audio arrives on this thread, and a busy PC that leaves it
+    // waiting is a gap in the speaker (issue 49), like the clock thread.
+    #[cfg(windows)]
+    let _mmcss = crate::platform::ProAudio::join("virtual controller reader");
     let _ = stream.set_read_timeout(None);
     let _ = stream.set_nodelay(true);
     let Ok(w) = stream.try_clone() else {
@@ -1335,7 +1536,11 @@ fn submit(s: &Shared, u: Submit) {
             s.audio.push(&u.data, gain);
             let mut g = s.conn.lock();
             if let Some(c) = g.as_mut() {
-                c.render.admit(u.seq, u.iso_lens, Instant::now(), s.epoch);
+                let now = Instant::now();
+                let packets = u.iso_lens.len() as u32;
+                let how = c.render.admit(u.seq, u.iso_lens, now, s.epoch);
+                let lead = c.render.cursor.map(|end| end.saturating_duration_since(now)).unwrap_or_default();
+                s.audio.transport.lock().admitted(packets, c.render.q.len(), lead, how);
             }
         }
         (d::EP_CAPTURE, wire::DIR_IN) if s.model.capture_interface().is_some() && u.packets.is_some() => {
@@ -1363,7 +1568,8 @@ fn submit(s: &Shared, u: Submit) {
 /// Completes isochronous windows on time and keeps input flowing.
 fn clock(s: &Arc<Shared>) {
     crate::platform::timer_resolution_1ms();
-    crate::platform::raise_thread_priority(false);
+    #[cfg(windows)]
+    let _mmcss = crate::platform::ProAudio::join("virtual controller clock");
     let timer = crate::platform::PreciseTimer::new();
     let mut descs: Vec<(u32, u32, u32)> = Vec::with_capacity(64);
     let mut capture: Vec<u8> = Vec::new();
@@ -1375,6 +1581,7 @@ fn clock(s: &Arc<Shared>) {
             if let Some(c) = g.as_mut() {
                 while c.render.q.front().map(|j| j.due <= now).unwrap_or(false) {
                     let j = c.render.q.pop_front().unwrap();
+                    s.audio.transport.lock().completed(now - j.due);
                     descs.clear();
                     let mut off = 0;
                     for &l in &j.lens {
@@ -1690,6 +1897,41 @@ fn audio_request(s: &Shared, req: u8, unit: u8, selector: u8, data: &[u8]) -> Op
 mod tests {
     use super::*;
 
+    #[test]
+    fn idle_report_has_no_finger_on_the_touchpad() {
+        // Bit 7 of a contact byte set means lifted; a parked pad whose
+        // controller left must not look like a resting finger.
+        let ds = Model::DualSense.idle_input();
+        assert_eq!((ds[33] & 0x80, ds[37] & 0x80), (0x80, 0x80));
+        assert!(ds[34..37].iter().chain(&ds[38..41]).all(|b| *b == 0));
+        let ds4 = Model::DualShock4.idle_input();
+        assert_eq!((ds4[35] & 0x80, ds4[39] & 0x80), (0x80, 0x80));
+    }
+
+    #[test]
+    fn idle_report_matches_the_no_touch_live_report() {
+        // The idle report and a live report built without touch agree on
+        // every byte the idle report sets, so only the touch bytes changed.
+        let pad = ds_proto::virtual_pad::PadState::default();
+        let live = ds_proto::virtual_pad::ds_usb_input(&pad, None, false, 0);
+        let idle = Model::DualSense.idle_input();
+        assert_eq!(&idle[33..41], &live[33..41]);
+        assert_eq!(&idle[..11], &live[..11]);
+    }
+
+    #[test]
+    fn live_touch_still_passes_through() {
+        let pad = ds_proto::virtual_pad::PadState::default();
+        let mut raw = [0u8; ds_proto::virtual_pad::DS_USB_INPUT_LEN];
+        raw[0] = 0x01;
+        raw[33..37].copy_from_slice(&[0x05, 0x10, 0x20, 0x30]);
+        raw[37] = 0x80;
+        let r = ds_proto::virtual_pad::ds_usb_input(&pad, Some(&raw), true, 0);
+        assert_eq!(&r[33..41], &raw[33..41]);
+        let r = ds_proto::virtual_pad::ds_usb_input(&pad, Some(&raw), false, 0);
+        assert_eq!((r[33], r[37]), (0x80, 0x80));
+    }
+
     fn microphone_test_pad() -> Shared {
         test_pad(Model::DualSense)
     }
@@ -1701,6 +1943,7 @@ mod tests {
             sink: DsSink {
                 on_output: Box::new(|_| {}),
                 mirror: Arc::new(Mutex::new(super::super::mirror::Mirror::default())),
+                refresh: None,
             },
             conn: Mutex::new(None),
             input: Mutex::new(model.idle_input()),
@@ -2001,15 +2244,15 @@ mod tests {
         let epoch = Instant::now();
         let mut c = IsoClock::default();
         let t0 = epoch + Duration::from_millis(5);
-        c.admit(1, vec![384; 10], t0, epoch);
-        c.admit(2, vec![384; 10], t0, epoch);
+        assert_eq!(c.admit(1, vec![384; 10], t0, epoch), Admitted::OnTime);
+        assert_eq!(c.admit(2, vec![384; 10], t0, epoch), Admitted::OnTime);
         assert_eq!(c.q[0].due, t0 + Duration::from_millis(10));
         assert_eq!(c.q[1].due, t0 + Duration::from_millis(20));
         assert_eq!(c.q[1].frame, 15);
         // Long after the cursor: start from now, not from the stale cursor.
-        let late = t0 + Duration::from_millis(100);
+        let late = t0 + Duration::from_millis(20) + MAKE_UP + MS;
         c.q.clear();
-        c.admit(3, vec![384; 2], late, epoch);
+        assert_eq!(c.admit(3, vec![384; 2], late, epoch), Admitted::Restarted);
         assert_eq!(c.q[0].due, late + Duration::from_millis(2));
     }
 
@@ -2028,7 +2271,7 @@ mod tests {
         pairing[7..].fill(0xA7);
         let mut mirror = crate::virt::mirror::Mirror::default();
         mirror.pairing = Some(pairing.clone());
-        let sink = DsSink { on_output: Box::new(|_| {}), mirror: Arc::new(Mutex::new(mirror)) };
+        let sink = DsSink { refresh: None, on_output: Box::new(|_| {}), mirror: Arc::new(Mutex::new(mirror)) };
         let answer = sink.feature(Model::DualSense, 0x09, 0x1234).unwrap();
         assert_eq!(&answer[..7], &[0x09, 0x34, 0x12, 0x59, 0x53, 0x44, 0x02]);
         assert_eq!(&answer[7..], &pairing[7..]);
@@ -2039,6 +2282,23 @@ mod tests {
         let unchanged = sink.mirror.lock().answer(0x05).unwrap();
         assert_eq!(sink.feature(Model::DualSense, 0x05, 0x1234).unwrap(), unchanged);
         assert_eq!(sink.mirror.lock().pairing.as_ref().unwrap(), &pairing);
+    }
+
+    #[test]
+    fn a_short_dry_spell_is_made_up_and_not_lost() {
+        let epoch = Instant::now();
+        let mut c = IsoClock::default();
+        let t0 = epoch + Duration::from_millis(5);
+        c.admit(1, vec![384; 10], t0, epoch);
+        c.q.clear();
+        // 40 ms after the last window ended: it takes the next window
+        // anyway, already due, so the clock is back to now in a few URBs.
+        let late = t0 + Duration::from_millis(50);
+        assert_eq!(c.admit(2, vec![384; 10], late, epoch), Admitted::MadeUp);
+        assert_eq!(c.q[0].due, t0 + Duration::from_millis(20));
+        assert_eq!(c.q[0].frame, 15);
+        // Just within a packet of the cursor is on time, as before.
+        assert_eq!(c.admit(3, vec![384; 10], t0 + Duration::from_millis(21), epoch), Admitted::OnTime);
     }
 
     #[test]
@@ -2067,6 +2327,48 @@ mod tests {
         assert_eq!(printed, serial);
         let mac_report = d::ds4::feature(0x81, None, &mac).unwrap();
         assert_eq!(&mac_report[1..7], &report[1..7]);
+    }
+
+    #[test]
+    fn ring_counts_pauses_in_the_audio_arriving() {
+        let r = AudioRing::new();
+        let frame = [0u8; 8];
+        r.push(&frame, 1.0);
+        r.push(&frame, 1.0);
+        assert_eq!(r.take_arrival_gaps().count, 0, "back to back is no pause");
+        std::thread::sleep(ArrivalGaps::LATE + Duration::from_millis(5));
+        r.push(&frame, 1.0);
+        let g = r.take_arrival_gaps();
+        assert_eq!(g.count, 1);
+        assert!(g.longest >= ArrivalGaps::LATE);
+        assert_eq!(r.take_arrival_gaps(), ArrivalGaps::default(), "taking starts afresh");
+        r.clear();
+        std::thread::sleep(ArrivalGaps::LATE + Duration::from_millis(5));
+        r.push(&frame, 1.0);
+        assert_eq!(r.take_arrival_gaps().count, 0, "a closed stream is no pause");
+    }
+
+    #[test]
+    fn sample_ring_wraps_and_reads_slices() {
+        let mut ring = SampleRing::new(8);
+        let pcm: Vec<u8> = [1i16, 2, 3, 4, 5, 6, 7, 8]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+        ring.push_pcm_le(&pcm, 8, 1.0);
+        let mut out = [0i16; 6];
+        assert_eq!(ring.read_into(&mut out), 6);
+        assert_eq!(out, [1, 2, 3, 4, 5, 6]);
+        // Wrap around the ring end and verify slice-split read.
+        let pcm2: Vec<u8> = [9i16, 10, 11, 12, 13, 14]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+        ring.push_pcm_le(&pcm2, 6, 1.0);
+        let mut out2 = [0i16; 8];
+        assert_eq!(ring.read_into(&mut out2), 8);
+        assert_eq!(out2, [7, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(ring.len, 0);
     }
 
     #[test]

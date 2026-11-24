@@ -8,7 +8,8 @@
 //!
 //! DSZ never downloads a program itself: an app that fetches an exe and
 //! starts it is what antivirus heuristics call a downloader (Kaspersky
-//! flagged 0.3.8, which did). "Download" opens the release's `dsz.exe` in
+//! flagged 0.3.8, which did). "Download" opens the release's `dsz.exe` (on an
+//! ARM64 PC its native `dsz-arm64.exe`, when the release has one) in
 //! the browser, which scans and saves it like any download. DSZ then finds
 //! it in the Downloads folder (or is shown where it is), checks it against
 //! the SHA-256 GitHub publishes for the file, and on "Install and restart"
@@ -39,6 +40,10 @@ const LATEST: &str = "https://api.github.com/repos/jpbjesus/dualwave/releases?pe
 pub const RELEASES: &str = "https://github.com/jpbjesus/dualwave/releases";
 #[cfg(target_os = "linux")]
 const ASSET: &str = "DualWave-x86_64.AppImage";
+/// The native build for Windows on ARM. An ARM64 PC updates to it, also
+/// from the x64 exe under emulation; a release without it gives `ASSET`,
+/// which runs there under emulation.
+const ASSET_ARM64: &str = "dsz-arm64.exe";
 /// First check a little after startup, out of the way of controllers
 /// connecting; then once a day.
 const FIRST_CHECK: Duration = Duration::from_secs(20);
@@ -132,9 +137,9 @@ pub fn run(engine: Arc<Engine>) {
         if let Some(r) = available() {
             if told.as_deref() != Some(r.version.as_str()) {
                 log::info!("DSZ {} is available", r.version);
-                engine.toast(crate::localized_format!("DSZ {} is available: Settings > Updates", "DSZ {} está disponível: Configurações > Atualizações", "DSZ {} está disponible: Configuración > Actualizaciones"; "DSZ {} disponível: Definições > Atualizações", r.version));
+                engine.toast(crate::localized_format!("DSZ {} is available: Settings > Updates", "DSZ {} está disponível: Configurações > Atualizações", "DSZ {} está disponible: Configuración > Actualizaciones", "DSZ {} 已发布：设置 > 更新"; "DSZ {} disponível: Definições > Atualizações", r.version));
                 crate::tray::notify(
-                    &crate::localized_format!("DSZ {} is available", "DSZ {} está disponível", "DSZ {} está disponible"; "DSZ {} está disponível", r.version),
+                    &crate::localized_format!("DSZ {} is available", "DSZ {} está disponível", "DSZ {} está disponible", "DSZ {} 已发布"; "DSZ {} está disponível", r.version),
                     crate::i18n::tr("Open DSZ and go to Settings to update."),
                 );
                 told = Some(r.version);
@@ -186,31 +191,30 @@ fn latest() -> Result<Release, String> {
         })?;
     let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&file);
-    let release = parse(&text).ok_or_else(|| "GitHub's answer had no release in it.".to_string())?;
+    let release = parse(&text, crate::install::native_arm64()).ok_or_else(|| "GitHub's answer had no release in it.".to_string())?;
     log::debug!("update check: latest published release {}", release.version);
     Ok(release)
 }
 
-fn parse(json: &str) -> Option<Release> {
+fn parse(json: &str, arm64: bool) -> Option<Release> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
     if let Some(releases) = v.as_array() {
-        return releases.iter().filter_map(parse_release)
+        return releases.iter().filter_map(|v| parse_release(v, arm64))
             .max_by(|a, b| version_number(&a.version).unwrap().cmp_precedence(&version_number(&b.version).unwrap()));
     }
-    parse_release(&v)
+    parse_release(&v, arm64)
 }
 
-fn parse_release(v: &serde_json::Value) -> Option<Release> {
+fn parse_release(v: &serde_json::Value, arm64: bool) -> Option<Release> {
     if v["draft"].as_bool() == Some(true) { return None; }
     // Alpha builds follow published pre-releases; stable builds stay on stable.
     if v["prerelease"].as_bool() == Some(true) && !env!("CARGO_PKG_VERSION").contains('-') { return None; }
     let version = v["tag_name"].as_str()?.trim_start_matches('v').to_string();
     version_number(&version)?;
     let page = v["html_url"].as_str().unwrap_or(RELEASES).to_string();
-    let asset = v["assets"]
-        .as_array()?
-        .iter()
-        .find(|a| a["name"].as_str() == Some(ASSET))?;
+    let assets = v["assets"].as_array()?;
+    let named = |n: &str| assets.iter().find(|a| a["name"].as_str() == Some(n));
+    let asset = (cfg!(windows) && arm64).then(|| named(ASSET_ARM64)).flatten().or_else(|| named(ASSET))?;
     let url = asset["browser_download_url"].as_str()?.to_string();
     let size = asset["size"].as_u64();
     let sha256 = asset["digest"]
@@ -466,12 +470,30 @@ mod tests {
             "assets":[{"name":"other.zip","browser_download_url":"https://example.invalid/x"},
             {"name":"dsz.exe","browser_download_url":"https://github.com/MaximumFreak/dsz/releases/download/v0.3.8/dsz.exe",
              "size":9294336,"digest":"sha256:ef4fea4dcb25a386e63ebb4e50f55c89a36a79b4ee02d1652d425325fa4c26c2"}]}"#;
-        let r = parse(json).unwrap();
+        let r = parse(json, false).unwrap();
         assert_eq!(r.version, "0.3.8");
         assert!(r.url.ends_with("/v0.3.8/dsz.exe"));
         assert_eq!(r.size, Some(9294336));
         assert_eq!(r.sha256.unwrap()[..2], [0xef, 0x4f]);
-        assert!(parse(r#"{"tag_name":"v1","assets":[]}"#).is_none(), "no exe, no update");
+        assert!(parse(r#"{"tag_name":"v1","assets":[]}"#, false).is_none(), "no exe, no update");
+        // A release from before the ARM64 build: an ARM64 PC gets the x64 exe.
+        assert_eq!(parse(json, true).unwrap(), r);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn an_arm64_pc_gets_the_arm64_build() {
+        let json = r#"{"tag_name":"v0.4.18","assets":[
+            {"name":"dsz.exe","browser_download_url":"https://example.invalid/dsz.exe","size":1,
+             "digest":"sha256:ef4fea4dcb25a386e63ebb4e50f55c89a36a79b4ee02d1652d425325fa4c26c2"},
+            {"name":"dsz-arm64.exe","browser_download_url":"https://example.invalid/dsz-arm64.exe","size":2,
+             "digest":"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]}"#;
+        let arm = parse(json, true).unwrap();
+        assert!(arm.url.ends_with("/dsz-arm64.exe"));
+        assert_eq!((arm.size, arm.sha256.unwrap()[0]), (Some(2), 0xba));
+        let x64 = parse(json, false).unwrap();
+        assert!(x64.url.ends_with("/dsz.exe"));
+        assert_eq!((x64.size, x64.sha256.unwrap()[0]), (Some(1), 0xef));
     }
 
     #[test]
@@ -499,16 +521,17 @@ mod tests {
             entry("v0.4.2-alpha.10", false, ASSET),
             entry("v0.4.2-alpha.2", false, ASSET)
         ]);
-        let r = parse(&feed.to_string()).expect("alpha release from GitHub's list");
+        let r = parse(&feed.to_string(), false).expect("alpha release from GitHub's list");
+        assert_eq!(parse(&feed.to_string(), true).unwrap(), r, "Linux must never select a Windows ARM64 asset");
         assert_eq!(r.version, "0.4.2-alpha.10");
         assert_eq!(r.sha256, Some([0xab; 32]));
         assert_eq!(r.size, Some(123));
-        assert!(parse("[]").is_none());
-        assert!(parse(&serde_json::json!([entry("v0.5.0-alpha.1", true, ASSET), entry("v0.6.0-alpha.1", false, "source.zip")]).to_string()).is_none());
+        assert!(parse("[]", false).is_none());
+        assert!(parse(&serde_json::json!([entry("v0.5.0-alpha.1", true, ASSET), entry("v0.6.0-alpha.1", false, "source.zip")]).to_string(), false).is_none());
         let promoted = serde_json::json!([entry("v0.4.2-alpha.10", false, ASSET), entry("v0.4.2", false, ASSET)]);
-        assert_eq!(parse(&promoted.to_string()).unwrap().version, "0.4.2");
+        assert_eq!(parse(&promoted.to_string(), false).unwrap().version, "0.4.2");
         let single = entry("v0.4.2-alpha.1", false, ASSET);
-        assert_eq!(parse(&single.to_string()).unwrap().version, "0.4.2-alpha.1");
+        assert_eq!(parse(&single.to_string(), false).unwrap().version, "0.4.2-alpha.1");
     }
 
     /// Asks the real GitHub: `cargo test -- --ignored asks_github`.

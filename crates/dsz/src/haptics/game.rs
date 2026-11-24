@@ -11,22 +11,63 @@
 //! dropping frames, which clicks. Only a backlog far past the target (a
 //! stall) is cut. Speaker audio fades in after a gap and fades out into
 //! one.
+//!
+//! Windows sends the audio in 10 ms URBs and holds only one or two ahead,
+//! so `PRIME` is three windows: two windows' worth started every session
+//! with a dropout on the first sound (issue 49).
+//!
+//! When the game's audio runs dry and comes back within `REFILL` (the PC
+//! was too busy to deliver it in time, often while a game is still
+//! loading), the target grows by a window, up to `MAX_PRIME`, so a PC that
+//! drops out once keeps a deeper buffer for the rest of the connection.
+//! Playback starts again once `PRIME` is back rather than the whole
+//! target, so a dropout is not also a target's worth of silence, and the
+//! rest of the target fills by reading up to `CATCH_UP` slower.
+//!
+//! The haptics Latency setting picks the targets: Short stays at `PRIME`,
+//! Medium starts there and grows to `MAX_PRIME`, Long starts at
+//! `MAX_PRIME` and grows to `LONG_MAX_PRIME`, for a PC that holds the
+//! audio back longer than 64 ms now and then (issue 49).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::dsp::resample_window;
+use crate::profile::Latency;
 
 /// Frames per window at the `0x32` haptics rate (32 samples at 3 kHz).
 pub const WINDOW: usize = 512;
-/// Backlog the reader aims for, in frames (about 21 ms).
-const PRIME: usize = 2 * WINDOW;
-/// Past this the backlog is cut back to `PRIME`.
-const MAX_BACKLOG: usize = PRIME + 8 * WINDOW;
+/// Backlog the reader aims for at first, in frames (about 32 ms), and
+/// what it waits for after running dry.
+const PRIME: usize = 3 * WINDOW;
+/// Deepest backlog it grows to after dropouts (about 64 ms), and where
+/// Long latency starts.
+const MAX_PRIME: usize = 6 * WINDOW;
+/// Deepest backlog with Long latency (about 96 ms).
+const LONG_MAX_PRIME: usize = 9 * WINDOW;
+/// Past the target by this much the backlog is cut back to the target.
+const MAX_OVER: usize = 8 * WINDOW;
+/// Audio back within this long after running dry was a dropout, not the
+/// game stopping its audio.
+const REFILL: Duration = Duration::from_millis(250);
 /// Largest read rate correction.
 const MAX_SKEW: f64 = 0.005;
+/// Largest slowdown while the backlog is more than a window short of the
+/// target, after a dropout: fills 32 ms in about 3 s, a pitch change too
+/// small to hear in game sound.
+const CATCH_UP: f64 = 0.01;
 /// Speaker fade length in frames (5 ms).
 const FADE: usize = 240;
+
+/// The backlog a Latency setting starts at and the deepest dropouts can
+/// grow it to, in frames.
+fn targets(latency: Latency) -> (usize, usize) {
+    match latency {
+        Latency::Short => (PRIME, PRIME),
+        Latency::Medium => (PRIME, MAX_PRIME),
+        Latency::Long => (MAX_PRIME, LONG_MAX_PRIME),
+    }
+}
 
 /// Interleaved 4-channel 16-bit PCM at 48 kHz.
 pub trait PcmSource: Send + Sync {
@@ -34,6 +75,39 @@ pub trait PcmSource: Send + Sync {
     /// Read up to `out.len() / 4` frames. Returns frames read.
     fn read(&self, out: &mut [i16]) -> usize;
     fn drop_frames(&self, n: usize);
+    /// Pauses in the audio arriving since the last call, which starts
+    /// counting afresh.
+    fn take_arrival_gaps(&self) -> ArrivalGaps {
+        ArrivalGaps::default()
+    }
+    /// Log how the audio was delivered since the last call (when `log`),
+    /// and start counting afresh.
+    fn log_transport(&self, _log: bool) {}
+    /// Changes whenever the game closes or reopens the stream.
+    fn restarts(&self) -> u64 {
+        0
+    }
+}
+
+/// Times the game's audio stopped arriving for `ArrivalGaps::LATE` or
+/// longer, and the longest pause (issue 49: tells a PC that stops sending
+/// apart from a buffer that is too thin).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArrivalGaps {
+    pub count: u64,
+    pub longest: Duration,
+}
+
+impl ArrivalGaps {
+    pub const LATE: Duration = Duration::from_millis(25);
+
+    /// Count the pause between two arrivals.
+    pub fn note(&mut self, pause: Duration) {
+        if pause >= Self::LATE {
+            self.count += 1;
+            self.longest = self.longest.max(pause);
+        }
+    }
 }
 
 /// One window of game audio, scaled to -1..1.
@@ -49,6 +123,22 @@ pub struct GameWindow {
 
 pub struct GameReader {
     primed: bool,
+    /// Backlog the reader aims for, frames.
+    prime: usize,
+    latency: Latency,
+    /// Where `prime` starts and how far dropouts can grow it, from
+    /// `latency`.
+    start: usize,
+    max: usize,
+    /// When the audio last ran dry, until it is back.
+    starved_at: Option<Instant>,
+    /// The source's restart count at the last read.
+    restarts_seen: u64,
+    /// The target grew a window when it ran dry; taken back if the audio
+    /// turns out to have stopped rather than dropped out.
+    grown: bool,
+    /// Dropouts: the audio ran dry and came back within `REFILL`.
+    pub underruns: u64,
     /// Fade the next speaker window in.
     fade_in: bool,
     pcm: Vec<i16>,
@@ -65,13 +155,23 @@ pub struct GameReader {
 
 impl GameReader {
     pub fn new() -> Self {
+        let latency = Latency::Medium;
+        let (start, max) = targets(latency);
         GameReader {
             primed: false,
+            prime: start,
+            latency,
+            start,
+            max,
+            starved_at: None,
+            restarts_seen: 0,
+            grown: false,
+            underruns: 0,
             fade_in: true,
             pcm: vec![0; (WINDOW + WINDOW / 64 + 2) * 4],
             raw_speaker: Vec::with_capacity(WINDOW * 2),
             prev_speaker: [0.0; 2],
-            fill: PRIME as f64,
+            fill: start as f64,
             acc: 0.0,
             win: GameWindow {
                 haptics: Vec::with_capacity(WINDOW * 2),
@@ -83,31 +183,94 @@ impl GameReader {
         }
     }
 
+    /// Follow the haptics Latency setting. A change takes effect at once:
+    /// a deeper target fills by reading slower, a shallower one drains by
+    /// reading faster.
+    pub fn set_latency(&mut self, latency: Latency) {
+        if latency == self.latency {
+            return;
+        }
+        let (start, max) = targets(latency);
+        log::info!(
+            "game audio latency {:?}: buffering {} to {} ms",
+            latency,
+            start * 1000 / 48_000,
+            max * 1000 / 48_000
+        );
+        self.latency = latency;
+        self.start = start;
+        self.max = max;
+        self.prime = self.prime.clamp(start, max);
+        // Growth already cut back by the clamp is not taken back again.
+        self.grown &= self.prime > start;
+    }
+
+    pub fn latency(&self) -> Latency {
+        self.latency
+    }
+
+    /// The backlog the reader aims for, in milliseconds. Growth from a
+    /// dry spell not yet known to be a dropout (the audio may have closed)
+    /// is left out.
+    pub fn buffer_ms(&self) -> usize {
+        let pending = if self.starved_at.is_some() && self.grown { WINDOW } else { 0 };
+        (self.prime - pending) * 1000 / 48_000
+    }
+
     /// Take one window of `frames` frames (at most `WINDOW`). `None` while
     /// priming or after an underrun.
     pub fn take(&mut self, src: &dyn PcmSource, frames: usize) -> Option<&GameWindow> {
         let frames = frames.min(WINDOW);
         let mut filled = src.filled_frames();
+        // The game closed or reopened its audio since the last read.
+        let restarts = src.restarts();
+        let restarted = std::mem::replace(&mut self.restarts_seen, restarts) != restarts;
         if !self.primed {
-            if filled < PRIME {
+            // Not back in time, or back as a new stream: the game stopped
+            // or reopened its audio (FFXIV reopens it at once on start), so
+            // this was no dropout.
+            if self.starved_at.is_some_and(|at| restarted || at.elapsed() >= REFILL) {
+                self.starved_at = None;
+                if self.grown {
+                    self.grown = false;
+                    self.prime = (self.prime - WINDOW).max(self.start);
+                }
+            }
+            if filled < PRIME.min(self.prime) {
                 return None;
             }
             self.primed = true;
             self.fade_in = true;
             self.fill = filled as f64;
             self.acc = 0.0;
+            if let Some(at) = self.starved_at.take() {
+                self.underruns += 1;
+                if self.grown {
+                    log::info!(
+                        "game audio ran dry and was back {} ms later; buffering up to {} ms of it now",
+                        at.elapsed().as_millis(),
+                        self.prime * 1000 / 48_000
+                    );
+                } else {
+                    log::debug!(
+                        "game audio ran dry again and was back {} ms later",
+                        at.elapsed().as_millis()
+                    );
+                }
+            }
         }
-        if filled > MAX_BACKLOG {
-            let drop = filled - PRIME;
+        if filled > self.prime + MAX_OVER {
+            let drop = filled - self.prime;
             src.drop_frames(drop);
             self.dropped.fetch_add(drop as u64, Ordering::Relaxed);
-            filled = PRIME;
-            self.fill = PRIME as f64;
+            filled = self.prime;
+            self.fill = self.prime as f64;
         }
         // Follow the game's clock: read a little more while the backlog
         // grows, a little less while it shrinks.
         self.fill += (filled as f64 - self.fill) * 0.02;
-        let skew = ((self.fill - PRIME as f64) / (8.0 * WINDOW as f64)).clamp(-MAX_SKEW, MAX_SKEW);
+        let slowest = if self.fill + (WINDOW as f64) < self.prime as f64 { CATCH_UP } else { MAX_SKEW };
+        let skew = ((self.fill - self.prime as f64) / (8.0 * WINDOW as f64)).clamp(-slowest, MAX_SKEW);
         self.acc += frames as f64 * (1.0 + skew);
         let want = self.acc.floor() as usize;
         self.acc -= want as f64;
@@ -132,6 +295,13 @@ impl GameReader {
         if underrun {
             // Play what there is, fading to silence, then wait to prime.
             self.primed = false;
+            // Refill deeper, so the restart already has the larger cushion,
+            // unless the stream itself ended or started again.
+            self.starved_at = (!restarted).then(Instant::now);
+            self.grown = !restarted && self.prime < self.max;
+            if self.grown {
+                self.prime += WINDOW;
+            }
             let len = self.raw_speaker.len().max(1) as f32;
             for (k, f) in self.raw_speaker.iter_mut().enumerate() {
                 let g = 1.0 - k as f32 / len;
@@ -259,10 +429,11 @@ fn speaker_test(secs: f32) -> f32 {
 
 impl PcmSource for TestSource {
     fn filled_frames(&self) -> usize {
+        // Made on demand: enough for any target the reader has grown to.
         if self.finished() {
             0
         } else {
-            PRIME
+            LONG_MAX_PRIME
         }
     }
     fn read(&self, out: &mut [i16]) -> usize {
@@ -321,7 +492,7 @@ mod tests {
         let src = Fake(parking_lot::Mutex::new(600));
         let mut r = GameReader::new();
         assert!(r.take(&src, WINDOW).is_none(), "waits for the target backlog");
-        *src.0.lock() = MAX_BACKLOG + 100;
+        *src.0.lock() = PRIME + MAX_OVER + 100;
         let w = r.take(&src, WINDOW).unwrap();
         assert!((w.haptics.len() as i64 - WINDOW as i64).abs() <= 3);
         assert_eq!(w.speaker.len(), WINDOW);
@@ -363,6 +534,157 @@ mod tests {
         assert!(w.speaker[99][0].abs() < 0.01);
         assert_eq!(w.speaker[200][0], 0.0);
         assert!(r.take(&src, WINDOW).is_none(), "primes again");
+    }
+
+    #[test]
+    fn a_dropout_deepens_the_buffer_and_a_closed_stream_does_not() {
+        let src = Fake(parking_lot::Mutex::new(PRIME));
+        let mut r = GameReader::new();
+        r.take(&src, WINDOW).unwrap();
+        assert_eq!(r.buffer_ms(), 32);
+        // Runs dry, and the audio is back at once: one dropout, one window deeper.
+        *src.0.lock() = 100;
+        r.take(&src, WINDOW).unwrap();
+        assert_eq!(r.buffer_ms(), 32, "not known yet to be a dropout");
+        *src.0.lock() = PRIME - 1;
+        assert!(r.take(&src, WINDOW).is_none(), "waits for the first target");
+        *src.0.lock() = PRIME;
+        r.take(&src, WINDOW).unwrap();
+        assert_eq!((r.underruns, r.prime, r.buffer_ms()), (1, PRIME + WINDOW, 42));
+        // It stops growing at MAX_PRIME.
+        for _ in 0..10 {
+            *src.0.lock() = 0;
+            r.take(&src, WINDOW);
+            *src.0.lock() = MAX_PRIME;
+            r.take(&src, WINDOW).unwrap();
+        }
+        assert_eq!((r.underruns, r.prime), (11, MAX_PRIME));
+        // Audio that comes back much later was the game stopping its audio.
+        let mut r = GameReader::new();
+        *src.0.lock() = PRIME;
+        r.take(&src, WINDOW).unwrap();
+        *src.0.lock() = 0;
+        r.take(&src, WINDOW);
+        r.starved_at = Some(Instant::now() - REFILL * 2);
+        *src.0.lock() = PRIME;
+        r.take(&src, WINDOW).unwrap();
+        assert_eq!((r.underruns, r.prime), (0, PRIME));
+    }
+
+    #[test]
+    fn latency_sets_where_the_buffer_starts_and_how_far_it_grows() {
+        let dropout = |r: &mut GameReader, src: &Fake| {
+            *src.0.lock() = 0;
+            r.take(src, WINDOW);
+            *src.0.lock() = LONG_MAX_PRIME;
+            r.take(src, WINDOW).unwrap();
+        };
+        let src = Fake(parking_lot::Mutex::new(PRIME));
+        // Short never grows.
+        let mut r = GameReader::new();
+        r.set_latency(Latency::Short);
+        r.take(&src, WINDOW).unwrap();
+        for _ in 0..5 {
+            dropout(&mut r, &src);
+        }
+        assert_eq!((r.underruns, r.prime, r.buffer_ms()), (5, PRIME, 32));
+        // Long starts at 64 ms, plays once 32 ms is there, and grows to 96 ms.
+        let mut r = GameReader::new();
+        r.set_latency(Latency::Long);
+        assert_eq!(r.buffer_ms(), 64);
+        *src.0.lock() = PRIME;
+        assert!(r.take(&src, WINDOW).is_some());
+        for _ in 0..5 {
+            dropout(&mut r, &src);
+        }
+        assert_eq!((r.prime, r.buffer_ms()), (LONG_MAX_PRIME, 96));
+        // Back to Medium: the target comes down to its limit.
+        r.set_latency(Latency::Medium);
+        assert_eq!(r.buffer_ms(), 64);
+        r.set_latency(Latency::Short);
+        assert_eq!(r.buffer_ms(), 32);
+        // And up again: Long's start.
+        r.set_latency(Latency::Long);
+        assert_eq!(r.buffer_ms(), 64);
+    }
+
+    #[test]
+    fn after_a_dropout_it_reads_slower_until_the_buffer_is_full() {
+        let src = Fake(parking_lot::Mutex::new(MAX_PRIME));
+        let mut r = GameReader::new();
+        r.prime = MAX_PRIME;
+        r.take(&src, WINDOW).unwrap();
+        // Back with only the first target buffered.
+        *src.0.lock() = 0;
+        r.take(&src, WINDOW);
+        r.prime = MAX_PRIME;
+        r.grown = false;
+        *src.0.lock() = PRIME;
+        let mut read = 0usize;
+        let windows = 48_000 * 4 / WINDOW;
+        for _ in 0..windows {
+            let before = *src.0.lock();
+            r.take(&src, WINDOW).expect("plays on while it fills");
+            read += before - *src.0.lock();
+            *src.0.lock() += WINDOW;
+        }
+        let backlog = *src.0.lock();
+        assert!(backlog + WINDOW >= MAX_PRIME, "filled to {backlog} of {MAX_PRIME}");
+        assert!(read < windows * WINDOW, "it read slower");
+        assert_eq!(r.dropped.load(Ordering::Relaxed), 0);
+    }
+
+    /// FFXIV opens its audio, closes it and opens it again within 0.2 s.
+    #[test]
+    fn a_reopened_stream_is_no_dropout() {
+        struct Reopening(Fake, std::sync::atomic::AtomicU64);
+        impl PcmSource for Reopening {
+            fn filled_frames(&self) -> usize {
+                self.0.filled_frames()
+            }
+            fn read(&self, out: &mut [i16]) -> usize {
+                self.0.read(out)
+            }
+            fn drop_frames(&self, n: usize) {
+                self.0.drop_frames(n)
+            }
+            fn restarts(&self) -> u64 {
+                self.1.load(Ordering::Relaxed)
+            }
+        }
+        let src = Reopening(Fake(parking_lot::Mutex::new(PRIME)), Default::default());
+        let mut r = GameReader::new();
+        r.take(&src, WINDOW).unwrap();
+        // Closed and reopened between two reads: runs dry at once.
+        src.1.fetch_add(2, Ordering::Relaxed);
+        *src.0 .0.lock() = 0;
+        r.take(&src, WINDOW);
+        *src.0 .0.lock() = PRIME;
+        r.take(&src, WINDOW).unwrap();
+        assert_eq!((r.underruns, r.prime), (0, PRIME));
+        // Runs dry, then reopens before it is back.
+        *src.0 .0.lock() = 0;
+        r.take(&src, WINDOW);
+        src.1.fetch_add(2, Ordering::Relaxed);
+        *src.0 .0.lock() = PRIME;
+        r.take(&src, WINDOW).unwrap();
+        assert_eq!((r.underruns, r.prime), (0, PRIME));
+    }
+
+    #[test]
+    fn the_test_source_starts_after_the_buffer_grew() {
+        let src = Fake(parking_lot::Mutex::new(PRIME));
+        let mut r = GameReader::new();
+        r.take(&src, WINDOW).unwrap();
+        for _ in 0..10 {
+            *src.0.lock() = 0;
+            r.take(&src, WINDOW);
+            *src.0.lock() = MAX_PRIME;
+            r.take(&src, WINDOW).unwrap();
+        }
+        assert_eq!(r.prime, MAX_PRIME);
+        let test = TestSource::new(Duration::from_secs(1), TestSignal::Speaker);
+        assert!(r.take(&test, WINDOW).is_some());
     }
 
     #[test]

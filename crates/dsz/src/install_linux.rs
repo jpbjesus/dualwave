@@ -66,3 +66,5 @@ mod tests {
         assert_eq!(text, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 }
+
+pub(crate) fn native_arm64() -> bool { cfg!(target_arch = "aarch64") }

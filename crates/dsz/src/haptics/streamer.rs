@@ -19,7 +19,7 @@ use ds_proto::Buttons;
 
 use super::audio::Sub;
 use super::dsp::{haptic_clip, resample_window, soft_clip, HapticFilter, Limiter, Squeeze};
-use super::game::WINDOW;
+use super::game::{PcmSource, WINDOW};
 use super::opus::{Encoder, Pcm};
 use super::synth::Synth;
 use crate::device::{Device, StreamPacket, MAX_REPORT, SPEAKER_HEADSET, SPEAKER_MUTED, SPEAKER_UNTOUCHED};
@@ -222,6 +222,52 @@ fn add_level(out: &mut [[f32; 2]], input: &mut [[f32; 2]], level: u8, limiter: &
     }
 }
 
+/// Counters at the start of one game audio session.
+#[derive(Default)]
+struct AudioSession {
+    start: Option<Instant>,
+    underruns: u64,
+    dropped: u64,
+    stream: u64,
+}
+
+impl AudioSession {
+    fn start(game: &super::game::GameReader, device: &Device, src: Option<&dyn PcmSource>) -> Self {
+        // Count only this session's pauses.
+        if let Some(src) = src {
+            src.take_arrival_gaps();
+            // Start the delivery figures with the session too.
+            src.log_transport(false);
+        }
+        AudioSession {
+            start: Some(Instant::now()),
+            underruns: game.underruns,
+            dropped: game.dropped.load(Ordering::Relaxed),
+            stream: device.stats.stream_underruns.load(Ordering::Relaxed),
+        }
+    }
+
+    fn log(&self, game: &super::game::GameReader, device: &Device, src: Option<&dyn PcmSource>) {
+        let Some(start) = self.start else { return };
+        let gaps = src.map(|s| s.take_arrival_gaps()).unwrap_or_default();
+        log::info!(
+            "game audio closed after {} s: {} dropout(s) in the game's audio, buffering {} ms ({:?} latency), {} frames cut, {} stream underrun(s); it stopped arriving {} time(s) for {} ms or more, longest {} ms",
+            start.elapsed().as_secs(),
+            game.underruns - self.underruns,
+            game.buffer_ms(),
+            game.latency(),
+            game.dropped.load(Ordering::Relaxed) - self.dropped,
+            device.stats.stream_underruns.load(Ordering::Relaxed) - self.stream,
+            gaps.count,
+            super::game::ArrivalGaps::LATE.as_millis(),
+            gaps.longest.as_millis(),
+        );
+        if let Some(src) = src {
+            src.log_transport(true);
+        }
+    }
+}
+
 pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
     crate::platform::timer_resolution_1ms();
     crate::platform::raise_thread_priority(true);
@@ -258,6 +304,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
     let mut pcm: Pcm = [0; OPUS_SAMPLES * 2];
     let mut encoder: Option<Encoder> = None;
     let mut was_media = false;
+    let mut was_classic = false;
     let mut lead = 0usize;
     // The sound that starts a speaker stream was noticed one window
     // earlier, so the stream joins it mid-sound: fade it in.
@@ -268,6 +315,12 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
     // audio at all (issue 29).
     let mut was_audio_open = false;
     let mut game_haptics_logged = false;
+    // What the game's audio did while it was open, logged when it closes:
+    // dropouts never reached the log before (issue 49).
+    let mut session = AudioSession::default();
+    // The settings a game's classic rumble plays with, logged once a
+    // session (issue 43).
+    let mut was_game_rumble = false;
 
     // The stream keeps the actuators until this instant; anything that
     // needs it pushes the instant out by `IDLE_AFTER`.
@@ -307,6 +360,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
     while !device.stop.load(Ordering::Acquire) {
         let profile = cache.get(engine, device);
         let h = &profile.haptics;
+        game.set_latency(h.latency);
         let vo = &profile.virtual_out;
         #[cfg(target_os = "linux")]
         let native_audio = device.native_audio();
@@ -329,8 +383,16 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
         if audio_open && !was_audio_open {
             game_haptics_logged = false;
             super::log_game_settings(engine, device, &profile, "a game opened the virtual DualSense's sound device");
+            session = AudioSession::start(&game, device, game_src.as_deref());
+        } else if !audio_open && was_audio_open {
+            session.log(&game, device, game_src.as_deref());
         }
         was_audio_open = audio_open;
+        let game_rumble = device.feedback.lock().game.rumble_logged;
+        if game_rumble && !was_game_rumble {
+            super::log_game_settings(engine, device, &profile, "the game rumbles");
+        }
+        was_game_rumble = game_rumble;
         let game_speaker = game_src.is_some() && vo.game_speaker;
         let pc_speaker = h.pc_audio_on_speaker && device.media_transport_ready();
         let speaker_allowed = enabled && device.media_transport_ready() && h.speaker_volume > 0 && (game_speaker || pc_speaker || native_speaker);
@@ -363,7 +425,8 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
             || native_speaker
             || h.buttons.enabled
             || h.triggers.enabled
-            || h.rumble_as_haptics
+            // With "Classic rumble always" the stream has no rumble to play.
+            || (h.rumble_as_haptics && !profile.rumble.always_classic)
             || (game_src.is_some() && (vo.game_haptics || game_speaker));
         let now = Instant::now();
         if enabled
@@ -429,6 +492,23 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
             continue;
         }
 
+        // "Classic rumble always" while rumble plays (and CLASSIC_HOLD
+        // after): the firmware's rumble emulation has the actuators, so the
+        // stream leaves its haptic packet out. Any haptic packet, silent or
+        // not, takes the actuators back, and with the speaker stream running
+        // every 21 ms that made the rumble jitter and skip (issue 43). The
+        // speaker keeps playing; haptics-only reports pause.
+        let classic =
+            profile.rumble.always_classic && device.classic_rumble.load(Ordering::Acquire);
+        if classic != was_classic {
+            was_classic = classic;
+            device.flight.note(if classic {
+                "classic rumble has the actuators"
+            } else {
+                "actuators back to the stream"
+            });
+        }
+
         // Speaker reports while there is speaker sound.
         if speaker_allowed && encoder.is_none() {
             encoder = Encoder::new();
@@ -473,10 +553,13 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
                     enc.encode(&silent, slot);
                 }
                 let headset = device.speaker_route.load(Ordering::Acquire) == SPEAKER_HEADSET;
-                let len =
+                let len = if classic {
+                    stream::build_audio_without_haptics(&mut counters, &opus, headset, microphone, &mut buf).len()
+                } else {
                     stream::build_audio_with_microphone(&mut counters, &opus, &[[0u8; HAPTIC_FRAME]; BLOCKS], headset,
                     microphone, &mut buf)
-                        .len();
+                        .len()
+                };
                 let mut pkt = StreamPacket {
                     len,
                     data: [0u8; MAX_REPORT],
@@ -552,12 +635,25 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
         {
             let mut fb = device.feedback.lock();
             let (mut heavy, mut light) = fb.rumble_now(now);
+            let mut held = None;
             if profile.virtual_out.game_rumble {
-                let (gh, gl) = fb.game_rumble_now();
+                // A level the game set and cut since the last block still
+                // plays, for PULSE_MIN at least (issue 43;
+                // `GameState::rumble_to_send`).
+                let ((gh, gl), pending) = fb.game.rumble_to_send(now);
                 heavy = heavy.max(gh);
                 light = light.max(gl);
+                held = pending;
             }
-            synth.rumble(heavy, light, h.rumble_intensity);
+            if profile.rumble.always_classic {
+                // The firmware's rumble emulation plays it (composer).
+                synth.rumble(0, 0, 1.0);
+            } else {
+                synth.rumble(heavy, light, h.rumble_intensity);
+                if let Some((seq, raised)) = held {
+                    fb.game.rumble_sent(seq, raised, now);
+                }
+            }
             pulses.extend(fb.pulses.drain(..));
         }
         for p in pulses.drain(..) {
@@ -567,9 +663,11 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
         spk.clear();
         let mut speaker_peak = 0f32;
         let mut any_haptics = false;
+        // Rumble strength opens limiter headroom only while rumble plays on
+        // the stream.
         let drive = haptic_drive(
             (game_src.is_some() && vo.game_haptics).then_some(vo.game_haptics_level),
-            h.rumble_intensity,
+            if profile.rumble.always_classic { 1.0 } else { h.rumble_intensity },
         );
         for frame in frames.iter_mut().take(blocks) {
             // PC audio window
@@ -650,6 +748,14 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
             }
             continue;
         }
+        if classic && !media {
+            // A haptics-only report would carry nothing but the haptic
+            // packet: send none while the emulation has the actuators.
+            if mic_clock.due(now, microphone) && mic_control(&mut counters, recording) {
+                mic_clock.sent(now, microphone);
+            }
+            continue;
+        }
 
         let len = if media {
             // 1024 frames squeezed into 960 (the controller's 21.3 ms tick).
@@ -683,8 +789,12 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
                     }
                 }
             }
-            stream::build_audio_with_microphone(&mut counters, &opus, &frames, headset,
-                microphone, &mut buf).len()
+            if classic {
+                stream::build_audio_without_haptics(&mut counters, &opus, headset, microphone, &mut buf).len()
+            } else {
+                stream::build_audio_with_microphone(&mut counters, &opus, &frames, headset,
+                    microphone, &mut buf).len()
+            }
         } else {
             stream::build_with_microphone(&mut counters, &frames[0], microphone, &mut buf).len()
         };
@@ -712,6 +822,10 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
     }
     #[cfg(target_os = "linux")]
     if let Some(audio) = device.native_audio() { audio.set_recording(false); }
+    if was_audio_open {
+        let src = device.game_audio.lock().clone();
+        session.log(&game, device, src.as_deref());
+    }
     device.microphone.configure(false, true, 100);
     if was_media || capture_used {
         mic_control(&mut counters, false);

@@ -820,6 +820,7 @@ fn plug_microphone() -> Result<Target, String> {
     let sink = usbip::DsSink {
         on_output: Box::new(|_| {}),
         mirror: Default::default(),
+        refresh: None,
     };
     usbip::UsbPad::create(usbip::Model::Microphone, sink).map_err(|e| e.to_string())
 }
@@ -941,7 +942,7 @@ pub fn run(engine: &Arc<Engine>, device: &Arc<Device>) {
                         match engine.pads.create(want, &mac, Some(device)) {
                             Ok(p) => {
                                 attach(device, &p);
-                                engine.toast(crate::localized_format!("Virtual {} controller connected ({})", "Controle virtual {} conectado ({})", "Mando virtual {} conectado ({})"; "Comando virtual {} ligado ({})",
+                                engine.toast(crate::localized_format!("Virtual {} controller connected ({})", "Controle virtual {} conectado ({})", "Mando virtual {} conectado ({})", "虚拟 {} 手柄已连接（{}）"; "Comando virtual {} ligado ({})",
                                     p.kind().label(),
                                     p.target.backend()
                                 ));

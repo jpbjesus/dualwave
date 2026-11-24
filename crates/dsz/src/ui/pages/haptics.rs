@@ -105,7 +105,7 @@ impl App {
                     ui.label(RichText::new(crate::i18n::tr("Level")).color(muted_color()));
                     meter(ui, d.speaker_level.load(Ordering::Relaxed) as f32 / 255.0, violet_color(), 184.0);
                     let (t, c) = if streaming > 0 {
-                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s", "{streaming} paq/s"; "{streaming} pac/s"), good_color())
+                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s", "{streaming} paq/s", "{streaming} 包/秒"; "{streaming} pac/s"), good_color())
                     } else {
                         (crate::i18n::tr("off").to_string(), faint_color())
                     };
@@ -115,7 +115,7 @@ impl App {
                 if under > 0 {
                     muted(
                         ui,
-                        &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão", "{under} corte(s) de audio suavizado(s) desde la conexión"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
+                        &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão", "{under} corte(s) de audio suavizado(s) desde la conexión", "连接以来已平滑 {under} 处音频间隙"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
                     );
                 }
                 note(ui, crate::i18n::tr("Not tried on a real DualShock 4 yet. While a source is on, the controller gets audio all the time, which uses more battery."), warn_color());
@@ -158,7 +158,7 @@ impl App {
         }
         #[cfg(target_os = "linux")]
         if let Some(error) = dev.and_then(|device| device.native_audio_error.lock().clone()) {
-            note(ui, &crate::localized_format!("Controller audio is unavailable: {error}", "O áudio do controle está indisponível: {error}", "El audio del mando no está disponible: {error}"; "O áudio do comando está indisponível: {error}"), warn_color());
+            note(ui, &crate::localized_format!("Controller audio is unavailable: {error}", "O áudio do controle está indisponível: {error}", "El audio del mando no está disponible: {error}", "Controller audio is unavailable: {error}"; "O áudio do comando está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
         let devices = self.audio_device_list();
@@ -194,7 +194,7 @@ impl App {
                                     let (t, c) = if !h.enabled || !bt {
                                         (crate::i18n::tr("off").to_string(), faint_color())
                                     } else if streaming > 0 {
-                                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s", "{streaming} paq/s"; "{streaming} pac/s"), good_color())
+                                        (crate::localized_format!("{streaming} pkt/s", "{streaming} pac/s", "{streaming} paq/s", "{streaming} 包/秒"; "{streaming} pac/s"), good_color())
                                     } else if d.pcm_mode.load(Ordering::Relaxed) {
                                         (crate::i18n::tr("idle").to_string(), muted_color())
                                     } else {
@@ -208,7 +208,7 @@ impl App {
                         if under > 0 {
                             muted(
                                 ui,
-                                &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão", "{under} corte(s) de audio suavizado(s) desde la conexión"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
+                                &crate::localized_format!("{under} audio gap(s) smoothed over since connect", "{under} falha(s) de áudio suavizada(s) desde a conexão", "{under} corte(s) de audio suavizado(s) desde la conexión", "连接以来已平滑 {under} 处音频间隙"; "{under} falha(s) de áudio suavizada(s) desde a ligação"),
                             );
                         }
                     }
@@ -258,7 +258,7 @@ impl App {
                             meter(ui, peak, violet_color(), 160.0);
                             if capture.running {
                                 ui.label(
-                                    RichText::new(crate::localized_format!("{} · {} Hz · {} ch", "{} · {} Hz · {} canais", "{} · {} Hz · {} canales"; "{} · {} Hz · {} canais",
+                                    RichText::new(crate::localized_format!("{} · {} Hz · {} ch", "{} · {} Hz · {} canais", "{} · {} Hz · {} canales", "{} · {} Hz · {} 声道"; "{} · {} Hz · {} canais",
                                         capture.device, capture.rate, capture.channels
                                     ))
                                     .size(12.0)
@@ -346,11 +346,7 @@ impl App {
                         });
                         if p.virtual_out.kind != VirtualKind::DualSense {
                             if let Some(name) = &ds_profile {
-                                muted(ui, &crate::localized_format!(
-                                    "A game's own speaker sound plays with the \"{name}\" profile's volume and amplifier.",
-                                    "O som do alto-falante do próprio jogo usa o volume e o amplificador do perfil \"{name}\".",
-                                    "El sonido del altavoz del propio juego usa el volumen y el amplificador del perfil \"{name}\".";
-                                    "O som do altifalante do próprio jogo usa o volume e o amplificador do perfil \"{name}\"."
+                                muted(ui, &crate::localized_format!("A game's own speaker sound plays with the \"{name}\" profile's volume and amplifier.", "O som do alto-falante do próprio jogo usa o volume e o amplificador do perfil \"{name}\".", "El sonido del altavoz del propio juego usa el volumen y el amplificador del perfil \"{name}\".", "游戏自身的扬声器声音使用“{name}”配置文件的音量和功放设置。"; "O som do altifalante do próprio jogo usa o volume e o amplificador do perfil \"{name}\"."
                                 ));
                             }
                         }
@@ -482,7 +478,7 @@ impl App {
                         if !ready {
                             note(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "Connect over Bluetooth and check that PipeWire audio is available. A virtual DualSense can also expose its microphone." } else { "Connect over Bluetooth and select a virtual controller on the Virtual controller page to expose the microphone to Windows." }), warn_color());
                         } else {
-                            let toggled = d.toggles.lock().mute_engaged;
+                            let toggled = d.toggles.load().mute_engaged;
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr("Microphone level")).color(muted_color()));
                                 meter(ui, d.microphone.peak() as f32 / 255.0, violet_color(), 184.0);
@@ -612,8 +608,18 @@ impl App {
                         crate::i18n::tr("Smoother rumble emulation (firmware 2.24 and later)"),
                         &mut r.enhanced,
                     );
+                    if !ds4 {
+                        toggle_row(
+                            ui,
+                            crate::i18n::tr("Classic rumble always"),
+                            crate::i18n::tr("Rumble uses the controller's own emulation even while haptics play; game haptics pause while it rumbles"),
+                            &mut r.always_classic,
+                        );
+                    }
+                    let classic = r.always_classic && !ds4;
                     if bt && p.haptics.enabled {
                         let h = &mut p.haptics;
+                        ui.add_enabled_ui(!classic, |ui| {
                         toggle_row(
                             ui,
                             crate::i18n::tr("Rumble as haptics"),
@@ -631,6 +637,7 @@ impl App {
                         ) {
                             h.rumble_intensity = pct / 100.0;
                         }
+                        });
                     }
                     if let Some(d) = dev {
                         ui.horizontal(|ui| {

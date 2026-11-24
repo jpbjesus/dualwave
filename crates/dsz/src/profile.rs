@@ -147,6 +147,24 @@ impl Default for Lighting {
 pub struct Triggers {
     pub left: TriggerEffect,
     pub right: TriggerEffect,
+    /// L2's effect plays only while R2 is held, and R2's only while L2 is
+    /// (issue 62), as games that aim with one trigger and shoot with the
+    /// other do, so menus don't fight back. Only the profile's own effect
+    /// waits; a game's or a mod's plays as sent. Off: always, as before.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub left_needs_r2: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub right_needs_l2: bool,
+    /// How far the other trigger has to be pulled to count as held, in
+    /// percent of its travel.
+    #[serde(skip_serializing_if = "is_default_hold_at")]
+    pub hold_at: u8,
+}
+
+pub const DEFAULT_HOLD_AT: u8 = 10;
+
+fn is_default_hold_at(v: &u8) -> bool {
+    *v == DEFAULT_HOLD_AT
 }
 
 impl Default for Triggers {
@@ -154,6 +172,9 @@ impl Default for Triggers {
         Triggers {
             left: TriggerEffect::Off,
             right: TriggerEffect::Off,
+            left_needs_r2: false,
+            right_needs_l2: false,
+            hold_at: DEFAULT_HOLD_AT,
         }
     }
 }
@@ -167,6 +188,14 @@ pub struct Rumble {
     pub power_reduction: u8,
     /// Firmware "improved rumble emulation".
     pub enhanced: bool,
+    /// Classic rumble (a game's or a test's) always goes to the
+    /// controller's own rumble emulation, even while haptics stream, where
+    /// it would otherwise be played as haptics (issue 43). The firmware
+    /// takes the actuators while it rumbles, so streamed haptics pause
+    /// until the rumble stops. Left out of the JSON while off, so saved
+    /// profiles stay as they were.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub always_classic: bool,
 }
 
 impl Default for Rumble {
@@ -174,6 +203,7 @@ impl Default for Rumble {
         Rumble {
             power_reduction: 0,
             enhanced: true,
+            always_classic: false,
         }
     }
 }
@@ -210,6 +240,9 @@ impl SpeakerAmp {
     }
 }
 
+/// Buffer length for sound streamed to a Bluetooth DualSense: PC audio
+/// (`prime_windows`) and a game's audio through the virtual DualSense
+/// (`haptics::game`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Latency {
     Short,
@@ -727,6 +760,10 @@ pub enum Action {
     Run {
         path: String,
     },
+    /// Type a line of text, as if typed on the keyboard, once per gesture.
+    Text {
+        text: String,
+    },
     /// Switch this controller to a named profile.
     Profile {
         name: String,
@@ -931,6 +968,10 @@ pub struct Mapping {
     pub mode: HoldStyle,
     pub action: Action,
     pub turbo_ms: u32,
+    /// Turbo only: each interval comes out up to this much shorter or
+    /// longer, at random, so the presses don't land like a metronome.
+    /// 0 (the default) keeps every interval exactly `turbo_ms`.
+    pub turbo_variation_ms: u32,
     pub long_ms: u32,
     pub double_ms: u32,
 }
@@ -957,6 +998,7 @@ impl Default for Mapping {
             mode: HoldStyle::Hold,
             action: Action::None,
             turbo_ms: 80,
+            turbo_variation_ms: 0,
             long_ms: 500,
             double_ms: 400,
         }
@@ -1082,6 +1124,12 @@ pub struct VirtualOutput {
     pub game_rumble: bool,
     /// Adaptive-trigger effects the game sends to the virtual DualSense.
     pub game_triggers: bool,
+    /// Strength of the game's L2 and R2 effects in percent, 0..=100
+    /// (issue 66); 100 passes them through untouched and isn't saved.
+    #[serde(skip_serializing_if = "is_full_strength")]
+    pub left_game_trigger_strength: u8,
+    #[serde(skip_serializing_if = "is_full_strength")]
+    pub right_game_trigger_strength: u8,
     /// Lightbar, player, and mute LEDs the game sends.
     pub game_leds: bool,
     /// Game haptics: the virtual DualSense's actuator channels.
@@ -1108,6 +1156,10 @@ pub struct VirtualOutput {
     pub touch_passthrough: bool,
 }
 
+fn is_full_strength(v: &u8) -> bool {
+    *v == 100
+}
+
 impl Default for VirtualOutput {
     fn default() -> Self {
         VirtualOutput {
@@ -1115,6 +1167,8 @@ impl Default for VirtualOutput {
             hide_physical: true,
             game_rumble: true,
             game_triggers: true,
+            left_game_trigger_strength: 100,
+            right_game_trigger_strength: 100,
             game_leds: false,
             game_haptics: true,
             usb_game_haptics: false,
@@ -1432,7 +1486,7 @@ impl ProfileStore {
     pub fn import(&self, path: &Path) -> Result<String, String> {
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let mut p: Profile = serde_json::from_str(text.trim_start_matches(crate::settings::BOM))
-            .map_err(|e| crate::localized_format!("Not a profile: {e}", "Não é um perfil: {e}", "No es un perfil: {e}"; "Não é um perfil: {e}"))?;
+            .map_err(|e| crate::localized_format!("Not a profile: {e}", "Não é um perfil: {e}", "No es un perfil: {e}", "不是配置文件：{e}"; "Não é um perfil: {e}"))?;
         if p.name.trim().is_empty() {
             p.name = path
                 .file_stem()
@@ -1522,6 +1576,84 @@ mod tests {
         assert_eq!(*reopened.get_or_first(&active.name), *active);
         assert_eq!(*reopened.get_or_first(&name), edited);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trigger_conditions_are_off_and_left_out_until_turned_on() {
+        let p: Profile = serde_json::from_str(
+            r#"{"name":"Old","triggers":{"left":{"type":"off"},"right":{"type":"feedback","position":2,"strength":5}}}"#,
+        )
+        .unwrap();
+        assert!(!p.triggers.left_needs_r2 && !p.triggers.right_needs_l2);
+        assert_eq!(p.triggers.hold_at, DEFAULT_HOLD_AT);
+        assert_eq!(
+            p.triggers.right,
+            TriggerEffect::Feedback {
+                position: 2,
+                strength: 5
+            }
+        );
+        for p in Profile::starter_set() {
+            assert!(!p.triggers.left_needs_r2 && !p.triggers.right_needs_l2, "{}", p.name);
+            let json = serde_json::to_string(&p).unwrap();
+            for field in ["left_needs_r2", "right_needs_l2", "hold_at"] {
+                assert!(!json.contains(field), "{} {field}", p.name);
+            }
+        }
+        let mut on = Profile::default();
+        on.triggers.right_needs_l2 = true;
+        on.triggers.hold_at = 25;
+        let json = serde_json::to_string(&on).unwrap();
+        assert!(json.contains(r#""right_needs_l2":true"#) && json.contains(r#""hold_at":25"#));
+        assert_eq!(serde_json::from_str::<Profile>(&json).unwrap(), on);
+    }
+
+    #[test]
+    fn game_trigger_strength_is_full_and_left_out_until_changed() {
+        let p: Profile =
+            serde_json::from_str(r#"{"name":"Old","virtual":{"kind":"DualSense","game_triggers":true}}"#).unwrap();
+        assert_eq!(p.virtual_out.left_game_trigger_strength, 100);
+        assert_eq!(p.virtual_out.right_game_trigger_strength, 100);
+        for p in Profile::starter_set() {
+            assert_eq!(p.virtual_out.left_game_trigger_strength, 100, "{}", p.name);
+            assert_eq!(p.virtual_out.right_game_trigger_strength, 100, "{}", p.name);
+            let json = serde_json::to_string(&p).unwrap();
+            assert!(!json.contains("game_trigger_strength"), "{}", p.name);
+        }
+        let mut on = Profile::default();
+        on.virtual_out.right_game_trigger_strength = 60;
+        let json = serde_json::to_string(&on).unwrap();
+        assert!(json.contains(r#""right_game_trigger_strength":60"#));
+        assert!(!json.contains("left_game_trigger_strength"));
+        assert_eq!(serde_json::from_str::<Profile>(&json).unwrap(), on);
+    }
+
+    #[test]
+    fn classic_rumble_always_is_off_and_left_out_until_turned_on() {
+        let p: Profile =
+            serde_json::from_str(r#"{"name":"Old","rumble":{"power_reduction":2,"enhanced":false}}"#).unwrap();
+        assert!(!p.rumble.always_classic);
+        assert_eq!(p.rumble.power_reduction, 2);
+        for p in Profile::starter_set() {
+            assert!(!p.rumble.always_classic, "{}", p.name);
+            let json = serde_json::to_string(&p).unwrap();
+            assert!(!json.contains("always_classic"), "{}", p.name);
+        }
+        let mut on = Profile::default();
+        on.rumble.always_classic = true;
+        let json = serde_json::to_string(&on).unwrap();
+        assert!(json.contains(r#""always_classic":true"#));
+        assert_eq!(serde_json::from_str::<Profile>(&json).unwrap(), on);
+    }
+
+    #[test]
+    fn older_mappings_load_without_turbo_variation() {
+        let m: Mapping = serde_json::from_str(r#"{"button":"Cross","mode":"Turbo","turbo_ms":120}"#).unwrap();
+        assert_eq!((m.mode, m.turbo_ms, m.turbo_variation_ms), (HoldStyle::Turbo, 120, 0));
+        assert_eq!(Mapping::default().turbo_variation_ms, 0);
+        for p in Profile::starter_set() {
+            assert!(p.mappings.iter().all(|m| m.turbo_variation_ms == 0), "{}", p.name);
+        }
     }
 
     #[test]
@@ -1740,6 +1872,14 @@ mod tests {
         .unwrap();
         assert_eq!(p.mappings[0].action, Action::TurnOffController);
         assert_eq!(p.mappings[0].button, Button::Cross);
+    }
+
+    #[test]
+    fn text_action_round_trips() {
+        let a = Action::Text { text: "Hi there!".into() };
+        let j = serde_json::to_string(&a).unwrap();
+        assert_eq!(j, r#"{"kind":"text","text":"Hi there!"}"#);
+        assert_eq!(serde_json::from_str::<Action>(&j).unwrap(), a);
     }
 
     #[test]

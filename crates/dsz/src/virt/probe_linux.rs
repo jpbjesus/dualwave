@@ -32,6 +32,7 @@ pub fn probe(what: &str) {
         mirror.firmware = Some(firmware);
     }
     let sink = usbip::DsSink {
+        refresh: None,
         on_output: Box::new(|bytes| log::debug!("virtual controller host output: {} bytes", bytes.len())),
         mirror: std::sync::Arc::new(parking_lot::Mutex::new(mirror)),
     };

@@ -202,8 +202,8 @@ pub const DS4_USB_INPUT_LEN: usize = 64;
 /// `dualshock4_input_report_usb`. Motion and touch come from the physical
 /// DualSense report in USB layout (`raw`, see [`usb_layout`]): the IMU
 /// formats match, and touch rows are rescaled from the DualSense's 1080 to
-/// the DualShock 4's 942. The battery is the DualSense's, reported as on a
-/// cable.
+/// the DualShock 4's 942. The battery is the DualSense's, on a cable only
+/// while the DualSense is charging or full.
 pub fn ds4_usb_input(
     pad: &PadState,
     raw: Option<&[u8; DS_USB_INPUT_LEN]>,
@@ -214,19 +214,11 @@ pub fn ds4_usb_input(
     r[0] = 0x01;
     r[1..10].copy_from_slice(&ds4_report(pad));
     r[7] |= seq << 2;
-    // status[0]: battery capacity in the low nibble (0..=10 charging,
-    // 11 full) with the cable bit (Linux's `DS4_STATUS0_*`).
-    let capacity = raw
-        .map(|raw| {
-            let level = (raw[53] & 0x0F).min(10);
-            if raw[53] >> 4 == 2 {
-                11
-            } else {
-                level
-            }
-        })
-        .unwrap_or(10);
-    r[30] = 0x10 | capacity;
+    // status[0]: battery capacity in the low nibble (0..=10, 11 full) and
+    // the cable bit (Linux's `DS4_STATUS0_*`). Readers take the cable bit as
+    // charging (issue 65), so a DualSense on battery leaves it clear, as a
+    // DualShock 4 on Sony's USB wireless adapter does.
+    r[30] = raw.map_or(0x1A, |raw| ds4_status0(raw[53]));
     // One touch report follows.
     r[33] = 1;
     r[34] = seq;
@@ -252,6 +244,17 @@ pub fn ds4_usb_input(
         }
     }
     r
+}
+
+/// The DualShock 4 battery byte for a DualSense status byte (level in the
+/// low nibble; 0 discharging, 1 charging, 2 full in the high one).
+fn ds4_status0(ds: u8) -> u8 {
+    let level = (ds & 0x0F).min(10);
+    match ds >> 4 {
+        0 => level,
+        2 => 0x10 | 11,
+        _ => 0x10 | level,
+    }
 }
 
 /// What a game asked of the virtual DualShock 4 (output report `0x05`).
@@ -439,6 +442,8 @@ pub struct GameOutput {
     pub audio_control: Option<u8>,
     /// Speaker preamp gain (audio control 2, bits 2:0), when set.
     pub speaker_preamp: Option<u8>,
+    /// The three valid-flag bytes as sent, for the log.
+    pub flags: [u8; 3],
 }
 
 /// USB output report `0x02` offsets and valid flags, from the layout in
@@ -447,6 +452,7 @@ pub struct GameOutput {
 mod out {
     pub const FLAGS0: usize = 1;
     pub const FLAGS1: usize = 2;
+    pub const FLAGS2: usize = 39;
     pub const MOTOR_RIGHT: usize = 3;
     pub const MOTOR_LEFT: usize = 4;
     pub const MUTE_LED: usize = 9;
@@ -504,6 +510,7 @@ pub fn parse_ds_usb_output(r: &[u8]) -> Option<GameOutput> {
         speaker_volume: on(f0, out::SPEAKER_VOLUME_ON).then(|| r[out::SPEAKER_VOLUME]),
         audio_control: on(f0, out::AUDIO_CONTROL_ON).then(|| r[out::AUDIO_CONTROL]),
         speaker_preamp: on(f1, out::AUDIO_CONTROL2_ON).then(|| r[out::AUDIO_CONTROL2] & 0x07),
+        flags: [f0, f1, r[out::FLAGS2]],
     })
 }
 
@@ -676,6 +683,30 @@ mod ds4_tests {
         let o = parse_ds4_output(&[0x05, 0x03, 0x04, 0, 0x20, 0x90, 1, 2, 3]).unwrap();
         assert_eq!(o.rumble, Some((0x90, 0x20)));
         assert_eq!(o.rgb, Some([1, 2, 3]));
+    }
+
+    #[test]
+    fn ds4_usb_report_battery_follows_the_dualsense() {
+        let mut raw = [0u8; DS_USB_INPUT_LEN];
+        raw[0] = 0x01;
+        // (DualSense status byte, DualShock 4 status[0])
+        for (ds, ds4) in [
+            (0x08, 0x08), // on battery, 80 %: no cable bit (issue 65)
+            (0x0A, 0x0A),
+            (0x00, 0x00),
+            (0x17, 0x17), // charging, 70 %
+            (0x1A, 0x1A),
+            (0x2A, 0x1B), // full
+            (0x25, 0x1B),
+            (0xF3, 0x13), // error states keep the old byte
+            (0x0F, 0x0A),
+        ] {
+            raw[53] = ds;
+            let r = ds4_usb_input(&PadState::default(), Some(&raw), false, 0);
+            assert_eq!(r[30], ds4, "{ds:#04x}");
+        }
+        // No controller behind the pad: unchanged, 100 % on a cable.
+        assert_eq!(ds4_usb_input(&PadState::default(), None, false, 0)[30], 0x1A);
     }
 
     #[test]

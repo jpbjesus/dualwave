@@ -214,7 +214,7 @@ fn reach_preview(ui: &mut egui::Ui, state: &mut ReachEditor, reach: &mut StickRe
     p.circle_filled(dot, 4.0, accent_color());
     let raw_percent = raw.length() * 100.0;
     let corrected_percent = corrected.length() * 100.0;
-    muted(ui, &crate::localized_format!("Raw {raw_percent:.0}% → corrected {corrected_percent:.0}%", "Bruto {raw_percent:.0}% → corrigido {corrected_percent:.0}%", "Original {raw_percent:.0}% → corregido {corrected_percent:.0}%"; "Bruto {raw_percent:.0}% → corrigido {corrected_percent:.0}%"));
+    muted(ui, &crate::localized_format!("Raw {raw_percent:.0}% → corrected {corrected_percent:.0}%", "Bruto {raw_percent:.0}% → corrigido {corrected_percent:.0}%", "Original {raw_percent:.0}% → corregido {corrected_percent:.0}%", "原始 {raw_percent:.0}% → 校正后 {corrected_percent:.0}%"; "Bruto {raw_percent:.0}% → corrigido {corrected_percent:.0}%"));
 }
 
 fn reach_editor(ui: &mut egui::Ui, reach: &mut StickReach, state: &mut ReachEditor, input: Option<(u8, u8)>, virtual_on: bool) {
@@ -286,11 +286,11 @@ fn reach_editor(ui: &mut egui::Ui, reach: &mut StickReach, state: &mut ReachEdit
     if let Some(c) = &state.calibration {
         let count = c.maxima.iter().filter(|m| m.is_some()).count();
         let turns = c.turns;
-        note(ui, &crate::localized_format!("Rotate fully: {count}/16 directions · {turns}/3 turns", "Gire até o limite: {count}/16 direções · {turns}/3 voltas", "Gira hasta el tope: {count}/16 direcciones · {turns}/3 vueltas"; "Rode até ao limite: {count}/16 direções · {turns}/3 voltas"), accent_color());
+        note(ui, &crate::localized_format!("Rotate fully: {count}/16 directions · {turns}/3 turns", "Gire até o limite: {count}/16 direções · {turns}/3 voltas", "Gira hasta el tope: {count}/16 direcciones · {turns}/3 vueltas", "完整旋转：{count}/16 个方向 · {turns}/3 圈"; "Rode até ao limite: {count}/16 direções · {turns}/3 voltas"), accent_color());
     } else if let Some(maxima) = &state.pending {
         let missing = maxima.iter().filter(|m| m.is_none()).count();
         if missing > 0 {
-            note(ui, &crate::localized_format!("{missing} directions unmeasured. Apply keeps their current gains.", "{missing} direções sem amostras. Aplicar mantém os ganhos atuais delas.", "{missing} direcciones sin medir. Aplicar conserva sus ganancias actuales."; "{missing} direções sem medição. Aplicar mantém os respetivos ganhos atuais."), warn_color());
+            note(ui, &crate::localized_format!("{missing} directions unmeasured. Apply keeps their current gains.", "{missing} direções sem amostras. Aplicar mantém os ganhos atuais delas.", "{missing} direcciones sin medir. Aplicar conserva sus ganancias actuales.", "有 {missing} 个方向未测量。应用时保留它们当前的增益。"; "{missing} direções sem medição. Aplicar mantém os respetivos ganhos atuais."), warn_color());
         } else {
             muted(ui, crate::i18n::tr("All directions measured. Apply or discard the preview."));
         }
@@ -669,7 +669,7 @@ impl App {
         );
         #[cfg(target_os = "linux")]
         if let Some(error) = crate::inputsim::error() {
-            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}", "La entrada de teclado y ratón no está disponible: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());
+            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}", "La entrada de teclado y ratón no está disponible: {error}", "Keyboard and mouse input is unavailable: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
         let mut live = dev.map(|d| d.snapshot()).unwrap_or_default();
@@ -884,6 +884,21 @@ impl App {
                         if t.two_finger_scroll {
                             slider_row(ui, crate::i18n::tr("Scroll speed"), "", &mut t.scroll_speed, 0.1..=4.0, "×");
                             toggle_row(ui, crate::i18n::tr("Natural scrolling"), crate::i18n::tr("The page follows your fingers"), &mut t.natural_scroll);
+                        }
+                    }
+                    // The same switch as Touchpad passthrough on the Virtual
+                    // controller page, here where the mouse is set up. Only
+                    // virtual pads with a touchpad carry touches.
+                    let has_touchpad = matches!(p.virtual_out.kind, VirtualKind::DualSense | VirtualKind::DualShock4);
+                    if p.touchpad.mode == TouchMode::Mouse && has_touchpad {
+                        let mut hide = !p.virtual_out.touch_passthrough;
+                        if toggle_row(
+                            ui,
+                            crate::i18n::tr("Hide the touchpad from the game"),
+                            crate::i18n::tr("The game doesn't see touches, or presses while Press to click is on"),
+                            &mut hide,
+                        ) {
+                            p.virtual_out.touch_passthrough = !hide;
                         }
                     }
                 });

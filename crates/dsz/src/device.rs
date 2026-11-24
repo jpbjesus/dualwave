@@ -86,12 +86,64 @@ impl HapticPulse {
     }
 }
 
+/// A rumble level the game set that no report to the controller has
+/// carried yet; see [`GameState::set_rumble`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeldRumble {
+    pub heavy: u8,
+    pub light: u8,
+    /// Which of the game's rumble reports this is, so a report composed
+    /// before a newer level came in doesn't let that one go.
+    pub seq: u64,
+    pub at: Instant,
+    /// When the oldest level merged into this one was set, for how long
+    /// pulses wait for a report (the session log, issue 43).
+    pub since: Instant,
+}
+
+/// A held rumble level no report took within this long is dropped rather
+/// than played late (a stalled link, or rumble going nowhere, such as a
+/// wired controller playing the game's haptic audio).
+pub const PULSE_STALE: Duration = Duration::from_millis(100);
+
+/// Shortest a game's rumble pulse plays on the controller (issue 43). GTA V
+/// switches its rumble on and off again 0.2 ms later, about 11 times a
+/// second, so the motors ran only until the next report: about 4 ms on
+/// Bluetooth (felt as skipping) or 8 ms while streaming ("so close"). A
+/// stop that comes sooner than this after the first report carrying the
+/// pulse waits until then; one frame at 60 fps, which is likely how long
+/// the game means a pulse to last.
+pub const PULSE_MIN: Duration = Duration::from_millis(16);
+
+/// The game's last rumble pulse, kept on until [`PULSE_MIN`] after a report
+/// first carried it.
+#[derive(Debug, Clone, Copy)]
+pub struct PulseStretch {
+    /// The level the game last set in it.
+    pub heavy: u8,
+    pub light: u8,
+    pub began: Instant,
+    /// Set when a report first carries the pulse.
+    pub until: Option<Instant>,
+    /// The game stopped it early, so it is being kept on.
+    pub cut: bool,
+}
+
 /// What a game sent to the virtual controller.
 #[derive(Debug, Default, Clone)]
 pub struct GameState {
     /// (heavy, light). Holds until the game changes it, as on a real pad;
     /// cleared when the game closes the virtual controller.
     pub rumble: Option<(u8, u8)>,
+    /// Issue 43: the highest level set since a report last carried the
+    /// game's rumble. GTA V pulses its rumble, a level in one report and
+    /// zero in the next, often closer together than the control reports
+    /// go out; without this the zero overwrote the level before any report
+    /// carried it, and those pulses never reached the controller.
+    pub held: Option<HeldRumble>,
+    /// The pulse a stop cut short of [`PULSE_MIN`], or the one playing.
+    pub stretch: Option<PulseStretch>,
+    pub rumble_seq: u64,
     pub right_trigger: Option<[u8; 11]>,
     pub left_trigger: Option<[u8; 11]>,
     pub rgb: Option<[u8; 3]>,
@@ -103,6 +155,220 @@ pub struct GameState {
     pub reports: u64,
     /// The first rumble of this session was logged.
     pub rumble_logged: bool,
+    /// How the game's reports changed its rumble this session, logged when
+    /// the virtual controller goes (issue 43): reports that set a level,
+    /// that stopped it with zero levels, that stopped it with no flags at
+    /// all (SDL's way), and that stopped it while changing something else.
+    pub rumble_sets: u64,
+    pub rumble_zeroed: u64,
+    pub rumble_flags_off: u64,
+    pub rumble_cut_by_other: u64,
+    /// How long the game kept its rumble on each time, for the session
+    /// line (issue 43): runs, the shortest, the total, and those under
+    /// 8 ms (shorter than a control report gap while streaming).
+    pub rumble_on_since: Option<Instant>,
+    pub rumble_runs: u64,
+    pub rumble_run_min: Option<Duration>,
+    pub rumble_run_total: Duration,
+    pub rumble_runs_short: u64,
+    /// Pulses that reached the controller only because they were held.
+    pub rumble_saved: u64,
+    /// Whether every pulse reached the controller, and on time (issue 43):
+    /// pulses merged into a level still waiting for a report (the
+    /// controller gets one pulse for them), held levels dropped or left
+    /// with no report carrying them, and how long carried ones waited.
+    pub rumble_merged: u64,
+    pub rumble_uncarried: u64,
+    pub rumble_carried: u64,
+    pub rumble_wait_total: Duration,
+    pub rumble_wait_max: Duration,
+    pub rumble_waits_long: u64,
+    /// Pulses a stop came too soon for, kept on to [`PULSE_MIN`] (issue 43).
+    pub rumble_stretched: u64,
+    /// Time between one pulse's start and the next's, for how often the
+    /// game pulses: the shortest, the total, and gaps under 50 ms.
+    pub rumble_last_start: Option<Instant>,
+    pub rumble_gaps: u64,
+    pub rumble_gap_min: Option<Duration>,
+    pub rumble_gap_total: Duration,
+    pub rumble_gaps_short: u64,
+    /// The highest level each motor had in a pulse, and how many pulses
+    /// used each motor.
+    pub rumble_peak: (u8, u8),
+    pub rumble_on_heavy: u64,
+    pub rumble_on_light: u64,
+    /// Whether the motors are on in the last report sent to the
+    /// controller, since when, and how long they stayed on each time:
+    /// what the controller actually played, as opposed to what the game
+    /// asked for (issue 43).
+    pub out_on_since: Option<Instant>,
+    pub out_runs: u64,
+    pub out_run_min: Option<Duration>,
+    pub out_run_max: Duration,
+    pub out_run_total: Duration,
+}
+
+impl GameState {
+    /// The game set its classic rumble. A non-zero level is also held,
+    /// merged with any level still waiting, until a report carries it
+    /// ([`GameState::rumble_sent`]); a zero or lower level never cuts a
+    /// level no report has carried yet.
+    pub fn set_rumble(&mut self, heavy: u8, light: u8, now: Instant) {
+        let on = heavy != 0 || light != 0;
+        // A new pulse, not the game repeating the level it holds.
+        let starts = on && self.rumble_on_since.is_none();
+        match (self.rumble_on_since, on) {
+            (None, true) => self.rumble_on_since = Some(now),
+            (Some(since), false) => {
+                let run = now.saturating_duration_since(since);
+                self.rumble_on_since = None;
+                self.rumble_runs += 1;
+                self.rumble_run_total += run;
+                self.rumble_run_min = Some(self.rumble_run_min.map_or(run, |m| m.min(run)));
+                if run < Duration::from_millis(8) {
+                    self.rumble_runs_short += 1;
+                }
+            }
+            _ => {}
+        }
+        self.rumble = on.then_some((heavy, light));
+        if starts {
+            if let Some(last) = self.rumble_last_start {
+                let gap = now.saturating_duration_since(last);
+                self.rumble_gaps += 1;
+                self.rumble_gap_total += gap;
+                self.rumble_gap_min = Some(self.rumble_gap_min.map_or(gap, |m| m.min(gap)));
+                if gap < Duration::from_millis(50) {
+                    self.rumble_gaps_short += 1;
+                }
+            }
+            self.rumble_last_start = Some(now);
+            self.rumble_on_heavy += (heavy > 0) as u64;
+            self.rumble_on_light += (light > 0) as u64;
+            // Its minimum length counts from the first report that carries
+            // it (`rumble_sent`), so a pulse waiting for a report still gets
+            // all of it on the controller.
+            self.stretch = Some(PulseStretch { heavy, light, began: now, until: None, cut: false });
+        } else if on {
+            if let Some(s) = self.stretch.as_mut() {
+                s.heavy = heavy;
+                s.light = light;
+            }
+        } else if self.stretch_owed(now).is_some() {
+            if let Some(s) = self.stretch.as_mut().filter(|s| !s.cut) {
+                s.cut = true;
+                self.rumble_stretched += 1;
+            }
+        }
+        if on {
+            self.rumble_peak = (self.rumble_peak.0.max(heavy), self.rumble_peak.1.max(light));
+            self.rumble_seq += 1;
+            let waiting = self.held_now(now);
+            if waiting.is_some() {
+                self.rumble_merged += starts as u64;
+            } else if self.held.is_some() {
+                self.rumble_uncarried += 1;
+            }
+            let (h, l, since) = waiting.map_or((0, 0, now), |p| (p.heavy, p.light, p.since));
+            self.held = Some(HeldRumble {
+                heavy: h.max(heavy),
+                light: l.max(light),
+                seq: self.rumble_seq,
+                at: now,
+                since,
+            });
+        }
+    }
+
+    fn held_now(&self, now: Instant) -> Option<HeldRumble> {
+        self.held
+            .filter(|p| now.saturating_duration_since(p.at) < PULSE_STALE)
+    }
+
+    /// The level of a pulse that still owes the controller some of
+    /// [`PULSE_MIN`]: not carried yet (and not stale), or carried less than
+    /// that long ago.
+    fn stretch_owed(&self, now: Instant) -> Option<(u8, u8)> {
+        self.stretch
+            .filter(|s| match s.until {
+                Some(u) => now < u,
+                None => now.saturating_duration_since(s.began) < PULSE_STALE,
+            })
+            .map(|s| (s.heavy, s.light))
+    }
+
+    /// A report went out to the controller; `on`: its motors are running.
+    /// Times how long the controller actually played each burst.
+    pub fn motors_written(&mut self, on: bool, now: Instant) {
+        match (self.out_on_since, on) {
+            (None, true) => self.out_on_since = Some(now),
+            (Some(since), false) => {
+                let run = now.saturating_duration_since(since);
+                self.out_on_since = None;
+                self.out_runs += 1;
+                self.out_run_total += run;
+                self.out_run_max = self.out_run_max.max(run);
+                self.out_run_min = Some(self.out_run_min.map_or(run, |m| m.min(run)));
+            }
+            _ => {}
+        }
+    }
+
+    /// When a pulse the game already stopped ends on the controller, for
+    /// the writer to send the stop right then rather than at its next tick.
+    pub fn stretch_end(&self, now: Instant) -> Option<Instant> {
+        if self.rumble.is_some() {
+            return None;
+        }
+        self.stretch.and_then(|s| s.until).filter(|&u| now < u)
+    }
+
+    /// The game's rumble for the next report: what it last set (or a pulse
+    /// it stopped before [`PULSE_MIN`] was up), raised to any level it set
+    /// that no report has carried yet. With the hold, the held report's
+    /// sequence number and whether it raised the level.
+    pub fn rumble_to_send(&self, now: Instant) -> ((u8, u8), Option<(u64, bool)>) {
+        // Before a report carries the pulse, the held level below sends it.
+        let carried_stretch = self
+            .stretch
+            .filter(|s| s.until.is_some_and(|u| now < u))
+            .map(|s| (s.heavy, s.light));
+        let (h, l) = match self.rumble {
+            Some(level) => level,
+            None => carried_stretch.unwrap_or((0, 0)),
+        };
+        match self.held_now(now) {
+            Some(p) => (
+                (h.max(p.heavy), l.max(p.light)),
+                Some((p.seq, p.heavy > h || p.light > l)),
+            ),
+            None => ((h, l), None),
+        }
+    }
+
+    /// A report to the controller (or the haptic stream) carried the held
+    /// level `seq` from [`GameState::rumble_to_send`]: let it go, unless a
+    /// newer level came in since. `raised`: the hold made the difference.
+    pub fn rumble_sent(&mut self, seq: u64, raised: bool, now: Instant) {
+        if let Some(p) = self.held.filter(|p| p.seq == seq) {
+            self.held = None;
+            // The pulse is on the controller from now: it stays on at
+            // least PULSE_MIN, however soon the game stops it.
+            if let Some(s) = self.stretch.as_mut().filter(|s| s.until.is_none()) {
+                s.until = Some(now + PULSE_MIN);
+            }
+            if raised {
+                self.rumble_saved += 1;
+            }
+            let wait = now.saturating_duration_since(p.since);
+            self.rumble_carried += 1;
+            self.rumble_wait_total += wait;
+            self.rumble_wait_max = self.rumble_wait_max.max(wait);
+            if wait > Duration::from_millis(8) {
+                self.rumble_waits_long += 1;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -127,6 +393,65 @@ impl Feedback {
         self.game.rumble.unwrap_or((0, 0))
     }
     pub fn clear_game(&mut self) {
+        let g = &self.game;
+        if g.rumble_logged {
+            log::info!(
+                "game rumble this session: {} report(s) set it, stopped by {} with zero levels, {} with no flags, {} that changed only other things",
+                g.rumble_sets,
+                g.rumble_zeroed,
+                g.rumble_flags_off,
+                g.rumble_cut_by_other
+            );
+            if g.rumble_runs > 0 {
+                log::info!(
+                    "game rumble pulses: {} on for {:.1} ms on average, shortest {:.1} ms, {} under 8 ms; {} reached the controller only because DSZ held them",
+                    g.rumble_runs,
+                    g.rumble_run_total.as_secs_f64() * 1000.0 / g.rumble_runs as f64,
+                    g.rumble_run_min.unwrap_or_default().as_secs_f64() * 1000.0,
+                    g.rumble_runs_short,
+                    g.rumble_saved
+                );
+            }
+            if g.rumble_carried > 0 || g.rumble_merged > 0 || g.rumble_uncarried > 0 || g.held.is_some() {
+                log::info!(
+                    "game rumble delivery: {} held level(s) carried, after {:.1} ms on average, longest {:.1} ms, {} over 8 ms; {} pulse(s) merged into one still waiting; {} never carried",
+                    g.rumble_carried,
+                    g.rumble_wait_total.as_secs_f64() * 1000.0 / g.rumble_carried.max(1) as f64,
+                    g.rumble_wait_max.as_secs_f64() * 1000.0,
+                    g.rumble_waits_long,
+                    g.rumble_merged,
+                    g.rumble_uncarried + g.held.is_some() as u64
+                );
+            }
+            if g.rumble_runs > 0 {
+                log::info!(
+                    "game rumble stretch: {} pulse(s) the game stopped early kept on the controller for {} ms",
+                    g.rumble_stretched,
+                    PULSE_MIN.as_millis()
+                );
+            }
+            if g.rumble_gaps > 0 {
+                log::info!(
+                    "game rumble pattern: a pulse every {:.1} ms on average, closest {:.1} ms apart, {} under 50 ms apart; heavy motor in {} pulse(s), light in {}; highest levels heavy {}, light {}",
+                    g.rumble_gap_total.as_secs_f64() * 1000.0 / g.rumble_gaps as f64,
+                    g.rumble_gap_min.unwrap_or_default().as_secs_f64() * 1000.0,
+                    g.rumble_gaps_short,
+                    g.rumble_on_heavy,
+                    g.rumble_on_light,
+                    g.rumble_peak.0,
+                    g.rumble_peak.1
+                );
+            }
+            if g.out_runs > 0 {
+                log::info!(
+                    "controller rumble: the motors ran {} time(s) in the reports sent, {:.1} ms on average, shortest {:.1} ms, longest {:.1} ms",
+                    g.out_runs,
+                    g.out_run_total.as_secs_f64() * 1000.0 / g.out_runs as f64,
+                    g.out_run_min.unwrap_or_default().as_secs_f64() * 1000.0,
+                    g.out_run_max.as_secs_f64() * 1000.0
+                );
+            }
+        }
         self.game = GameState::default();
     }
     pub fn prune(&mut self, now: Instant) {
@@ -140,12 +465,65 @@ impl Feedback {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Toggles {
     pub gyro: Option<bool>,
     pub touchpad: Option<bool>,
     pub mute_engaged: bool,
     pub gyro_toggled_on: bool,
+}
+
+/// Lock-free atomic storage for [`Toggles`], read on every HID input report.
+#[derive(Default)]
+pub struct AtomicToggles(AtomicU32);
+
+impl AtomicToggles {
+    fn pack(t: Toggles) -> u32 {
+        let opt = |o: Option<bool>| match o {
+            None => 0u32,
+            Some(false) => 1,
+            Some(true) => 2,
+        };
+        opt(t.gyro)
+            | (opt(t.touchpad) << 2)
+            | (u32::from(t.mute_engaged) << 4)
+            | (u32::from(t.gyro_toggled_on) << 5)
+    }
+
+    fn unpack(v: u32) -> Toggles {
+        let opt = |bits: u32| match bits & 3 {
+            1 => Some(false),
+            2 => Some(true),
+            _ => None,
+        };
+        Toggles {
+            gyro: opt(v),
+            touchpad: opt(v >> 2),
+            mute_engaged: (v & (1 << 4)) != 0,
+            gyro_toggled_on: (v & (1 << 5)) != 0,
+        }
+    }
+
+    #[inline]
+    pub fn load(&self) -> Toggles {
+        Self::unpack(self.0.load(Ordering::Acquire))
+    }
+
+    pub fn update(&self, mut f: impl FnMut(&mut Toggles)) {
+        let mut cur = self.0.load(Ordering::Relaxed);
+        loop {
+            let mut t = Self::unpack(cur);
+            f(&mut t);
+            let next = Self::pack(t);
+            match self
+                .0
+                .compare_exchange_weak(cur, next, Ordering::AcqRel, Ordering::Relaxed)
+            {
+                Ok(_) => return,
+                Err(v) => cur = v,
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,7 +581,7 @@ pub struct Device {
     pub link: Mutex<Link>,
     pub overrides: Mutex<Overrides>,
     pub feedback: Mutex<Feedback>,
-    pub toggles: Mutex<Toggles>,
+    pub toggles: AtomicToggles,
     pub flick_calibration: Mutex<Option<crate::flick_calibration::Turn>>,
     /// A profile in use only while a mapping's buttons are held.
     pub held_profile: Mutex<Option<crate::engine::HeldProfile>>,
@@ -217,6 +595,10 @@ pub struct Device {
     pub(crate) haptics_wake: Receiver<()>,
     /// The haptics thread owns the actuators (PCM mode).
     pub pcm_mode: AtomicBool,
+    /// "Classic rumble always" has the actuators: the firmware's rumble
+    /// emulation plays and the haptic stream leaves its haptic packet out.
+    /// Set by the writer from [`crate::composer::Composer::classic_owns`].
+    pub classic_rumble: AtomicBool,
     /// A game's haptic audio is playing on a wired controller's own sound
     /// device: the control reports leave the motor fields unmarked, or the
     /// firmware's rumble emulation takes the actuators and the audio isn't
@@ -259,9 +641,13 @@ pub struct Device {
     /// turns DualShock 4 audio on.
     pub ds4_audio: Mutex<ds_proto::ds4::AudioOut>,
     pub calibrate_request: AtomicBool,
-    /// Calibration feature report (`0x05`) read at connect.
     /// Feature reports a virtual DualSense driven by this controller answers with.
     pub mirror: Mutex<Mirror>,
+    /// A game asked a virtual DualSense for a report the controller didn't
+    /// give at connect: the writer thread reads the missing ones again.
+    mirror_request: AtomicBool,
+    /// When the last read again was asked for, and how many have been.
+    mirror_retry: Mutex<(Option<Instant>, u32)>,
     /// The virtual controller standing in for this one, if any.
     pub virt: crate::virt::Slot,
     /// Game audio for the haptics thread: a virtual DualSense's PCM ring,
@@ -372,13 +758,31 @@ impl Device {
         let _ = self.kick_tx.try_send(());
     }
 
+    /// Have the writer thread read the feature reports missing from
+    /// [`Device::mirror`] again, at most every [`MIRROR_RETRY_GAP`] and
+    /// [`MIRROR_RETRIES`] times. A game asking for one every half second
+    /// asks here as often; the virtual pad answers with a stand-in meanwhile.
+    pub fn request_mirror(&self) {
+        if self.model.is_dualshock4() {
+            return;
+        }
+        let mut r = self.mirror_retry.lock();
+        if r.1 >= MIRROR_RETRIES || r.0.is_some_and(|t| t.elapsed() < MIRROR_RETRY_GAP) {
+            return;
+        }
+        *r = (Some(Instant::now()), r.1 + 1);
+        drop(r);
+        self.mirror_request.store(true, Ordering::Release);
+        self.kick();
+    }
+
     /// Apply a profile's microphone settings. Capture runs only while an app
     /// records from a native microphone or virtual DualSense (a call, a recorder),
     /// so the rest of the time the controller's microphone, its radio
     /// traffic and the idle-off timer are as if it were off.
     pub fn apply_microphone(&self, mic: &crate::profile::Microphone) {
         let virtual_microphone = self.virt.microphone_ready();
-        let muted = mic.muted || (mic.mute_button && self.toggles.lock().mute_engaged);
+        let muted = mic.muted || (mic.mute_button && self.toggles.load().mute_engaged);
         #[cfg(windows)]
         let (enabled, listening) = (mic.enabled && virtual_microphone, self.virt.microphone_open());
         #[cfg(target_os = "linux")]
@@ -624,7 +1028,7 @@ impl Device {
     /// Rumble from the game.
     pub fn set_game_rumble(&self, heavy: u8, light: u8) {
         let mut f = self.feedback.lock();
-        f.game.rumble = (heavy != 0 || light != 0).then_some((heavy, light));
+        f.game.set_rumble(heavy, light, Instant::now());
         drop(f);
         self.kick();
     }
@@ -649,12 +1053,35 @@ impl Device {
         let g = &mut f.game;
         g.reports += 1;
         let (heavy, light) = o.rumble;
-        g.rumble = (heavy != 0 || light != 0).then_some((heavy, light));
+        let was = g.rumble.is_some();
+        g.set_rumble(heavy, light, Instant::now());
+        let [f0, f1, f2] = o.flags;
+        if g.rumble.is_some() {
+            g.rumble_sets += 1;
+        } else if was {
+            let other = f0 & !0x03 != 0 || f1 != 0 || f2 & !0x04 != 0;
+            if f0 & 0x03 != 0 {
+                g.rumble_zeroed += 1;
+            } else if !other {
+                g.rumble_flags_off += 1;
+            } else {
+                if g.rumble_cut_by_other == 0 {
+                    log::info!(
+                        "the game stopped its rumble with a report that changes other things (flags {f0:02X} {f1:02X} {f2:02X})"
+                    );
+                }
+                g.rumble_cut_by_other += 1;
+            }
+        }
         if g.rumble.is_some() && !g.rumble_logged {
             // Which way a game sends its feedback (rumble, haptic audio, or
-            // both) decides which level applies; issue 29.
+            // both) decides which level applies; issue 29. The flags and
+            // motor power show which rumble emulation it asks for (issue 43).
             g.rumble_logged = true;
-            log::info!("the game sends classic rumble to the virtual DualSense (heavy {heavy}, light {light})");
+            log::info!(
+                "the game sends classic rumble to the virtual DualSense (heavy {heavy}, light {light}; flags {f0:02X} {f1:02X} {f2:02X}, motor power {})",
+                o.motor_power.map_or("-".to_string(), |b| format!("0x{b:02X}"))
+            );
         }
         if let Some(t) = o.right_trigger {
             g.right_trigger = Some(t);
@@ -705,34 +1132,101 @@ fn normalize_mac(raw: &str) -> String {
         .join(":")
 }
 
+/// Waits before each read again of a feature report Windows calls busy.
+/// Right after a Bluetooth controller connects, all three reads can fail
+/// with "The requested resource is in use" (os error 170).
+const FEATURE_BUSY_RETRIES: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(150),
+    Duration::from_millis(300),
+];
+/// Shortest gap between reads again asked for by a game, and how many.
+const MIRROR_RETRY_GAP: Duration = Duration::from_secs(2);
+const MIRROR_RETRIES: u32 = 10;
+/// `ERROR_BUSY`.
+const OS_ERROR_BUSY: i32 = 170;
+
+/// One feature report, read again while Windows calls it busy.
+fn read_feature(dev: &HidDevice, id: u8, len: usize) -> Option<Vec<u8>> {
+    let mut waits = FEATURE_BUSY_RETRIES.iter();
+    let mut tries = 1;
+    loop {
+        match dev.get_feature(id, len) {
+            Ok(b) => {
+                if tries > 1 {
+                    log::debug!("feature 0x{id:02X} read on try {tries}");
+                }
+                return Some(b);
+            }
+            Err(e) => match waits.next() {
+                Some(wait) if e.raw_os_error() == Some(OS_ERROR_BUSY) => {
+                    std::thread::sleep(*wait);
+                    tries += 1;
+                }
+                _ => {
+                    log::debug!("feature 0x{id:02X} read failed after {tries} tries: {e}");
+                    return None;
+                }
+            },
+        }
+    }
+}
+
+/// "2.17 · Sep 19 2025" from a DualSense firmware report, or empty.
+fn firmware_text(mirror: &Mirror) -> String {
+    let Some(b) = mirror.firmware.as_ref().filter(|b| b.len() >= 46) else {
+        return String::new();
+    };
+    let date: String = b[1..12]
+        .iter()
+        .map(|&c| c as char)
+        .filter(|c| !c.is_control())
+        .collect();
+    let upd = u16::from_le_bytes([b[44], b[45]]);
+    let mut firmware = format!("{:X}.{:02X}", upd >> 8, upd & 0xFF);
+    if !date.trim().is_empty() {
+        firmware.push_str(&format!(" · {}", date.trim()));
+    }
+    firmware
+}
+
+/// Reads the feature reports a game asked the virtual DualSense for and the
+/// controller didn't give before. Runs on the writer thread, between output
+/// reports, so each is tried once with no waits: rumble and haptics keep
+/// going, and [`Device::request_mirror`]'s spacing is the retry.
+fn read_mirror_again(device: &Device, dev: &HidDevice) {
+    let mut mirror = device.mirror.lock().clone();
+    if !mirror.fill_missing(|id, len| dev.get_feature(id, len).ok()) {
+        log::debug!("{}: missing feature reports still unreadable", device.model.name());
+        return;
+    }
+    let firmware = firmware_text(&mirror);
+    if !firmware.is_empty() {
+        *device.firmware.lock() = firmware.clone();
+    }
+    let missing: Vec<String> = [0x05u8, 0x09, 0x20]
+        .iter()
+        .filter(|&&id| mirror.lacks(id))
+        .map(|id| format!("0x{id:02X}"))
+        .collect();
+    *device.mirror.lock() = mirror;
+    log::info!(
+        "{}: read its feature reports again for a game, firmware {}{}",
+        device.model.name(),
+        if firmware.is_empty() { "?" } else { &firmware },
+        if missing.is_empty() { String::new() } else { format!(", still missing {}", missing.join(", ")) }
+    );
+}
+
 fn read_identity(dev: &HidDevice, conn: Connection, model: Model) -> (String, String, Mirror) {
     if model.is_dualshock4() {
         return read_ds4_identity(dev, conn);
     }
     // The calibration read inside also switches a Bluetooth controller from
     // the short 0x01 report to the full 0x31 report.
-    let mirror = Mirror::read(|id, len| match dev.get_feature(id, len) {
-        Ok(b) => Some(b),
-        Err(e) => {
-            log::debug!("feature 0x{id:02X} read failed: {e}");
-            None
-        }
-    });
-    let mut firmware = String::new();
-    if let Some(b) = &mirror.firmware {
-        if b.len() >= 46 {
-            let date: String = b[1..12]
-                .iter()
-                .map(|&c| c as char)
-                .filter(|c| !c.is_control())
-                .collect();
-            let upd = u16::from_le_bytes([b[44], b[45]]);
-            firmware = format!("{:X}.{:02X}", upd >> 8, upd & 0xFF);
-            if !date.trim().is_empty() {
-                firmware.push_str(&format!(" · {}", date.trim()));
-            }
-        }
-    }
+    let mut mirror = Mirror::read(|id, len| read_feature(dev, id, len));
+    mirror.firmware_from_edge = model == Model::DualSenseEdge;
+    let firmware = firmware_text(&mirror);
     let mut mac = normalize_mac(&dev.info.serial);
     if mac.is_empty() || conn == Connection::Usb {
         if let Some(b) = &mirror.pairing {
@@ -752,7 +1246,7 @@ fn read_identity(dev: &HidDevice, conn: Connection, model: Model) -> (String, St
 fn read_ds4_identity(dev: &HidDevice, conn: Connection) -> (String, String, Mirror) {
     let mut mac = normalize_mac(&dev.info.serial);
     if mac.is_empty() || conn == Connection::Usb {
-        if let Ok(b) = dev.get_feature(0x12, 16) {
+        if let Some(b) = read_feature(dev, 0x12, 16) {
             if b.len() >= 7 && b[0] == 0x12 && b[1..7].iter().any(|x| *x != 0) {
                 mac = (1..7)
                     .rev()
@@ -763,7 +1257,7 @@ fn read_ds4_identity(dev: &HidDevice, conn: Connection) -> (String, String, Mirr
         }
     }
     let mut firmware = String::new();
-    if let Ok(b) = dev.get_feature(0xA3, 49) {
+    if let Some(b) = read_feature(dev, 0xA3, 49) {
         if b.len() >= 43 && b[0] == 0xA3 {
             let hw = u16::from_le_bytes([b[35], b[36]]);
             let fw = u16::from_le_bytes([b[41], b[42]]);
@@ -775,11 +1269,11 @@ fn read_ds4_identity(dev: &HidDevice, conn: Connection) -> (String, String, Mirr
     } else {
         (0x02, 37, false)
     };
-    match dev.get_feature(id, len) {
-        Ok(b) if !ds_proto::ds4::calibration_plausible(&b, bluetooth) => {
+    match read_feature(dev, id, len) {
+        Some(b) if !ds_proto::ds4::calibration_plausible(&b, bluetooth) => {
             log::info!("DualShock 4 calibration is missing or unusable; gyro uses a software bias");
         }
-        Err(e) => log::debug!("DualShock 4 calibration read failed: {e}"),
+        None => log::debug!("DualShock 4 calibration read failed"),
         _ => {}
     }
     let mirror = Mirror {
@@ -958,6 +1452,63 @@ fn controller_apps(running: &std::collections::HashSet<String>) -> Vec<&'static 
     CONTROLLER_APPS.iter().copied().filter(|a| running.contains(*a)).collect()
 }
 
+/// Input with no controller state for this long shows as "No signal".
+const QUIET_AFTER: Duration = Duration::from_millis(1500);
+/// Log at most this many "No signal" stops per connection.
+const QUIET_LOGS: u32 = 20;
+
+/// What the reader got since the last controller state. Issue 63: Game Bar
+/// opening put a controller on "No signal" and the log said nothing.
+#[derive(Default)]
+struct SinceState {
+    timeouts: u32,
+    errors: u32,
+    bad_crc: u32,
+    other: u32,
+}
+
+impl SinceState {
+    fn describe(&self) -> String {
+        let parts: Vec<String> = [
+            (self.timeouts, "reads timed out"),
+            (self.errors, "reads failed"),
+            (self.bad_crc, "reports failed the CRC"),
+            (self.other, "other packets"),
+        ]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, what)| format!("{n} {what}"))
+        .collect();
+        if parts.is_empty() {
+            "nothing read".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
+}
+
+/// Whether Game Bar is up and which program is in front, for the log.
+#[cfg(windows)]
+fn quiet_context() -> String {
+    format!(
+        "Game Bar {}, window in front: {}",
+        if crate::virt::gamebar::on_screen() { "on screen" } else { "not on screen" },
+        crate::platform::foreground_exe().unwrap_or_else(|| "unknown".to_string())
+    )
+}
+
+#[cfg(test)]
+mod since_state_tests {
+    use super::*;
+
+    #[test]
+    fn names_only_what_happened() {
+        assert_eq!(SinceState::default().describe(), "nothing read");
+        let s = SinceState { timeouts: 15, bad_crc: 2, ..Default::default() };
+        assert_eq!(s.describe(), "15 reads timed out, 2 reports failed the CRC");
+    }
+}
+
 fn quick_charge_disconnect(mac: String) -> bool {
     // Tests record the address. A real one would talk to the Bluetooth radio.
     #[cfg(test)]
@@ -1026,8 +1577,8 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
         link: Mutex::new(Link::Opening),
         overrides: Mutex::new(Overrides::default()),
         feedback: Mutex::new(Feedback::default()),
-        toggles: Mutex::new(Toggles::default()),
-        flick_calibration: Mutex::new(None),
+        toggles: AtomicToggles::default(),
+    flick_calibration: Mutex::new(None),
         held_profile: Mutex::new(None),
         stream_tx: tx,
         stream_rx: rx,
@@ -1036,6 +1587,7 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
         haptics_wake_tx,
         haptics_wake,
         pcm_mode: AtomicBool::new(false),
+        classic_rumble: AtomicBool::new(false),
         usb_haptics: AtomicBool::new(false),
         haptic_level: [AtomicU8::new(0), AtomicU8::new(0)],
         speaker_level: AtomicU8::new(0),
@@ -1062,6 +1614,8 @@ pub fn run(engine: Arc<Engine>, info: DeviceInfo, id: u64) {
         speaker_test_result: Mutex::new(None),
         calibrate_request: AtomicBool::new(false),
         mirror: Mutex::new(mirror),
+        mirror_request: AtomicBool::new(false),
+        mirror_retry: Mutex::new((None, 0)),
         virt: Default::default(),
         game_audio: Mutex::new(None),
         game_audio_test: Mutex::new(None),
@@ -1228,12 +1782,47 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
     let mut last_kind = 0u8;
     #[cfg(target_os = "linux")]
     let mut kernel_mute_checked = false;
+    let mut since_state = SinceState::default();
+    let mut quiet_logs = 0u32;
+    // Issue 63: input held back while Game Bar is open.
+    let mut stall = crate::stall::Stall::new(device.model, device.conn);
 
     while !device.stop.load(Ordering::Acquire) {
         #[cfg(target_os = "linux")]
         device.isolated_media_ready.store(reader.has_isolated_media(), Ordering::Release);
-        match reader.read(100) {
-            Ok(Some(buf)) => {
+        #[cfg(windows)]
+        let ask = stall.ask(Instant::now(), last_input, prev.full);
+        #[cfg(windows)]
+        let timeout = stall.read_ms();
+        #[cfg(not(windows))]
+        let timeout = 100;
+        let got = match reader.read(timeout) {
+            #[cfg(not(windows))]
+            Ok(None) => Ok(None),
+            #[cfg(windows)]
+            Ok(None) => match ask {
+                Some(id) => match reader.current(id, crate::stall::ASK_TIMEOUT_MS) {
+                    Ok(Some(buf)) => Ok(Some((buf, true))),
+                    Ok(None) => {
+                        if let Some(line) = stall.fail(crate::stall::AskFail::Timeout) {
+                            log::warn!("{line}");
+                        }
+                        Ok(None)
+                    }
+                    Err(e) => {
+                        if let Some(line) = stall.fail(crate::stall::AskFail::from_io(&e)) {
+                            log::warn!("{line}");
+                        }
+                        Ok(None)
+                    }
+                },
+                None => Ok(None),
+            },
+            Ok(Some(buf)) => Ok(Some((buf, false))),
+            Err(e) => Err(e),
+        };
+        match got {
+            Ok(Some((buf, asked))) => {
                 errors = 0;
                 let gap = last_packet.elapsed();
                 last_packet = Instant::now();
@@ -1264,7 +1853,9 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                         ds_proto::input::parse(buf, device.conn, device.model, false)
                     }
                 } else {
-                    ds_proto::input::parse(buf, device.conn, device.model, check_crc)
+                    // An asked-for report is always checked: it skips the
+                    // stream, and with it any doubt about what it is.
+                    ds_proto::input::parse(buf, device.conn, device.model, check_crc || asked)
                 };
                 let kind = match &parsed {
                     Err(ParseError::NotState(k)) => *k,
@@ -1274,11 +1865,39 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                     last_kind = kind;
                     device.flight.input_kind(kind);
                 }
+                if asked && !matches!(parsed, Ok(ref st) if st.full) {
+                    // Anything but full input state ends asking until the
+                    // stream is back.
+                    let reason = match parsed {
+                        Err(ParseError::BadCrc) => crate::stall::AskFail::Crc,
+                        _ => crate::stall::AskFail::bad_report(buf),
+                    };
+                    if let Some(line) = stall.fail(reason) {
+                        log::warn!("{line}");
+                    }
+                    continue;
+                }
                 match parsed {
                     Ok(mut state) => {
                         let now = Instant::now();
+                        let was_asking = stall.asking();
+                        if !stall.accept(asked, state.sensor_ts, now) {
+                            // Already have newer state from an ask.
+                            continue;
+                        }
+                        if stall.asking() != was_asking {
+                            log::info!(
+                                "{}",
+                                if was_asking {
+                                    "input stream back"
+                                } else {
+                                    "input stream held back (Game Bar open?): reading current reports"
+                                }
+                            );
+                        }
                         device.stats.reports.fetch_add(1, Ordering::Relaxed);
                         count_since += 1;
+                        let silent = now.duration_since(last_input);
                         last_input = now;
                         if !state.full
                             && now.duration_since(last_short_retry) > Duration::from_secs(1)
@@ -1293,12 +1912,23 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                         if is_active(&state, &prev) {
                             *device.last_activity.lock() = now;
                         }
-                        {
+                        let was_quiet = {
                             let mut link = device.link.lock();
+                            let quiet = *link == Link::Quiet;
                             if *link != Link::Live {
                                 *link = Link::Live;
                             }
+                            quiet
+                        };
+                        if was_quiet && quiet_logs <= QUIET_LOGS {
+                            log::info!(
+                                "{} input back after {} ms; {}",
+                                device.model.name(),
+                                silent.as_millis(),
+                                quiet_context()
+                            );
                         }
+                        since_state = SinceState::default();
                         let raw = if device.model.is_dualshock4() {
                             if state.full {
                                 state.sensor_ts =
@@ -1324,12 +1954,12 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                                 Ok(value) => {
                                     device.kernel_mute_state.store(match value { None => 0, Some(false) => 1, Some(true) => 2 }, Ordering::Release);
                                     if let Some(muted) = value {
-                                        device.toggles.lock().mute_engaged = muted;
+                                        device.toggles.update(|t| t.mute_engaged = muted);
                                     }
                                 }
                                 Err(error) => {
                                     device.kernel_mute_state.store(3, Ordering::Release);
-                                    device.toggles.lock().mute_engaged = true;
+                                    device.toggles.update(|t| t.mute_engaged = true);
                                     device.set_microphone(false, true, 100, crate::profile::MicrophoneSource::Auto);
                                     let message = format!("Cannot read the kernel microphone mute state: {error}");
                                     let mut previous = device.native_audio_error.lock();
@@ -1343,8 +1973,10 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                     }
                     Err(ParseError::BadCrc) => {
                         device.stats.crc_errors.fetch_add(1, Ordering::Relaxed);
+                        since_state.bad_crc += 1;
                     }
                     Err(ParseError::NotState(2)) => {
+                        since_state.other += 1;
                         if let Some(packet) = crate::haptics::capture::Capture::packet(buf) {
                             // A voice call is activity even when no buttons
                             // move. Muted/disabled capture retains idle-off.
@@ -1360,10 +1992,10 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                             }
                         }
                     }
-                    Err(_) => {}
+                    Err(_) => since_state.other += 1,
                 }
             }
-            Ok(None) => {}
+            Ok(None) => since_state.timeouts += 1,
             Err(e) => {
                 if hid::is_fatal(&e) {
                     log::info!("input stream closed: {e}");
@@ -1372,6 +2004,7 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                     break;
                 }
                 errors += 1;
+                since_state.errors += 1;
                 if errors % 50 == 1 {
                     log::warn!("read error (retrying): {e}");
                 }
@@ -1379,10 +2012,27 @@ fn reader_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
             }
         }
         let now = Instant::now();
-        if now.duration_since(last_input) > Duration::from_millis(1500) {
-            let mut link = device.link.lock();
-            if *link == Link::Live {
-                *link = Link::Quiet;
+        if now.duration_since(last_input) > QUIET_AFTER {
+            let went_quiet = {
+                let mut link = device.link.lock();
+                let live = *link == Link::Live;
+                if live {
+                    *link = Link::Quiet;
+                }
+                live
+            };
+            if went_quiet {
+                quiet_logs += 1;
+                if quiet_logs <= QUIET_LOGS {
+                    log::warn!(
+                        "{} input stopped: no controller state for {} ms ({}); {}{}",
+                        device.model.name(),
+                        now.duration_since(last_input).as_millis(),
+                        since_state.describe(),
+                        quiet_context(),
+                        if quiet_logs == QUIET_LOGS { "; further stops on this connection aren't logged" } else { "" }
+                    );
+                }
             }
         }
         if now.duration_since(last_rate) >= Duration::from_secs(1) {
@@ -1594,6 +2244,9 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
         }
         // Lighter control cadence while the media stream shares the radio.
         next_tick = now + if pcm { TICK_STREAMING } else { TICK };
+        if device.mirror_request.swap(false, Ordering::AcqRel) {
+            read_mirror_again(device, dev);
+        }
 
         let profile = profile_cache.get(engine, device);
         crate::haptics::usb::Worker::sync(&mut usb_haptics, engine, device, &profile.virtual_out, profile.haptics.speaker_volume);
@@ -1619,7 +2272,7 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
         };
         let input = device.live.lock().input;
         let overrides = device.overrides.lock().clone();
-        let toggles = *device.toggles.lock();
+        let toggles = device.toggles.load();
         let mut state = {
             let mut fb = device.feedback.lock();
             fb.prune(now);
@@ -1634,6 +2287,9 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                 now,
             )
         };
+        device
+            .classic_rumble
+            .store(composer.classic_owns(), Ordering::Release);
         let mut microphone_managed = false;
         let route = device.speaker_route.load(Ordering::Acquire);
         if !device.is_bluetooth() && !device.model.is_dualshock4() && route != SPEAKER_UNTOUCHED {
@@ -1675,6 +2331,7 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
             && now.duration_since(last_write) < LIGHTING_GAP;
         let due =
             keepalive || (changed && !throttled) || device.force_output.load(Ordering::Acquire);
+        let mut wrote = false;
         if due && now >= backoff_until {
             device.force_output.store(false, Ordering::Release);
             let ds4_audio = *device.ds4_audio.lock();
@@ -1691,9 +2348,34 @@ fn writer_loop(engine: &Arc<Engine>, device: &Arc<Device>, dev: &HidDevice) {
                 last_sent = Some(state);
                 last_write = now;
                 writes_since += 1;
+                wrote = true;
             } else {
                 // Make sure the state goes out once the link is back.
                 last_sent = None;
+            }
+        }
+        if let Some((seq, raised)) = composer.take_held() {
+            // The held rumble level is with the controller once a report
+            // carrying it went out, or when the last one sent already had
+            // the same motor levels (nothing new to send).
+            let carried = last_sent.as_ref().is_some_and(|l| {
+                (l.rumble_valid, l.rumble_left, l.rumble_right)
+                    == (state.rumble_valid, state.rumble_left, state.rumble_right)
+            });
+            if carried {
+                device.feedback.lock().game.rumble_sent(seq, raised && wrote, now);
+            }
+        }
+        {
+            let mut fb = device.feedback.lock();
+            if wrote {
+                let on = state.rumble_valid && (state.rumble_left > 0 || state.rumble_right > 0);
+                fb.game.motors_written(on, now);
+            }
+            // A pulse the game stopped early stops on the controller once
+            // its PULSE_MIN is up, not at the tick after.
+            if let Some(end) = fb.game.stretch_end(now) {
+                next_tick = next_tick.min(end);
             }
         }
 
@@ -1785,8 +2467,8 @@ impl Device {
             link: Mutex::new(Link::Live),
             overrides: Mutex::new(Overrides::default()),
             feedback: Mutex::new(Feedback::default()),
-            toggles: Mutex::new(Toggles::default()),
-            flick_calibration: Mutex::new(None),
+            toggles: AtomicToggles::default(),
+        flick_calibration: Mutex::new(None),
             held_profile: Mutex::new(None),
             stream_tx,
             stream_rx,
@@ -1795,6 +2477,7 @@ impl Device {
             haptics_wake_tx,
             haptics_wake,
             pcm_mode: AtomicBool::new(false),
+            classic_rumble: AtomicBool::new(false),
             usb_haptics: AtomicBool::new(false),
             haptic_level: [AtomicU8::new(0), AtomicU8::new(0)],
             speaker_level: AtomicU8::new(0),
@@ -1821,6 +2504,8 @@ impl Device {
             speaker_test_result: Mutex::new(None),
             calibrate_request: AtomicBool::new(false),
             mirror: Mutex::new(Mirror::default()),
+            mirror_request: AtomicBool::new(false),
+            mirror_retry: Mutex::new((None, 0)),
             virt: Default::default(),
             game_audio: Mutex::new(None),
             game_audio_test: Mutex::new(None),
@@ -1980,7 +2665,7 @@ mod microphone_tests {
         let now = Instant::now();
         let report = || {
             let state = crate::composer::Composer::new().compose(&profile, &input,
-                &d.overrides.lock(), &d.feedback.lock(), &d.toggles.lock(), false, 0.0, now);
+                &d.overrides.lock(), &d.feedback.lock(), &d.toggles.load(), false, 0.0, now);
             state.build(Connection::Bluetooth, &mut [0u8; 78]).to_vec()
         };
         let before = report();
@@ -1999,6 +2684,28 @@ mod microphone_tests {
     }
 
     #[test]
+    fn atomic_toggles_round_trip_every_combination() {
+        let at = AtomicToggles::default();
+        assert_eq!(at.load(), Toggles::default());
+        for gyro in [None, Some(false), Some(true)] {
+            for touchpad in [None, Some(false), Some(true)] {
+                for mute_engaged in [false, true] {
+                    for gyro_toggled_on in [false, true] {
+                        let want = Toggles {
+                            gyro,
+                            touchpad,
+                            mute_engaged,
+                            gyro_toggled_on,
+                        };
+                        at.update(|t| *t = want);
+                        assert_eq!(at.load(), want);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_profile_without_a_usable_microphone_changes_nothing() {
         let d = Device::for_test(Connection::Bluetooth, "");
         let mut mic = crate::profile::Microphone {
@@ -2007,7 +2714,7 @@ mod microphone_tests {
             gain_percent: 50,
             ..Default::default()
         };
-        d.toggles.lock().mute_engaged = true;
+        d.toggles.update(|t| t.mute_engaged = true);
         d.apply_microphone(&mic);
         // On, but with no virtual DualSense to record from.
         mic.enabled = true;
@@ -2378,3 +3085,365 @@ mod game_audio_test_tests {
         assert!(d.game_audio.lock().is_none());
     }
 }
+
+#[cfg(test)]
+mod rumble_pulse_tests {
+    //! Issue 43: GTA V pulses its rumble, a level in one report and zero in
+    //! the next. A level the game set must reach the controller in at least
+    //! one report, even when its zero comes before the writer's next report.
+    use super::*;
+    use crate::composer::Composer;
+    use crate::profile::Profile;
+    use ds_proto::OutputState;
+
+    fn compose(c: &mut Composer, d: &Device, p: &Profile, pcm: bool, now: Instant) -> OutputState {
+        let fb = d.feedback.lock();
+        c.compose(
+            p,
+            &InputState::default(),
+            &Overrides::default(),
+            &fb,
+            &Toggles::default(),
+            pcm,
+            0.0,
+            now,
+        )
+    }
+
+    /// A game's USB output report to the virtual DualSense: classic rumble
+    /// (heavy, light) with the rumble flags set, as GTA V sends it.
+    fn ds_rumble_report(heavy: u8, light: u8) -> Vec<u8> {
+        let mut r = vec![0u8; ds_proto::virtual_pad::DS_USB_OUTPUT_LEN];
+        r[0] = 0x02;
+        r[1] = 0x03;
+        r[2] = 0x40;
+        r[3] = light;
+        r[4] = heavy;
+        r
+    }
+
+    #[test]
+    fn a_pulse_cleared_before_the_next_report_still_goes_out() {
+        let d = Device::for_test(Connection::Bluetooth, "");
+        let p = Profile::default();
+        let mut c = Composer::new();
+        let now = Instant::now();
+        let idle = compose(&mut c, &d, &p, false, now);
+        assert_eq!((idle.rumble_left, idle.rumble_right), (0, 0));
+        // An Xbox 360 or DualShock 4 virtual pad: on, then off, both
+        // between two of the writer's reports.
+        d.set_game_rumble(111, 0);
+        d.set_game_rumble(0, 0);
+        let o = compose(&mut c, &d, &p, false, now + Duration::from_millis(4));
+        assert!(o.rumble_valid);
+        assert_eq!((o.rumble_left, o.rumble_right), (111, 0), "the pulse was lost");
+    }
+
+    #[test]
+    fn a_virtual_dualsense_pulse_survives_classic_rumble_always_with_the_speaker_stream() {
+        let d = Device::for_test(Connection::Bluetooth, "");
+        let mut p = Profile::default();
+        p.rumble.always_classic = true;
+        let mut c = Composer::new();
+        let now = Instant::now();
+        // The speaker stream runs (pcm), nothing rumbles: the stream has the
+        // actuators.
+        assert!(!compose(&mut c, &d, &p, true, now).rumble_valid);
+        d.apply_game_output(&ds_rumble_report(111, 0));
+        d.apply_game_output(&ds_rumble_report(0, 0));
+        let o = compose(&mut c, &d, &p, true, now + Duration::from_millis(8));
+        assert!(o.rumble_valid);
+        assert_eq!((o.rumble_left, o.rumble_right), (111, 0), "the pulse was lost");
+        assert!(c.classic_owns());
+    }
+
+    #[test]
+    fn a_game_that_never_rumbles_gets_the_same_report_bytes() {
+        // Reports that set no rumble leave every control report byte as
+        // it was, in every mode.
+        let bytes = |o: &OutputState| {
+            let mut b = [0u8; 128];
+            o.build(Connection::Bluetooth, &mut b).to_vec()
+        };
+        let now = Instant::now();
+        for always_classic in [false, true] {
+            for pcm in [false, true] {
+                let mut p = Profile::default();
+                p.rumble.always_classic = always_classic;
+                let quiet = Device::for_test(Connection::Bluetooth, "");
+                let busy = Device::for_test(Connection::Bluetooth, "");
+                // A report with no rumble flags, then zero rumble.
+                let mut plain = vec![0u8; ds_proto::virtual_pad::DS_USB_OUTPUT_LEN];
+                plain[0] = 0x02;
+                busy.apply_game_output(&plain);
+                busy.set_game_rumble(0, 0);
+                let (mut a, mut b) = (Composer::new(), Composer::new());
+                for ms in [0u64, 4, 8, 16, 200] {
+                    let t = now + Duration::from_millis(ms);
+                    let x = compose(&mut a, &quiet, &p, pcm, t);
+                    let y = compose(&mut b, &busy, &p, pcm, t);
+                    assert_eq!(bytes(&x), bytes(&y), "classic {always_classic}, pcm {pcm}, {ms} ms");
+                }
+            }
+        }
+    }
+
+    /// One writer step: compose, "send", and let the held level go as the
+    /// writer does once the report is out.
+    fn send(c: &mut Composer, d: &Device, p: &Profile, pcm: bool, now: Instant) -> (bool, u8, u8) {
+        let o = compose(c, d, p, pcm, now);
+        if let Some((seq, raised)) = c.take_held() {
+            d.feedback.lock().game.rumble_sent(seq, raised, now);
+        }
+        (o.rumble_valid, o.rumble_left, o.rumble_right)
+    }
+
+    #[test]
+    fn a_held_pulse_goes_out_once_then_the_zero_follows() {
+        let d = Device::for_test(Connection::Bluetooth, "");
+        let p = Profile::default();
+        let mut c = Composer::new();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        d.set_game_rumble(111, 0);
+        d.set_game_rumble(0, 0);
+        assert_eq!(send(&mut c, &d, &p, false, at(4)), (true, 111, 0));
+        assert!(d.feedback.lock().game.held.is_none());
+        assert_eq!(d.feedback.lock().game.rumble_saved, 1);
+        // Kept on for PULSE_MIN from that report, then the game's zero.
+        let min = PULSE_MIN.as_millis() as u64;
+        assert_eq!(send(&mut c, &d, &p, false, at(8)), (true, 111, 0));
+        assert_eq!(send(&mut c, &d, &p, false, at(4 + min - 1)), (true, 111, 0));
+        assert_eq!(send(&mut c, &d, &p, false, at(4 + min)), (true, 0, 0));
+    }
+
+    #[test]
+    fn a_short_pulse_stays_on_the_controller_for_pulse_min() {
+        let mut g = GameState::default();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let min = PULSE_MIN.as_millis() as u64;
+        // The game's 0.2 ms pulse; a report carries it 3 ms later.
+        g.set_rumble(111, 0, at(0));
+        g.set_rumble(0, 0, at(0) + Duration::from_micros(200));
+        let (level, held) = g.rumble_to_send(at(3));
+        assert_eq!(level, (111, 0));
+        g.rumble_sent(held.unwrap().0, true, at(3));
+        // The full PULSE_MIN counts from that report, not from the pulse.
+        assert_eq!(g.stretch_end(at(3)), Some(at(3 + min)));
+        assert_eq!(g.rumble_to_send(at(3 + min - 1)), ((111, 0), None));
+        assert_eq!(g.rumble_to_send(at(3 + min)), ((0, 0), None));
+        assert_eq!(g.stretch_end(at(3 + min)), None);
+        assert_eq!(g.rumble_stretched, 1);
+    }
+
+    #[test]
+    fn a_pulse_longer_than_pulse_min_stops_at_once() {
+        let mut g = GameState::default();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let min = PULSE_MIN.as_millis() as u64;
+        g.set_rumble(150, 0, at(0));
+        let (_, held) = g.rumble_to_send(at(0));
+        g.rumble_sent(held.unwrap().0, false, at(0));
+        g.set_rumble(0, 0, at(min + 5));
+        assert_eq!(g.rumble_to_send(at(min + 5)), ((0, 0), None));
+        assert_eq!(g.stretch_end(at(min + 5)), None);
+        assert_eq!(g.rumble_stretched, 0);
+    }
+
+    #[test]
+    fn a_new_pulse_during_a_stretch_takes_over_at_once() {
+        let mut g = GameState::default();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        g.set_rumble(200, 0, at(0));
+        let (_, held) = g.rumble_to_send(at(0));
+        g.rumble_sent(held.unwrap().0, true, at(0));
+        g.set_rumble(0, 0, at(1));
+        // A weaker pulse 5 ms later plays as it is, then gets its own
+        // PULSE_MIN from the report that carries it.
+        g.set_rumble(60, 0, at(5));
+        g.set_rumble(0, 0, at(6));
+        let (level, held) = g.rumble_to_send(at(8));
+        assert_eq!(level, (60, 0));
+        g.rumble_sent(held.unwrap().0, false, at(8));
+        assert_eq!(g.rumble_to_send(at(20)), ((60, 0), None));
+        assert_eq!(g.stretch_end(at(20)), Some(at(8) + PULSE_MIN));
+        assert_eq!(g.rumble_stretched, 2);
+    }
+
+    #[test]
+    fn the_session_log_times_the_pattern_and_what_the_controller_played() {
+        let mut g = GameState::default();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        for (start, level) in [(0u64, (111, 0)), (90, (0, 70)), (130, (120, 0))] {
+            g.set_rumble(level.0, level.1, at(start));
+            g.set_rumble(0, 0, at(start + 1));
+        }
+        assert_eq!(g.rumble_gaps, 2);
+        assert_eq!(g.rumble_gap_min, Some(Duration::from_millis(40)));
+        assert_eq!(g.rumble_gaps_short, 1);
+        assert_eq!((g.rumble_on_heavy, g.rumble_on_light), (2, 1));
+        assert_eq!(g.rumble_peak, (120, 70));
+        g.motors_written(true, at(0));
+        g.motors_written(true, at(8));
+        g.motors_written(false, at(16));
+        g.motors_written(false, at(24));
+        g.motors_written(true, at(90));
+        g.motors_written(false, at(110));
+        assert_eq!(g.out_runs, 2);
+        assert_eq!(g.out_run_min, Some(Duration::from_millis(16)));
+        assert_eq!(g.out_run_max, Duration::from_millis(20));
+    }
+
+    #[test]
+    fn steady_rumble_and_a_carried_stop_are_unchanged() {
+        let d = Device::for_test(Connection::Bluetooth, "");
+        let p = Profile::default();
+        let mut c = Composer::new();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        // Steady: the game repeats its level; every report has it.
+        for ms in (0..80).step_by(8) {
+            d.set_game_rumble(150, 40);
+            assert_eq!(send(&mut c, &d, &p, false, at(ms)), (true, 150, 40), "{ms}");
+        }
+        // Stopped after a report carried the level: the zero goes out in
+        // the very next report, no longer on than before.
+        d.set_game_rumble(0, 0);
+        assert_eq!(send(&mut c, &d, &p, false, at(84)), (true, 0, 0));
+        // Lowered after a report carried the level: the lower level at once.
+        d.set_game_rumble(200, 0);
+        assert_eq!(send(&mut c, &d, &p, false, at(88)), (true, 200, 0));
+        d.set_game_rumble(60, 0);
+        assert_eq!(send(&mut c, &d, &p, false, at(92)), (true, 60, 0));
+        assert_eq!(d.feedback.lock().game.rumble_saved, 0);
+    }
+
+    #[test]
+    fn a_higher_level_cut_to_a_lower_one_before_a_report_goes_out_once() {
+        let d = Device::for_test(Connection::Bluetooth, "");
+        let p = Profile::default();
+        let mut c = Composer::new();
+        let t = Instant::now();
+        d.set_game_rumble(200, 10);
+        d.set_game_rumble(80, 90);
+        // Each motor's highest level since the last report, once.
+        assert_eq!(send(&mut c, &d, &p, false, t), (true, 200, 90));
+        assert_eq!(send(&mut c, &d, &p, false, t + Duration::from_millis(8)), (true, 80, 90));
+    }
+
+    #[test]
+    fn a_newer_pulse_is_not_let_go_by_an_older_report() {
+        let mut g = GameState::default();
+        let t = Instant::now();
+        g.set_rumble(111, 0, t);
+        let (_, first) = g.rumble_to_send(t);
+        // Another pulse comes in while that report is on its way.
+        g.set_rumble(0, 0, t);
+        g.set_rumble(90, 0, t + Duration::from_millis(1));
+        g.set_rumble(0, 0, t + Duration::from_millis(2));
+        let (seq, _) = first.unwrap();
+        g.rumble_sent(seq, true, t);
+        assert_eq!(g.rumble_to_send(t + Duration::from_millis(3)).0, (111, 0), "merged and still held");
+        let (_, second) = g.rumble_to_send(t + Duration::from_millis(3));
+        g.rumble_sent(second.unwrap().0, true, t + Duration::from_millis(3));
+        // Let go; the last pulse then plays out its PULSE_MIN.
+        assert_eq!(g.rumble_to_send(t + Duration::from_millis(4)), ((90, 0), None));
+        assert_eq!(g.rumble_to_send(t + Duration::from_millis(3) + PULSE_MIN), ((0, 0), None));
+    }
+
+    #[test]
+    fn a_held_level_nothing_took_is_dropped_not_played_late() {
+        let mut g = GameState::default();
+        let t = Instant::now();
+        g.set_rumble(111, 0, t);
+        g.set_rumble(0, 0, t);
+        assert_eq!(g.rumble_to_send(t + PULSE_STALE - Duration::from_millis(1)).0, (111, 0));
+        assert_eq!(g.rumble_to_send(t + PULSE_STALE), ((0, 0), None));
+    }
+
+    #[test]
+    fn the_session_log_counts_merged_late_and_uncarried_pulses() {
+        let mut g = GameState::default();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        // Steady rumble the game repeats is not a merge.
+        for ms in 0..3 {
+            g.set_rumble(150, 0, at(ms));
+        }
+        assert_eq!(g.rumble_merged, 0);
+        // Two pulses before a report: one merge, carried 12 ms after the first.
+        g.set_rumble(0, 0, at(3));
+        g.set_rumble(90, 0, at(4));
+        g.set_rumble(0, 0, at(5));
+        assert_eq!(g.rumble_merged, 1);
+        let (_, held) = g.rumble_to_send(at(12));
+        g.rumble_sent(held.unwrap().0, true, at(12));
+        assert_eq!((g.rumble_carried, g.rumble_wait_max, g.rumble_waits_long), (1, Duration::from_millis(12), 1));
+        // A pulse no report took, then the next one: one never carried.
+        g.set_rumble(80, 0, at(20));
+        g.set_rumble(0, 0, at(21));
+        g.set_rumble(80, 0, at(20) + PULSE_STALE);
+        assert_eq!((g.rumble_uncarried, g.rumble_merged), (1, 1));
+    }
+
+    #[test]
+    fn while_the_stream_plays_rumble_the_control_report_is_unchanged() {
+        // Classic rumble always off and haptics streaming: rumble plays on
+        // the stream (the streamer takes the held level), and the control
+        // report is byte for byte what it was.
+        let bytes = |o: &OutputState| {
+            let mut b = [0u8; 128];
+            o.build(Connection::Bluetooth, &mut b).to_vec()
+        };
+        let d = Device::for_test(Connection::Bluetooth, "");
+        let p = Profile::default();
+        let t = Instant::now();
+        let mut c = Composer::new();
+        d.set_game_rumble(111, 0);
+        d.set_game_rumble(0, 0);
+        let got = compose(&mut c, &d, &p, true, t);
+        assert!(c.take_held().is_none());
+        let want = Composer::new().compose(
+            &p,
+            &InputState::default(),
+            &Overrides::default(),
+            &Feedback::default(),
+            &Toggles::default(),
+            true,
+            0.0,
+            t,
+        );
+        assert_eq!(bytes(&got), bytes(&want));
+        assert!(d.feedback.lock().game.held.is_some(), "left for the stream");
+    }
+
+    #[test]
+    fn pulses_keep_the_classic_handover() {
+        // Classic rumble always with the speaker stream: a held pulse takes
+        // the actuators, the zero follows, and CLASSIC_HOLD after the pulse
+        // they go back to the stream.
+        let d = Device::for_test(Connection::Bluetooth, "");
+        let mut p = Profile::default();
+        p.rumble.always_classic = true;
+        let mut c = Composer::new();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        d.set_game_rumble(111, 0);
+        d.set_game_rumble(0, 0);
+        assert_eq!(send(&mut c, &d, &p, true, at(0)), (true, 111, 0));
+        assert!(c.classic_owns());
+        assert_eq!(send(&mut c, &d, &p, true, at(16)), (true, 0, 0));
+        assert!(c.classic_owns());
+        let back = crate::composer::CLASSIC_HOLD.as_millis() as u64;
+        assert_eq!(send(&mut c, &d, &p, true, at(back)), (false, 0, 0));
+        assert!(!c.classic_owns());
+    }
+
+}
+
+#[cfg(not(windows))]
+fn quiet_context() -> String { "input stream quiet".into() }

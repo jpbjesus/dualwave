@@ -12,7 +12,6 @@ impl Watcher {
         log::debug!("Windows default-audio role guard is unavailable on Linux; audio routing follows the session manager");
         Self { prefs }
     }
-    pub fn busy(&self) -> bool { false }
     /// No Windows role preference can change on this platform.
     pub fn tick(&mut self) -> bool { false }
 }

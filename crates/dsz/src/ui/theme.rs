@@ -100,8 +100,54 @@ pub fn heading(size: f32) -> FontId {
     FontId::new(size, semibold())
 }
 
-fn load_font(paths: &[&str]) -> Option<Vec<u8>> {
-    paths.iter().find_map(|p| std::fs::read(p).ok())
+/// Maps a Windows font file into memory, read-only, for the rest of the run
+/// (each is loaded once). egui keeps a font given as bytes twice, so the
+/// Chinese fonts read into memory cost about 75 MB; mapped, Windows reads
+/// only the parts that are drawn, and can drop them again, as it does for
+/// every other program using the same font.
+fn load_font(paths: &[&str]) -> Option<&'static [u8]> {
+    paths.iter().find_map(|p| {
+        #[cfg(not(windows))]
+        return std::fs::read(p).ok().map(|bytes| &*Box::leak(bytes.into_boxed_slice()));
+        #[cfg(windows)]
+        {
+        let file = std::fs::File::open(p).ok()?;
+        // Safety: fonts in the Windows folder are only replaced through
+        // Windows Update, which waits for a restart while a font is open.
+        let map = unsafe { memmap2::Mmap::map(&file) }.ok()?;
+        Some(&**Box::leak(Box::new(map)))
+        }
+    })
+}
+
+/// Microsoft YaHei UI as the last fallback, added the first time Chinese is
+/// picked or the language list is opened. Its ~35 MB of font files are
+/// mapped rather than read (see [`load_font`]), so this costs other
+/// languages next to nothing. Fonts change on the next frame.
+pub fn ensure_cjk(ctx: &egui::Context) {
+    use egui::epaint::text::{FontInsert, FontPriority, InsertFontFamily};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static LOADED: AtomicBool = AtomicBool::new(false);
+    if LOADED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let Some(regular) = load_font(&[r"C:\Windows\Fonts\msyh.ttc", "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"]) else {
+        log::warn!("msyh.ttc not found; Chinese text may not render");
+        return;
+    };
+    // Face 1 of the collection is "Microsoft YaHei UI".
+    let face = |bytes: &'static [u8]| FontData { index: if cfg!(windows) { 1 } else { 0 }, ..FontData::from_static(bytes) };
+    let fallback = |family| InsertFontFamily { family, priority: FontPriority::Lowest };
+    let bold = load_font(&[r"C:\Windows\Fonts\msyhbd.ttc", "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"]);
+    let mut families = vec![fallback(FontFamily::Proportional), fallback(FontFamily::Monospace)];
+    if bold.is_none() {
+        families.push(fallback(semibold()));
+    }
+    ctx.add_font(FontInsert::new("yahei", face(regular), families));
+    if let Some(bytes) = bold {
+        ctx.add_font(FontInsert::new("yahei_b", face(bytes), vec![fallback(semibold())]));
+    }
+    ctx.request_repaint();
 }
 
 pub fn install(ctx: &egui::Context, scale: f32) {
@@ -115,7 +161,7 @@ pub fn install(ctx: &egui::Context, scale: f32) {
     if let Some(bytes) = load_font(&[r"C:\Windows\Fonts\segoeui.ttf", "/usr/share/fonts/noto/NotoSans-Regular.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf"]) {
         fonts
             .font_data
-            .insert("segoe".into(), Arc::new(FontData::from_owned(bytes)));
+            .insert("segoe".into(), Arc::new(FontData::from_static(bytes)));
         fonts
             .families
             .get_mut(&FontFamily::Proportional)
@@ -131,7 +177,7 @@ pub fn install(ctx: &egui::Context, scale: f32) {
     ]) {
         fonts
             .font_data
-            .insert("segoe_sb".into(), Arc::new(FontData::from_owned(bytes)));
+            .insert("segoe_sb".into(), Arc::new(FontData::from_static(bytes)));
         sb.push("segoe_sb".to_string());
     }
     // Symbols (arrows, shapes) for icons and glyphs.
@@ -139,7 +185,7 @@ pub fn install(ctx: &egui::Context, scale: f32) {
         if let Some(bytes) = load_font(paths) {
             fonts
                 .font_data
-                .insert(name.into(), Arc::new(FontData::from_owned(bytes)));
+                .insert(name.into(), Arc::new(FontData::from_static(bytes)));
             fonts
                 .families
                 .get_mut(&FontFamily::Proportional)
@@ -151,7 +197,7 @@ pub fn install(ctx: &egui::Context, scale: f32) {
     if let Some(bytes) = load_font(&[r"C:\Windows\Fonts\consola.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf"]) {
         fonts
             .font_data
-            .insert("consolas".into(), Arc::new(FontData::from_owned(bytes)));
+            .insert("consolas".into(), Arc::new(FontData::from_static(bytes)));
         fonts
             .families
             .get_mut(&FontFamily::Monospace)

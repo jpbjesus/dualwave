@@ -20,12 +20,38 @@ pub struct Composer {
     low_since: Option<Instant>,
     /// The last report ran the classic motors.
     motors_on: bool,
+    /// "Classic rumble always": the firmware's rumble emulation keeps the
+    /// actuators until this instant, [`CLASSIC_HOLD`] after the last rumble.
+    classic_until: Option<Instant>,
+    /// The last report left the actuators to the firmware's rumble
+    /// emulation while the haptic stream runs; see [`Composer::classic_owns`].
+    classic: bool,
+    /// The game's held rumble level (sequence, whether it raised the
+    /// level) the last report put on the motors; see [`Composer::take_held`].
+    held: Option<(u64, bool)>,
     /// The battery blend shown, eased toward the battery's level so a 10 %
     /// step doesn't jump; see [`battery_blend`].
     blend: Option<f32>,
     /// Lightbar level for the idle power-off countdown, 1 while in use;
     /// see [`idle_fade`]. Set by the writer before each report.
     pub idle_level: f32,
+    /// L2 and R2 count as held for the other trigger's "only while held"
+    /// effect; see [`trigger_held`].
+    l2_held: bool,
+    r2_held: bool,
+}
+
+/// Whether a trigger counts as held for the other trigger's "only while
+/// held" effect (issue 62): pulled to `hold_at` percent of its travel, and
+/// let go below two thirds of that, so a finger resting at the point
+/// doesn't flick the effect on and off.
+pub fn trigger_held(was: bool, value: u8, hold_at: u8) -> bool {
+    let on = (hold_at.clamp(1, 95) as u32 * 255 + 50) / 100;
+    if was {
+        value as u32 > on * 2 / 3
+    } else {
+        value as u32 >= on
+    }
 }
 
 pub fn hsv(h: f32, s: f32, v: f32) -> [u8; 3] {
@@ -91,6 +117,13 @@ pub fn battery_blend(input: &InputState, from: u8) -> Option<f32> {
 /// whole-charge blend takes two seconds.
 const BLEND_RATE: f32 = 0.05;
 
+/// With "Classic rumble always", how long the firmware's rumble emulation
+/// keeps the actuators after a game's rumble drops to zero, so the short
+/// gaps between rumble effects (a game often sends zero for a frame or two
+/// between them) don't hand the actuators to the stream and back each time.
+/// Short enough that game haptics and clicks come back without a felt delay.
+pub const CLASSIC_HOLD: Duration = Duration::from_millis(150);
+
 /// Longest stretch the lightbar takes to fade out before an idle power-off.
 const IDLE_FADE_MAX: Duration = Duration::from_secs(5 * 60);
 /// The fade moves in this many steps, each a single report with the new
@@ -151,9 +184,31 @@ impl Composer {
             last: now,
             low_since: None,
             motors_on: false,
+            classic_until: None,
+            classic: false,
+            held: None,
             blend: None,
             idle_level: 1.0,
+            l2_held: false,
+            r2_held: false,
         }
+    }
+
+    /// Whether the last composed report left the actuators to the firmware's
+    /// rumble emulation while haptics stream ("Classic rumble always", while
+    /// rumble plays and [`CLASSIC_HOLD`] after). The stream leaves its haptic
+    /// packet out meanwhile so it doesn't take them back (issue 43). Always
+    /// false with the option off.
+    pub fn classic_owns(&self) -> bool {
+        self.classic
+    }
+
+    /// The game's held rumble level the last composed report carries on
+    /// the motors, if any (issue 43). The writer passes it to
+    /// [`crate::device::GameState::rumble_sent`] once that report went out.
+    /// None while the stream plays the rumble instead.
+    pub fn take_held(&mut self) -> Option<(u64, bool)> {
+        self.held.take()
     }
 
     /// Lightbar color for the profile at `now`, without overrides.
@@ -345,7 +400,10 @@ impl Composer {
             MuteLed::Pulse => 2,
             MuteLed::Toggle => toggles.mute_engaged as u8,
         };
-        if let (true, Some(m)) = (vo.game_leds, game.mute_led) {
+        // Toggle with button gives the light to the Mute button, as on a
+        // PS5, where games can't set it. Otherwise a game that sends its
+        // own mute LED (issue 50) pins it, and pressing Mute does nothing.
+        if let (true, Some(m), false) = (vo.game_leds, game.mute_led, l.mute_led == MuteLed::Toggle) {
             out.mute_led = m;
         }
         if let Some(m) = overrides.mic_led {
@@ -353,17 +411,34 @@ impl Composer {
         }
 
         // Triggers
-        // Mod overrides, then what the game sent, then the profile.
-        let gl = game.left_trigger.filter(|_| vo.game_triggers);
-        let gr = game.right_trigger.filter(|_| vo.game_triggers);
+        // Mod overrides, then what the game sent, then the profile. The
+        // profile's effect can wait for the other trigger to be held.
+        let t = &p.triggers;
+        self.l2_held = trigger_held(self.l2_held, input.l2, t.hold_at);
+        self.r2_held = trigger_held(self.r2_held, input.r2, t.hold_at);
+        let own = |e: &ds_proto::TriggerEffect, needs: bool, held: bool| {
+            if needs && !held {
+                ds_proto::trigger::OFF
+            } else {
+                e.encode()
+            }
+        };
+        let gl = game
+            .left_trigger
+            .filter(|_| vo.game_triggers)
+            .map(|b| ds_proto::trigger::scale_effect(b, vo.left_game_trigger_strength));
+        let gr = game
+            .right_trigger
+            .filter(|_| vo.game_triggers)
+            .map(|b| ds_proto::trigger::scale_effect(b, vo.right_game_trigger_strength));
         out.left_trigger = overrides
             .left_trigger
             .or(gl)
-            .unwrap_or_else(|| p.triggers.left.encode());
+            .unwrap_or_else(|| own(&t.left, t.left_needs_r2, self.r2_held));
         out.right_trigger = overrides
             .right_trigger
             .or(gr)
-            .unwrap_or_else(|| p.triggers.right.encode());
+            .unwrap_or_else(|| own(&t.right, t.right_needs_l2, self.l2_held));
         if let Some((l2, r2, until)) = feedback.trigger_preview {
             if now < until {
                 if let Some(b) = l2 {
@@ -380,21 +455,46 @@ impl Composer {
         // are rendered into that stream instead. Handing over from running
         // motors sends one more valid report with them at zero first, so the
         // firmware's rumble stops rather than holding its last level.
+        // With "Classic rumble always" the firmware's emulation plays rumble
+        // even then: it takes the actuators while rumble lasts, and for
+        // CLASSIC_HOLD after (the motors at zero, so a short gap between
+        // effects doesn't flip the actuators back and forth), then hands
+        // them back to the stream. Meanwhile the stream leaves its haptic
+        // packet out (`classic_owns`): every haptic packet, even a silent
+        // one, takes the actuators back from the emulation, which made the
+        // rumble jitter and skip while the speaker stream ran (issue 43).
         out.rumble_reduction = p.rumble.power_reduction.min(7);
         out.enhanced_rumble = p.rumble.enhanced;
-        if pcm_haptics {
+        // A game's rumble level goes out in at least one report even when
+        // the game cut it before this one, and a pulse it cut short stays
+        // on for PULSE_MIN (`GameState::rumble_to_send`).
+        let (mut lo, mut hi) = feedback.rumble_now(now);
+        let mut held = None;
+        if vo.game_rumble {
+            let ((gh, gl), pending) = feedback.game.rumble_to_send(now);
+            lo = lo.max(gh);
+            hi = hi.max(gl);
+            held = pending;
+        }
+        let rumbling = lo > 0 || hi > 0;
+        if !p.rumble.always_classic {
+            self.classic_until = None;
+        } else if rumbling {
+            self.classic_until = Some(now + CLASSIC_HOLD);
+        }
+        self.classic = pcm_haptics
+            && p.rumble.always_classic
+            && (rumbling || self.classic_until.is_some_and(|u| now < u));
+        if pcm_haptics && !self.classic {
             out.rumble_valid = self.motors_on;
             self.motors_on = false;
+            // The stream plays the rumble, and lets the held level go.
+            self.held = None;
         } else {
-            let (mut lo, mut hi) = feedback.rumble_now(now);
-            if vo.game_rumble {
-                let (gh, gl) = feedback.game_rumble_now();
-                lo = lo.max(gh);
-                hi = hi.max(gl);
-            }
             out.rumble_left = lo;
             out.rumble_right = hi;
-            self.motors_on = lo > 0 || hi > 0;
+            self.motors_on = rumbling;
+            self.held = held;
         }
 
         out
@@ -643,5 +743,360 @@ mod tests {
             now,
         );
         assert_eq!(game.lightbar, [1, 2, 3]);
+    }
+
+    #[test]
+    fn mute_button_keeps_its_light_from_the_game_when_toggling() {
+        let mut c = Composer::new();
+        let input = InputState::default();
+        let none = crate::device::Overrides::default();
+        let now = Instant::now();
+        let mut fb = crate::device::Feedback::default();
+        fb.game.mute_led = Some(1);
+        let mut p = Profile::default();
+        p.virtual_out.game_leds = true;
+        let mut toggles = crate::device::Toggles::default();
+        let mut led = |p: &Profile, t: &crate::device::Toggles, o: &crate::device::Overrides, fb: &Feedback| {
+            c.compose(p, &input, o, fb, t, false, 0.0, now).mute_led
+        };
+        // Toggle: the Mute button switches it, whatever the game sends.
+        p.lighting.mute_led = MuteLed::Toggle;
+        assert_eq!(led(&p, &toggles, &none, &fb), 0);
+        toggles.mute_engaged = true;
+        assert_eq!(led(&p, &toggles, &none, &fb), 1);
+        toggles.mute_engaged = false;
+        // The other settings still let the game's LED through, as before.
+        for (m, own) in [(MuteLed::Off, 0), (MuteLed::On, 1), (MuteLed::Pulse, 2)] {
+            p.lighting.mute_led = m;
+            for game in [0, 1, 2] {
+                fb.game.mute_led = Some(game);
+                assert_eq!(led(&p, &toggles, &none, &fb), game, "{m:?}");
+            }
+            fb.game.mute_led = None;
+            assert_eq!(led(&p, &toggles, &none, &fb), own, "{m:?} without a game");
+            fb.game.mute_led = Some(1);
+        }
+        // Without the game's lights, the profile, as before.
+        p.virtual_out.game_leds = false;
+        p.lighting.mute_led = MuteLed::Off;
+        assert_eq!(led(&p, &toggles, &none, &fb), 0);
+        // A mod's mic LED still beats everything.
+        p.virtual_out.game_leds = true;
+        p.lighting.mute_led = MuteLed::Toggle;
+        let modded = crate::device::Overrides { mic_led: Some(2), ..Default::default() };
+        assert_eq!(led(&p, &toggles, &modded, &fb), 2);
+    }
+
+    #[test]
+    fn trigger_conditions_off_keep_the_reports() {
+        // Off (the default), the profile's effects go out as they always
+        // did, whatever the triggers do.
+        let mut p = Profile::default();
+        p.triggers.left = ds_proto::TriggerEffect::Feedback { position: 2, strength: 5 };
+        p.triggers.right = ds_proto::TriggerEffect::Weapon { start: 3, end: 6, strength: 7 };
+        let none = crate::device::Overrides::default();
+        let toggles = crate::device::Toggles::default();
+        let fb = crate::device::Feedback::default();
+        let now = Instant::now();
+        let bytes = |o: &OutputState| {
+            let mut b = [0u8; 128];
+            o.build(ds_proto::Connection::Bluetooth, &mut b).to_vec()
+        };
+        let mut c = Composer::new();
+        let mut plain = Composer::new();
+        for (l2, r2) in [(0, 0), (255, 0), (0, 255), (30, 200), (255, 255), (0, 0)] {
+            let input = InputState { l2, r2, ..Default::default() };
+            let o = c.compose(&p, &input, &none, &fb, &toggles, false, 0.0, now);
+            assert_eq!(o.left_trigger, p.triggers.left.encode());
+            assert_eq!(o.right_trigger, p.triggers.right.encode());
+            // The pull doesn't change any byte of the report.
+            let rest = plain.compose(&p, &InputState::default(), &none, &fb, &toggles, false, 0.0, now);
+            assert_eq!(bytes(&o), bytes(&rest), "{l2} {r2}");
+        }
+    }
+
+    #[test]
+    fn trigger_effect_waits_for_the_other_trigger() {
+        let mut p = Profile::default();
+        let shoot = ds_proto::TriggerEffect::Weapon { start: 3, end: 6, strength: 7 };
+        let aim = ds_proto::TriggerEffect::Feedback { position: 1, strength: 3 };
+        p.triggers.right = shoot.clone();
+        p.triggers.left = aim.clone();
+        p.triggers.right_needs_l2 = true;
+        let none = crate::device::Overrides::default();
+        let toggles = crate::device::Toggles::default();
+        let fb = crate::device::Feedback::default();
+        let now = Instant::now();
+        let mut c = Composer::new();
+        let mut at = |l2: u8, r2: u8| {
+            let input = InputState { l2, r2, ..Default::default() };
+            let o = c.compose(&p, &input, &none, &fb, &toggles, false, 0.0, now);
+            (o.left_trigger, o.right_trigger)
+        };
+        let off = ds_proto::trigger::OFF;
+        // R2 is free until L2 is held; L2's own effect is untouched.
+        assert_eq!(at(0, 0), (aim.encode(), off));
+        assert_eq!(at(0, 255), (aim.encode(), off));
+        assert_eq!(at(20, 0).1, off, "under 10 %");
+        assert_eq!(at(26, 0).1, shoot.encode(), "10 %");
+        // Let go only below two thirds of the point.
+        assert_eq!(at(18, 0).1, shoot.encode());
+        assert_eq!(at(16, 0).1, off);
+        assert_eq!(at(255, 255), (aim.encode(), shoot.encode()));
+        assert_eq!(at(0, 255).1, off);
+
+        // A game's or a mod's effect plays as sent.
+        let mut fb = crate::device::Feedback::default();
+        fb.game.right_trigger = Some([0x26, 1, 2, 3, 4, 5, 6, 0, 0, 9, 0]);
+        let mut p2 = p.clone();
+        p2.virtual_out.game_triggers = true;
+        let o = Composer::new().compose(&p2, &InputState::default(), &none, &fb, &toggles, false, 0.0, now);
+        assert_eq!(o.right_trigger, [0x26, 1, 2, 3, 4, 5, 6, 0, 0, 9, 0]);
+        let modded = crate::device::Overrides { right_trigger: Some(shoot.encode()), ..Default::default() };
+        let o = Composer::new().compose(&p, &InputState::default(), &modded, &crate::device::Feedback::default(), &toggles, false, 0.0, now);
+        assert_eq!(o.right_trigger, shoot.encode());
+    }
+
+    #[test]
+    fn game_trigger_strength_scales_only_the_game_effects() {
+        let none = crate::device::Overrides::default();
+        let toggles = crate::device::Toggles::default();
+        let now = Instant::now();
+        let game_l = ds_proto::TriggerEffect::Weapon { start: 2, end: 6, strength: 8 }.encode();
+        let game_r: ds_proto::trigger::EffectBytes = [0x26, 0x0F, 0, 0xFF, 0x0F, 0, 0, 0, 0, 30, 0];
+        let mut fb = crate::device::Feedback::default();
+        fb.game.left_trigger = Some(game_l);
+        fb.game.right_trigger = Some(game_r);
+        let mut p = Profile::default();
+        p.virtual_out.game_triggers = true;
+        let bytes = |o: &OutputState| {
+            let mut b = [0u8; 128];
+            o.build(ds_proto::Connection::Bluetooth, &mut b).to_vec()
+        };
+        // At 100 % (the default) the game's bytes go out as sent, and the
+        // whole report is what it was before the setting existed.
+        let full = Composer::new().compose(&p, &InputState::default(), &none, &fb, &toggles, false, 0.0, now);
+        assert_eq!((full.left_trigger, full.right_trigger), (game_l, game_r));
+        let mut explicit = p.clone();
+        explicit.virtual_out.left_game_trigger_strength = 100;
+        explicit.virtual_out.right_game_trigger_strength = 100;
+        let o = Composer::new().compose(&explicit, &InputState::default(), &none, &fb, &toggles, false, 0.0, now);
+        assert_eq!(bytes(&o), bytes(&full));
+        // L2 and R2 each have their own strength.
+        p.virtual_out.left_game_trigger_strength = 50;
+        let o = Composer::new().compose(&p, &InputState::default(), &none, &fb, &toggles, false, 0.0, now);
+        assert_eq!(o.left_trigger, ds_proto::TriggerEffect::Weapon { start: 2, end: 6, strength: 4 }.encode());
+        assert_eq!(o.right_trigger, game_r);
+        p.virtual_out.right_game_trigger_strength = 0;
+        let o = Composer::new().compose(&p, &InputState::default(), &none, &fb, &toggles, false, 0.0, now);
+        assert_eq!(o.right_trigger, ds_proto::trigger::OFF);
+        // A mod's effect and the profile's own effect stay as they are.
+        let shoot = ds_proto::TriggerEffect::Feedback { position: 1, strength: 8 };
+        let modded = crate::device::Overrides { left_trigger: Some(shoot.encode()), ..Default::default() };
+        let o = Composer::new().compose(&p, &InputState::default(), &modded, &fb, &toggles, false, 0.0, now);
+        assert_eq!(o.left_trigger, shoot.encode());
+        p.triggers.left = shoot.clone();
+        let o = Composer::new().compose(&p, &InputState::default(), &none, &crate::device::Feedback::default(), &toggles, false, 0.0, now);
+        assert_eq!(o.left_trigger, shoot.encode());
+    }
+
+    #[test]
+    fn trigger_held_has_hysteresis() {
+        assert!(!trigger_held(false, 0, 10));
+        assert!(trigger_held(false, 26, 10));
+        assert!(trigger_held(true, 18, 10));
+        assert!(!trigger_held(true, 17, 10));
+        // Out-of-range settings still work.
+        assert!(trigger_held(false, 3, 0));
+        assert!(!trigger_held(false, 200, 100));
+        assert!(trigger_held(false, 255, 100));
+    }
+
+    #[test]
+    fn classic_rumble_always_off_keeps_the_reports() {
+        // Off (the default), every report is what it was: rumble stays on
+        // the stream while it runs, on the firmware's emulation otherwise.
+        let p = Profile::default();
+        assert!(!p.rumble.always_classic);
+        let input = InputState::default();
+        let none = crate::device::Overrides::default();
+        let toggles = crate::device::Toggles::default();
+        let now = Instant::now();
+        let mut fb = crate::device::Feedback::default();
+        fb.game.rumble = Some((200, 90));
+        let bytes = |o: &OutputState| {
+            let mut b = [0u8; 128];
+            o.build(ds_proto::Connection::Bluetooth, &mut b).to_vec()
+        };
+        let quiet = crate::device::Feedback::default();
+        let mut c = Composer::new();
+        let streaming = c.compose(&p, &input, &none, &fb, &toggles, true, 0.0, now);
+        assert!(!streaming.rumble_valid);
+        assert_eq!((streaming.rumble_left, streaming.rumble_right), (0, 0));
+        // While streaming, game rumble leaves the 0x31 report untouched.
+        let silent = Composer::new().compose(&p, &input, &none, &quiet, &toggles, true, 0.0, now);
+        assert_eq!(bytes(&streaming), bytes(&silent));
+        // Turned on, nothing changes until something rumbles.
+        let mut on = p.clone();
+        on.rumble.always_classic = true;
+        for pcm in [false, true] {
+            let a = Composer::new().compose(&p, &input, &none, &quiet, &toggles, pcm, 0.0, now);
+            let b = Composer::new().compose(&on, &input, &none, &quiet, &toggles, pcm, 0.0, now);
+            assert_eq!(bytes(&a), bytes(&b), "{pcm}");
+        }
+        let mut c = Composer::new();
+        let motors = c.compose(&p, &input, &none, &fb, &toggles, false, 0.0, now);
+        assert!(motors.rumble_valid);
+        assert_eq!((motors.rumble_left, motors.rumble_right), (200, 90));
+    }
+
+    #[test]
+    fn classic_rumble_always_takes_the_actuators_while_rumbling() {
+        let mut p = Profile::default();
+        p.rumble.always_classic = true;
+        let input = InputState::default();
+        let none = crate::device::Overrides::default();
+        let toggles = crate::device::Toggles::default();
+        let now = Instant::now();
+        let mut c = Composer::new();
+        let mut fb = crate::device::Feedback::default();
+        // Nothing rumbling: the stream keeps the actuators.
+        let idle = c.compose(&p, &input, &none, &fb, &toggles, true, 0.0, now);
+        assert!(!idle.rumble_valid);
+        // Game rumble goes to the firmware even while haptics stream.
+        fb.game.rumble = Some((200, 90));
+        let on = c.compose(&p, &input, &none, &fb, &toggles, true, 0.0, now);
+        assert!(on.rumble_valid);
+        assert_eq!((on.rumble_left, on.rumble_right), (200, 90));
+        assert!(c.classic_owns());
+        // On stopping, the motors at zero, kept by the firmware for
+        // CLASSIC_HOLD, then the actuators go back to the stream.
+        fb.game.rumble = None;
+        let stop = c.compose(&p, &input, &none, &fb, &toggles, true, 0.0, now);
+        assert!(stop.rumble_valid);
+        assert_eq!((stop.rumble_left, stop.rumble_right), (0, 0));
+        assert!(c.classic_owns());
+        let later = now + CLASSIC_HOLD;
+        let back = c.compose(&p, &input, &none, &fb, &toggles, true, 0.0, later);
+        assert!(!back.rumble_valid);
+        assert!(!c.classic_owns());
+        // Game rumble turned off in the profile still doesn't play.
+        p.virtual_out.game_rumble = false;
+        fb.game.rumble = Some((200, 90));
+        assert!(!c.compose(&p, &input, &none, &fb, &toggles, true, 0.0, later).rumble_valid);
+        assert!(!c.classic_owns());
+        // A test rumble plays the same way.
+        fb.rumbles.push((255, 0, later + Duration::from_millis(450)));
+        let test = c.compose(&p, &input, &none, &fb, &toggles, true, 0.0, later);
+        assert!(test.rumble_valid);
+        assert_eq!((test.rumble_left, test.rumble_right), (255, 0));
+        assert!(c.classic_owns());
+    }
+
+    #[test]
+    fn classic_rumble_always_rides_out_short_gaps() {
+        let mut p = Profile::default();
+        p.rumble.always_classic = true;
+        let input = InputState::default();
+        let none = crate::device::Overrides::default();
+        let toggles = crate::device::Toggles::default();
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut c = Composer::new();
+        let mut fb = crate::device::Feedback::default();
+        let step = |c: &mut Composer, fb: &crate::device::Feedback, ms: u64| {
+            let o = c.compose(&p, &input, &none, fb, &toggles, true, 0.0, at(ms));
+            (o.rumble_valid, o.rumble_left, o.rumble_right, c.classic_owns())
+        };
+        fb.game.rumble = Some((111, 0));
+        assert_eq!(step(&mut c, &fb, 0), (true, 111, 0, true));
+        // A game's zero between two effects: the motors stop, the
+        // emulation keeps the actuators, the stream stays out.
+        fb.game.rumble = Some((0, 0));
+        assert_eq!(step(&mut c, &fb, 16), (true, 0, 0, true));
+        assert_eq!(step(&mut c, &fb, 100), (true, 0, 0, true));
+        fb.game.rumble = Some((111, 0));
+        assert_eq!(step(&mut c, &fb, 120), (true, 111, 0, true));
+        // The hold counts from the last rumble, not the first.
+        fb.game.rumble = None;
+        let last = 120 + CLASSIC_HOLD.as_millis() as u64;
+        assert_eq!(step(&mut c, &fb, last - 1), (true, 0, 0, true));
+        // Then the actuators go back to the stream: rumble fields invalid.
+        assert_eq!(step(&mut c, &fb, last), (false, 0, 0, false));
+        assert_eq!(step(&mut c, &fb, last + 500), (false, 0, 0, false));
+        // Without the stream there is nothing to hand over; the motors
+        // simply follow the rumble, as before.
+        fb.game.rumble = Some((111, 0));
+        let o = c.compose(&p, &input, &none, &fb, &toggles, false, 0.0, at(last + 600));
+        assert!(o.rumble_valid && o.rumble_left == 111 && !c.classic_owns());
+        // Turning the option off drops the hold at once.
+        fb.game.rumble = Some((111, 0));
+        let _ = step(&mut c, &fb, last + 700);
+        assert!(c.classic_owns());
+        fb.game.rumble = None;
+        let mut off = p.clone();
+        off.rumble.always_classic = false;
+        let o = c.compose(&off, &input, &none, &fb, &toggles, true, 0.0, at(last + 710));
+        // One report with the motors at zero (the old handover), then invalid.
+        assert!(o.rumble_valid && o.rumble_left == 0 && !c.classic_owns());
+        let o = c.compose(&off, &input, &none, &fb, &toggles, true, 0.0, at(last + 720));
+        assert!(!o.rumble_valid && !c.classic_owns());
+    }
+
+    #[test]
+    fn classic_rumble_always_off_is_byte_for_byte_the_old_handover() {
+        // The 0.4.10 rule with the option off, written out: while streaming
+        // the rumble fields are invalid, except one report with the motors
+        // at zero right after they ran; otherwise the motors follow rumble.
+        let p = Profile::default();
+        let input = InputState::default();
+        let none = crate::device::Overrides::default();
+        let toggles = crate::device::Toggles::default();
+        let t0 = Instant::now();
+        let bytes = |o: &OutputState| {
+            let mut b = [0u8; 128];
+            o.build(ds_proto::Connection::Bluetooth, &mut b).to_vec()
+        };
+        // (ms, game rumble, streaming)
+        type Step = (u64, Option<(u8, u8)>, bool);
+        let script: &[Step] = &[
+            (0, None, false),
+            (8, Some((111, 0)), false),
+            (16, Some((111, 0)), true),
+            (32, Some((0, 0)), true),
+            (48, Some((111, 0)), true),
+            (64, None, true),
+            (80, Some((200, 90)), false),
+            (88, Some((0, 0)), false),
+            (96, Some((200, 90)), false),
+            (104, Some((200, 90)), true),
+            (120, None, true),
+            (400, None, true),
+            (500, Some((50, 50)), false),
+            (508, None, false),
+        ];
+        let mut c = Composer::new();
+        let mut fb = crate::device::Feedback::default();
+        let mut motors_on = false;
+        for &(ms, rumble, pcm) in script {
+            fb.game.rumble = rumble;
+            let now = t0 + Duration::from_millis(ms);
+            let got = c.compose(&p, &input, &none, &fb, &toggles, pcm, 0.0, now);
+            assert!(!c.classic_owns(), "{ms}");
+            let (lo, hi) = rumble.unwrap_or((0, 0));
+            let mut want = Composer::new().compose(&p, &input, &none, &fb, &toggles, pcm, 0.0, now);
+            if pcm {
+                want.rumble_valid = motors_on;
+                want.rumble_left = 0;
+                want.rumble_right = 0;
+                motors_on = false;
+            } else {
+                want.rumble_valid = true;
+                want.rumble_left = lo;
+                want.rumble_right = hi;
+                motors_on = lo > 0 || hi > 0;
+            }
+            assert_eq!(bytes(&got), bytes(&want), "{ms}");
+        }
     }
 }

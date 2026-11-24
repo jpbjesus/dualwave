@@ -1,4 +1,5 @@
 /target/
+/dsz.exe
 *.json.tmp
 *.conflict*
 

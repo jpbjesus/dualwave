@@ -75,6 +75,7 @@ impl App {
                             egui::ComboBox::from_id_salt("interface-language")
                                 .selected_text(language.label())
                                 .show_ui(ui, |ui| {
+                                    ensure_cjk(ui.ctx());
                                     for value in crate::i18n::Language::ALL {
                                         ui.selectable_value(
                                             &mut language,
@@ -95,6 +96,8 @@ impl App {
             }
             1 => {
                 card(ui, crate::i18n::tr("Startup"), "", |ui| {
+                    #[cfg(windows)]
+                    let mut restart_admin = false;
                     let mut s = engine.settings.write();
                     let mut changed = false;
                     let mut auto = s.start_with_windows;
@@ -117,6 +120,24 @@ impl App {
                         crate::i18n::tr(if cfg!(target_os = "linux") { "Open to the tray when available; otherwise keep the window visible" } else { "Open to the tray" }),
                         &mut s.start_minimized,
                     );
+                    #[cfg(windows)]
+                    {
+                    let mut admin = s.run_as_admin;
+                    if toggle_row(
+                        ui,
+                        crate::i18n::tr("Run as administrator"),
+                        crate::i18n::tr("Lets mappings press keys and type in programs that run as administrator, like some game launchers. Windows asks each time DSZ starts"),
+                        &mut admin,
+                    ) {
+                        s.run_as_admin = admin;
+                        changed = true;
+                        if admin && !crate::platform::is_elevated() {
+                            restart_admin = true;
+                        } else if !admin && crate::platform::is_elevated() {
+                            engine.toast(crate::i18n::tr("DSZ runs without administrator rights from its next start"));
+                        }
+                    }
+                    }
                     changed |= toggle_row(
                         ui,
                         crate::i18n::tr("Close to tray"),
@@ -129,7 +150,7 @@ impl App {
                         crate::i18n::tr(if cfg!(target_os = "linux") { "Hide to the tray when available; otherwise minimize normally" } else { "The minimize button hides the window to the tray instead of the taskbar" }),
                         &mut s.minimize_to_tray,
                     );
-                    let hint = crate::localized_format!("Every controller starts on \"{}\"; picking another profile still sticks until the app restarts", "Todos os controles iniciam em \"{}\"; outro perfil escolhido permanece até reiniciar o aplicativo", "Todos los mandos inician con \"{}\"; si eliges otro perfil, se mantiene hasta reiniciar la aplicación"; "Todos os comandos arrancam com \"{}\"; a escolha de outro perfil mantém-se até reiniciar a aplicação", s.default_profile);
+                    let hint = crate::localized_format!("Every controller starts on \"{}\"; picking another profile still sticks until the app restarts", "Todos os controles iniciam em \"{}\"; outro perfil escolhido permanece até reiniciar o aplicativo", "Todos los mandos inician con \"{}\"; si eliges otro perfil, se mantiene hasta reiniciar la aplicación", "每个手柄启动时都使用“{}”；选择其他配置文件后会一直保留，直到应用重启"; "Todos os comandos arrancam com \"{}\"; a escolha de outro perfil mantém-se até reiniciar a aplicação", s.default_profile);
                     changed |= toggle_row(
                         ui,
                         crate::i18n::tr("Start on the default profile"),
@@ -138,6 +159,12 @@ impl App {
                     );
                     changed |=
                         toggle_row(ui, crate::i18n::tr("Show tips"), crate::i18n::tr("On the device status page"), &mut s.show_tips);
+                    changed |= toggle_row(
+                        ui,
+                        crate::i18n::tr("Battery as bars"),
+                        crate::i18n::tr("Three bars, like Steam and PlayStation, instead of a percentage"),
+                        &mut s.battery_bars,
+                    );
                     let mut scale = s.ui_scale;
                     let moved = row(ui, crate::i18n::tr("Interface size"), crate::i18n::tr(if cfg!(target_os = "linux") { "On top of the desktop display scale" } else { "On top of the Windows display scale" }), |ui| {
                         ui.add(
@@ -163,6 +190,10 @@ impl App {
                     drop(s);
                     if changed {
                         engine.settings_changed();
+                    }
+                    #[cfg(windows)]
+                    if restart_admin {
+                        restart_as_admin(engine.clone());
                     }
                 });
 
@@ -332,9 +363,9 @@ impl App {
                             } else {
                                 pill(ui, crate::i18n::tr("Off"), faint_color());
                             }
-                            muted(ui, &crate::localized_format!("{} packet(s) received", "{} pacote(s) recebido(s)", "{} paquete(s) recibido(s)"; "{} pacote(s) recebido(s)", st.packets));
+                            muted(ui, &crate::localized_format!("{} packet(s) received", "{} pacote(s) recebido(s)", "{} paquete(s) recibido(s)", "已收到 {} 个数据包"; "{} pacote(s) recebido(s)", st.packets));
                             if let Some(t) = st.last_packet {
-                                muted(ui, &crate::localized_format!("· last {:.0}s ago", "· último há {:.0}s", "· el último hace {:.0}s"; "· último há {:.0}s", t.elapsed().as_secs_f32()));
+                                muted(ui, &crate::localized_format!("· last {:.0}s ago", "· último há {:.0}s", "· el último hace {:.0}s", "· 上次在 {:.0} 秒前"; "· último há {:.0}s", t.elapsed().as_secs_f32()));
                             }
                         });
                         if !st.last_text.is_empty() {
@@ -423,7 +454,7 @@ impl App {
                     muted(ui, crate::i18n::tr(if cfg!(target_os = "linux") { "A fast native companion for DualSense and DualSense Edge. Linux uses PipeWire for audio, uinput for keyboard and mouse mappings, and USB/IP for virtual controllers. Configure system support on the Virtual controller page. There is no license service." } else { "A fast native companion for DualSense and DualSense Edge. Virtual controllers need two free, open-source drivers, usbip-win2 and HidHide, which the Virtual controller page can install in one click. There is no license service." }));
                     muted(
                         ui,
-                        &crate::localized_format!("Controller speaker: libopus {}, built in. Controller drawings and icon: OpenController (MIT).", "Alto-falante: libopus {} integrado. Desenhos e ícone: OpenController (MIT).", "Altavoz del mando: libopus {} integrado. Dibujos del mando e icono: OpenController (MIT)."; "Altifalante: libopus {} integrado. Desenhos e ícone: OpenController (MIT).",
+                        &crate::localized_format!("Controller speaker: libopus {}, built in. Controller drawings and icon: OpenController (MIT).", "Alto-falante: libopus {} integrado. Desenhos e ícone: OpenController (MIT).", "Altavoz del mando: libopus {} integrado. Dibujos del mando e icono: OpenController (MIT).", "手柄扬声器：内置 libopus {}。手柄图示和图标：OpenController（MIT）。"; "Altifalante: libopus {} integrado. Desenhos e ícone: OpenController (MIT).",
                             crate::haptics::opus::version()
                         ),
                     );
@@ -447,7 +478,7 @@ impl App {
                 if toggle_row(
                     ui,
                     crate::i18n::tr("Motion server (DSU)"),
-                    &crate::localized_format!("The cemuhook protocol, on 127.0.0.1:{PORT} only", "Protocolo cemuhook, somente em 127.0.0.1:{PORT}", "Protocolo cemuhook, solo en 127.0.0.1:{PORT}"; "Protocolo cemuhook, apenas em 127.0.0.1:{PORT}"),
+                    &crate::localized_format!("The cemuhook protocol, on 127.0.0.1:{PORT} only", "Protocolo cemuhook, somente em 127.0.0.1:{PORT}", "Protocolo cemuhook, solo en 127.0.0.1:{PORT}", "cemuhook 协议，仅限 127.0.0.1:{PORT}"; "Protocolo cemuhook, apenas em 127.0.0.1:{PORT}"),
                     &mut on,
                 ) {
                     engine.settings.write().dsu_enabled = on;
@@ -474,8 +505,8 @@ impl App {
                 });
                 ui.collapsing(crate::i18n::tr("Setup instructions"), |ui| {
                 ui.add_space(4.0);
-                muted(ui, &crate::localized_format!("Dolphin: Controllers > Alternate Input Sources > enable DSU Client and add a server named DualWave (127.0.0.1, port {PORT}). Picking the DSUClient device maps nothing by itself: in the Wii Remote's Motion Input tab, right-click each Accelerometer and Gyroscope box and enter its DSU input, such as `DSUClient/0/DualWave:Accel Up` or `DSUClient/0/DualWave:Gyro Pitch Up`, then tick Enabled under Point for gyro pointing. Leave Device on the controller you use for buttons.", "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DualWave (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: na aba Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e digite a entrada DSU, como `DSUClient/0/DualWave:Accel Up` ou `DSUClient/0/DualWave:Gyro Pitch Up`, e marque Enabled em Point para apontar com o giroscópio. Deixe Device no controle que você usa para os botões.", "Dolphin: Controllers > Alternate Input Sources > activa DSU Client y añade un servidor llamado DualWave (127.0.0.1, puerto {PORT}). Elegir el dispositivo DSUClient no asigna controles por sí solo: en la pestaña Motion Input del Wii Remote, haz clic derecho en cada casilla de Accelerometer y Gyroscope e introduce su entrada DSU, como `DSUClient/0/DualWave:Accel Up` o `DSUClient/0/DualWave:Gyro Pitch Up`. Después marca Enabled en Point para apuntar con el giroscopio. Deja Device en el mando que usas para los botones."; "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DualWave (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: no separador Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e introduza a entrada DSU, como `DSUClient/0/DualWave:Accel Up` ou `DSUClient/0/DualWave:Gyro Pitch Up`, e assinale Enabled em Point para apontar com o giroscópio. Deixe Device no comando que o utilizador usa para os botões."));
-                muted(ui, &crate::localized_format!("Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, port {PORT}). Yuzu-family emulators: Controls > Motion > CemuhookUDP.", "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, porta {PORT}). Emuladores da família Yuzu: Controls > Motion > CemuhookUDP.", "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, puerto {PORT}). Emuladores derivados de Yuzu: Controls > Motion > CemuhookUDP."; "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, porta {PORT}). Emuladores da família Yuzu: Controls > Motion > CemuhookUDP."));
+                muted(ui, &crate::localized_format!("Dolphin: Controllers > Alternate Input Sources > enable DSU Client and add a server named DualWave (127.0.0.1, port {PORT}). Picking the DSUClient device maps nothing by itself: in the Wii Remote's Motion Input tab, right-click each Accelerometer and Gyroscope box and enter its DSU input, such as `DSUClient/0/DualWave:Accel Up` or `DSUClient/0/DualWave:Gyro Pitch Up`, then tick Enabled under Point for gyro pointing. Leave Device on the controller you use for buttons.", "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DualWave (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: na aba Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e digite a entrada DSU, como `DSUClient/0/DualWave:Accel Up` ou `DSUClient/0/DualWave:Gyro Pitch Up`, e marque Enabled em Point para apontar com o giroscópio. Deixe Device no controle que você usa para os botões.", "Dolphin: Controllers > Alternate Input Sources > activa DSU Client y añade un servidor llamado DualWave (127.0.0.1, puerto {PORT}). Elegir el dispositivo DSUClient no asigna controles por sí solo: en la pestaña Motion Input del Wii Remote, haz clic derecho en cada casilla de Accelerometer y Gyroscope e introduce su entrada DSU, como `DSUClient/0/DualWave:Accel Up` o `DSUClient/0/DualWave:Gyro Pitch Up`. Después marca Enabled en Point para apuntar con el giroscopio. Deja Device en el mando que usas para los botones.", "Dolphin: Controllers > Alternate Input Sources > enable DSU Client and add a server named DualWave (127.0.0.1, port {PORT}). Picking the DSUClient device maps nothing by itself: in the Wii Remote's Motion Input tab, right-click each Accelerometer and Gyroscope box and enter its DSU input, such as `DSUClient/0/DualWave:Accel Up` or `DSUClient/0/DualWave:Gyro Pitch Up`, then tick Enabled under Point for gyro pointing. Leave Device on the controller you use for buttons."; "Dolphin: Controllers > Alternate Input Sources > ative o DSU Client e adicione um servidor chamado DualWave (127.0.0.1, porta {PORT}). Escolher o dispositivo DSUClient não mapeia nada sozinho: no separador Motion Input do Wii Remote, clique com o botão direito em cada caixa de Accelerometer e Gyroscope e introduza a entrada DSU, como `DSUClient/0/DualWave:Accel Up` ou `DSUClient/0/DualWave:Gyro Pitch Up`, e assinale Enabled em Point para apontar com o giroscópio. Deixe Device no comando que o utilizador usa para os botões."));
+                muted(ui, &crate::localized_format!("Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, port {PORT}). Yuzu-family emulators: Controls > Motion > CemuhookUDP.", "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, porta {PORT}). Emuladores da família Yuzu: Controls > Motion > CemuhookUDP.", "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, puerto {PORT}). Emuladores derivados de Yuzu: Controls > Motion > CemuhookUDP.", "Cemu：输入设置 > API 选择 DSUController。Ryujinx：输入 > 体感 > 兼容 CemuHook 的体感（127.0.0.1，端口 {PORT}）。yuzu 系模拟器：控制 > 体感 > CemuhookUDP。"; "Cemu: Input settings > API DSUController. Ryujinx: Input > Motion > CemuHook compatible motion (127.0.0.1, porta {PORT}). Emuladores da família Yuzu: Controls > Motion > CemuhookUDP."));
                 muted(ui, crate::i18n::tr("Buttons and sticks still come from the virtual controller. Set the profile's gyro to Off while playing, or the gyro moves the mouse as well."));
                 });
             },
@@ -504,7 +535,7 @@ impl App {
                 Some(Status::Available(r)) => {
                     note(
                         ui,
-                        &crate::localized_format!("DualWave {} is available (this is {}). Updating restarts DualWave, so the virtual controllers reconnect: best done outside a game.", "O DualWave {} está disponível (esta é a versão {}). A atualização reinicia o DualWave e reconecta os controles virtuais: prefira atualizar fora de um jogo.", "DualWave {} está disponible (esta versión es la {}). Al actualizar, DualWave se reinicia y los mandos virtuales se reconectan; es mejor hacerlo fuera de un juego."; "O DualWave {} está disponível (esta é a versão {}). A atualização reinicia o DualWave e volta a ligar os comandos virtuais: prefira atualizar fora de um jogo.",
+                        &crate::localized_format!("DualWave {} is available (this is {}). Updating restarts DualWave, so the virtual controllers reconnect: best done outside a game.", "O DualWave {} está disponível (esta é a versão {}). A atualização reinicia o DualWave e reconecta os controles virtuais: prefira atualizar fora de um jogo.", "DualWave {} está disponible (esta versión es la {}). Al actualizar, DualWave se reinicia y los mandos virtuales se reconectan; es mejor hacerlo fuera de un juego.", "DualWave {} is available (this is {}). Updating restarts DualWave, so the virtual controllers reconnect: best done outside a game."; "O DualWave {} está disponível (esta é a versão {}). A atualização reinicia o DualWave e volta a ligar os comandos virtuais: prefira atualizar fora de um jogo.",
                             r.version,
                             env!("CARGO_PKG_VERSION")
                         ),
@@ -527,7 +558,7 @@ impl App {
                         ui.spinner();
                         muted(
                             ui,
-                            &crate::localized_format!("Waiting for your browser to download DualWave {} to the Downloads folder…", "Aguardando o navegador baixar o DualWave {} na pasta Downloads…", "Esperando a que el navegador descargue DualWave {} en la carpeta Descargas…"; "A aguardar o navegador transferir o DualWave {} na pasta Downloads…",
+                            &crate::localized_format!("Waiting for your browser to download DualWave {} to the Downloads folder…", "Aguardando o navegador baixar o DualWave {} na pasta Downloads…", "Esperando a que el navegador descargue DualWave {} en la carpeta Descargas…", "Waiting for your browser to download DualWave {} to the Downloads folder…"; "A aguardar o navegador transferir o DualWave {} na pasta Downloads…",
                                 r.version
                             ),
                         );
@@ -555,7 +586,7 @@ impl App {
                 Some(Status::Ready(r, file)) => {
                     note(
                         ui,
-                        &crate::localized_format!("DualWave {} is downloaded and checked ({}). Installing restarts DualWave, so the virtual controllers reconnect.", "O DualWave {} foi baixado e verificado ({}). A instalação reinicia o DualWave e reconecta os controles virtuais.", "DualWave {} se ha descargado y verificado ({}). La instalación reinicia DualWave y reconecta los mandos virtuales."; "O DualWave {} foi transferido e verificado ({}). A instalação reinicia o DualWave e volta a ligar os comandos virtuais.",
+                        &crate::localized_format!("DualWave {} is downloaded and checked ({}). Installing restarts DualWave, so the virtual controllers reconnect.", "O DualWave {} foi baixado e verificado ({}). A instalação reinicia o DualWave e reconecta os controles virtuais.", "DualWave {} se ha descargado y verificado ({}). La instalación reinicia DualWave y reconecta los mandos virtuales.", "DualWave {} is downloaded and checked ({}). Installing restarts DualWave, so the virtual controllers reconnect."; "O DualWave {} foi transferido e verificado ({}). A instalação reinicia o DualWave e volta a ligar os comandos virtuais.",
                             r.version,
                             file.display()
                         ),
@@ -576,10 +607,10 @@ impl App {
                     let text = match &status {
                         Some(Status::Checking) => crate::i18n::tr("Checking…").to_string(),
                         Some(Status::UpToDate) => {
-                            crate::localized_format!("DualWave {} is the latest version.", "O DualWave {} é a versão mais recente.", "DualWave {} es la versión más reciente."; "O DualWave {} é a versão mais recente.", env!("CARGO_PKG_VERSION"))
+                            crate::localized_format!("DualWave {} is the latest version.", "O DualWave {} é a versão mais recente.", "DualWave {} es la versión más reciente.", "DualWave {} is the latest version."; "O DualWave {} é a versão mais recente.", env!("CARGO_PKG_VERSION"))
                         }
                         Some(Status::Failed(e)) => e.clone(),
-                        _ => crate::localized_format!("This is DualWave {}.", "Esta é a versão {} do DualWave.", "Esta es la versión {} de DualWave."; "Esta é a versão {} do DualWave.", env!("CARGO_PKG_VERSION")),
+                        _ => crate::localized_format!("This is DualWave {}.", "Esta é a versão {} do DualWave.", "Esta es la versión {} de DualWave.", "This is DualWave {}."; "Esta é a versão {} do DualWave.", env!("CARGO_PKG_VERSION")),
                     };
                     if let Some(Status::Failed(_)) = status {
                         note(ui, &text, warn_color());
@@ -633,7 +664,7 @@ impl App {
                     {
                         match crate::backup::export(&engine, &f) {
                             Ok(()) => engine.toast(crate::i18n::tr("Backup saved")),
-                            Err(e) => engine.warn_toast(crate::localized_format!("Couldn't save the backup: {e}", "Não foi possível salvar o backup: {e}", "No se pudo guardar la copia de seguridad: {e}"; "Não foi possível guardar a cópia de segurança: {e}")),
+                            Err(e) => engine.warn_toast(crate::localized_format!("Couldn't save the backup: {e}", "Não foi possível salvar o backup: {e}", "No se pudo guardar la copia de seguridad: {e}", "无法保存备份：{e}"; "Não foi possível guardar a cópia de segurança: {e}")),
                         }
                     }
                 }
@@ -663,7 +694,7 @@ impl App {
                     .unwrap_or_default();
                 note(
                     ui,
-                    &crate::localized_format!("Restore \"{file}\" ({})? This replaces all your current profiles and settings. They are saved first to the {} folder, so you can go back.", "Restaurar \"{file}\" ({})? Seus perfis e configurações serão substituídos. Uma cópia será salva antes na pasta {} para permitir a recuperação.", "¿Restaurar \"{file}\" ({})? Se reemplazarán todos los perfiles y ajustes actuales. Primero se guardarán en la carpeta {} para que puedas recuperarlos."; "Restaurar \"{file}\" ({})? Esta ação substitui todos os perfis e definições atuais. Primeiro, é guardada uma cópia na pasta {}, para permitir a recuperação.",
+                    &crate::localized_format!("Restore \"{file}\" ({})? This replaces all your current profiles and settings. They are saved first to the {} folder, so you can go back.", "Restaurar \"{file}\" ({})? Seus perfis e configurações serão substituídos. Uma cópia será salva antes na pasta {} para permitir a recuperação.", "¿Restaurar \"{file}\" ({})? Se reemplazarán todos los perfiles y ajustes actuales. Primero se guardarán en la carpeta {} para que puedas recuperarlos.", "要恢复“{file}”（{}）吗？这会替换你当前所有的配置文件和设置。它们会先保存到 {} 文件夹，以便你恢复。"; "Restaurar \"{file}\" ({})? Esta ação substitui todos os perfis e definições atuais. Primeiro, é guardada uma cópia na pasta {}, para permitir a recuperação.",
                         b.summary(),
                         crate::backup::AUTO_DIR
                     ),
@@ -672,7 +703,7 @@ impl App {
                 ui.horizontal(|ui| {
                     if danger_button(ui, crate::i18n::tr("Restore")).clicked() {
                         match crate::backup::restore(&engine, &b) {
-                            Ok(saved) => engine.toast(crate::localized_format!("Settings restored. The previous ones are in {}", "Configurações restauradas. As anteriores estão em {}", "Configuración restaurada. La anterior está en {}"; "Definições restauradas. As anteriores estão em {}",
+                            Ok(saved) => engine.toast(crate::localized_format!("Settings restored. The previous ones are in {}", "Configurações restauradas. As anteriores estão em {}", "Configuración restaurada. La anterior está en {}", "设置已恢复。之前的设置保存在 {}"; "Definições restauradas. As anteriores estão em {}",
                                 saved.display()
                             )),
                             Err(e) => engine.warn_toast(e),
@@ -687,7 +718,7 @@ impl App {
             ui.add_space(6.0);
             muted(
                 ui,
-                &crate::localized_format!("Everything is kept in {} (profiles in its profiles folder).", "Tudo fica em {} (os perfis ficam na subpasta profiles).", "Todo se guarda en {} (los perfiles están en su subcarpeta profiles)."; "Tudo fica em {} (os perfis ficam na subpasta profiles).",
+                &crate::localized_format!("Everything is kept in {} (profiles in its profiles folder).", "Tudo fica em {} (os perfis ficam na subpasta profiles).", "Todo se guarda en {} (los perfiles están en su subcarpeta profiles).", "所有内容都保存在 {}（配置文件在其 profiles 文件夹中）。"; "Tudo fica em {} (os perfis ficam na subpasta profiles).",
                     engine.data_dir.display()
                 ),
             );
@@ -698,7 +729,7 @@ impl App {
                 if toggle_row(
                     ui,
                     crate::i18n::tr(if cfg!(target_os = "linux") { "Keep settings beside the app" } else { "Keep settings beside dsz.exe" }),
-                    &crate::localized_format!("Portable: settings, profiles and the log go in a {} folder next to the app. Switching moves them and restarts DualWave", "Portátil: configurações, perfis e registros ficam em uma pasta {} ao lado do aplicativo. A troca move esses arquivos e reinicia o DualWave", "Portátil: los ajustes, perfiles y registros se guardan en una carpeta {} junto a la aplicación. Al cambiar de modo se trasladan y se reinicia DualWave"; "Portátil: definições, perfis e registos ficam numa pasta {} ao lado da aplicação. A troca move esses ficheiros e reinicia o DualWave",
+                    &crate::localized_format!("Portable: settings, profiles and the log go in a {} folder next to the app. Switching moves them and restarts DualWave", "Portátil: configurações, perfis e registros ficam em uma pasta {} ao lado do aplicativo. A troca move esses arquivos e reinicia o DualWave", "Portátil: los ajustes, perfiles y registros se guardan en una carpeta {} junto a la aplicación. Al cambiar de modo se trasladan y se reinicia DualWave", "Portable: settings, profiles and the log go in a {} folder next to the app. Switching moves them and restarts DualWave"; "Portátil: definições, perfis e registos ficam numa pasta {} ao lado da aplicação. A troca move esses ficheiros e reinicia o DualWave",
                         crate::portable::FOLDER
                     ),
                     &mut on,
@@ -751,4 +782,24 @@ mod tests {
         drop(app);
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// Save, then hand over to a copy started as administrator. If Windows'
+/// prompt is declined, the setting goes back off and DSZ keeps running.
+#[cfg(windows)]
+fn restart_as_admin(engine: std::sync::Arc<crate::engine::Engine>) {
+    engine.flush();
+    // `--show`: the window was open, so it opens again.
+    if !crate::platform::start_elevated("--elevated --show") {
+        engine.settings.write().run_as_admin = false;
+        engine.settings_changed();
+        engine.warn_toast(crate::i18n::tr("Running without administrator rights"));
+        return;
+    }
+    log::info!("restarting as administrator");
+    std::thread::spawn(move || {
+        engine.shutdown();
+        crate::applog::close();
+        std::process::exit(0);
+    });
 }

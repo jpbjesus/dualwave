@@ -222,6 +222,7 @@ fn plug(engine: &Engine) -> Result<Live, String> {
     let sink = usbip::DsSink {
         on_output: Box::new(|_| {}),
         mirror: Default::default(),
+        refresh: None,
     };
     let hide = hide_ok(engine);
     let apps = if hide { readers() } else { Vec::new() };
@@ -470,11 +471,17 @@ pub fn run(engine: Arc<Engine>) {
             }
         }
 
-        c.sleep(if live.is_some() {
-            Duration::from_millis(4)
-        } else {
-            WANT_EVERY
-        });
+        let sleep_for = match &live {
+            None => WANT_EVERY,
+            Some(l) if held != 0 || replay.is_some() || early.is_some() || !l.ready => {
+                Duration::from_millis(4)
+            }
+            Some(l) if l.hidden.is_some() && l.attached.elapsed() < CHILD_WATCH => {
+                CHILD_EVERY_EARLY
+            }
+            Some(_) => WANT_EVERY,
+        };
+        c.sleep(sleep_for);
     }
     unplug(&engine, &mut live);
     c.done.store(true, Ordering::Release);

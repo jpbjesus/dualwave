@@ -167,16 +167,16 @@ fn apply_observation(engine: &Engine, scan: GameObservation) {
     match &target {
         Some(GameTarget::Profile { profile, exe }) => {
             log::info!("{exe}: switching to profile \"{profile}\" ({reason:?})");
-            engine.toast(crate::localized_format!("{exe} detected — profile \"{profile}\"", "{exe} detectado — perfil \"{profile}\"", "{exe} detectado — perfil \"{profile}\""; "{exe} detetado — perfil \"{profile}\""));
+            engine.toast(crate::localized_format!("{exe} detected — profile \"{profile}\"", "{exe} detectado — perfil \"{profile}\"", "{exe} detectado — perfil \"{profile}\"", "检测到 {exe} — 配置文件“{profile}”"; "{exe} detetado — perfil \"{profile}\""));
         }
         Some(GameTarget::Fallback { exe }) => {
             let fallback = engine.settings.read().fallback_pad;
-            engine.toast(crate::localized_format!("{exe} — virtual {}", "{exe} — virtual {}", "{exe} — mando virtual {}"; "{exe} — virtual {}", fallback.label()));
+            engine.toast(crate::localized_format!("{exe} — virtual {}", "{exe} — virtual {}", "{exe} — mando virtual {}", "{exe} — 虚拟 {}"; "{exe} — virtual {}", fallback.label()));
         }
         None => {
             let back = engine.device_list().first().map(|d| engine.assigned_profile(d))
                 .unwrap_or_else(|| engine.settings.read().default_profile.clone());
-            engine.toast(crate::localized_format!("Automatic profile ended — back to \"{back}\"", "Perfil automático encerrado — voltando para \"{back}\"", "Finalizó el perfil automático — se vuelve a \"{back}\""; "Perfil automático terminado — a regressar a \"{back}\""));
+            engine.toast(crate::localized_format!("Automatic profile ended — back to \"{back}\"", "Perfil automático encerrado — voltando para \"{back}\"", "Finalizó el perfil automático — se vuelve a \"{back}\"", "Automatic profile ended — back to \"{back}\""; "Perfil automático terminado — a regressar a \"{back}\""));
         }
     }
     *engine.game_override.write() = next_override;
@@ -383,6 +383,7 @@ pub fn run(engine: Arc<Engine>) {
     let mut stack: Vec<String> = Vec::new();
     // Process id -> scan result, checked once per process.
     let mut checked: HashMap<u32, Checked> = HashMap::new();
+    let mut ds_dirs: HashSet<String> = HashSet::new();
     while !engine.shutdown.load(Ordering::Acquire) {
         let manual_revision = engine.manual_profile_revision();
         let procs = crate::platform::process_list();
@@ -422,11 +423,14 @@ pub fn run(engine: Arc<Engine>) {
 
                 });
             }
-            let ds_dirs: HashSet<String> = checked
-                .values()
-                .filter(|c| c.dualsense.is_some())
-                .filter_map(|c| c.dir.clone())
-                .collect();
+            ds_dirs.clear();
+            for c in checked.values() {
+                if c.dualsense.is_some() {
+                    if let Some(d) = &c.dir {
+                        ds_dirs.insert(d.clone());
+                    }
+                }
+            }
             for (pid, name) in &procs {
                 if rules
                     .iter()

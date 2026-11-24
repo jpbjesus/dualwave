@@ -10,6 +10,7 @@ mod icon_art;
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     build_opus(&manifest.join("..").join("..").join("vendor").join("opus"));
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
         let pw = pkg_config::Config::new().atleast_version("0.3.65")
@@ -22,12 +23,72 @@ fn main() {
         cc::Build::new().file("src/haptics/pipewire_linux.c").includes(pw.include_paths)
             .flag("-std=gnu11").warnings(true).compile("dualwave_gui_pipewire");
     }
+    build_i18n(&manifest, &out);
     println!("cargo:rerun-if-changed=src/icon_art.rs");
     println!("cargo:rerun-if-changed=assets/pads.json");
-    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_resources(&out);
     }
+}
+
+/// Generate a single deduplicated static lookup table for all bundled locales.
+/// Avoids storing 3 copies of every English key in `.rdata` and removes
+/// runtime JSON parsing + `BTreeMap` allocations.
+fn build_i18n(manifest: &Path, out: &Path) {
+    use std::collections::BTreeMap;
+    use std::fmt::Write as _;
+
+    let locales = manifest.join("locales");
+    let load = |name: &str| -> BTreeMap<String, String> {
+        let p = locales.join(name);
+        println!("cargo:rerun-if-changed={}", p.display());
+        let text = std::fs::read_to_string(&p).expect("read locale json");
+        serde_json::from_str(&text).expect("parse locale json")
+    };
+    let pt = load("pt-BR.json");
+    let european = load("pt-PT.json");
+    let es = load("es.json");
+    let zh = load("zh-CN.json");
+
+    let mut keys: Vec<&str> = pt
+        .keys()
+        .chain(european.keys())
+        .chain(es.keys())
+        .chain(zh.keys())
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    keys.dedup();
+
+    let mut code = String::with_capacity(200_000);
+    let write_slice = |code: &mut String, name: &str, items: &[&str]| {
+        let _ = writeln!(code, "static {name}: &[&str] = &[");
+        for s in items {
+            let _ = writeln!(code, "    {s:?},");
+        }
+        code.push_str("];\n");
+    };
+
+    write_slice(&mut code, "KEYS", &keys);
+    let pt_vals: Vec<&str> = keys
+        .iter()
+        .map(|k| pt.get(*k).map(String::as_str).unwrap_or(*k))
+        .collect();
+    let es_vals: Vec<&str> = keys
+        .iter()
+        .map(|k| es.get(*k).map(String::as_str).unwrap_or(*k))
+        .collect();
+    let zh_vals: Vec<&str> = keys
+        .iter()
+        .map(|k| zh.get(*k).map(String::as_str).unwrap_or(*k))
+        .collect();
+    let european_vals: Vec<&str> = keys.iter().map(|k| european.get(*k).map(String::as_str).unwrap_or(*k)).collect();
+    write_slice(&mut code, "PT_PT", &european_vals);
+    write_slice(&mut code, "PT_BR", &pt_vals);
+    write_slice(&mut code, "ES", &es_vals);
+    write_slice(&mut code, "ZH_CN", &zh_vals);
+
+    std::fs::write(out.join("i18n_table.rs"), code).expect("write i18n_table.rs");
 }
 
 /// Source files listed under `var` in one of libopus's `*_sources.mk`.
@@ -55,7 +116,9 @@ fn mk_list(dir: &Path, mk: &str, var: &str) -> Vec<PathBuf> {
 }
 
 /// libopus, float build, portable C (no CPU dispatch): two 10 ms frames
-/// per speaker report are cheap enough without SIMD.
+/// per speaker report are cheap enough without SIMD. Excludes multistream,
+/// projection, and mapping-matrix sources, and enables `/Gy` `/Gw` so
+/// `/OPT:REF,ICF` strips unreferenced code and tables.
 fn build_opus(dir: &Path) {
     println!("cargo:rerun-if-changed={}", dir.display());
     let mut files = Vec::new();
@@ -63,10 +126,18 @@ fn build_opus(dir: &Path) {
         ("celt_sources.mk", "CELT_SOURCES"),
         ("silk_sources.mk", "SILK_SOURCES"),
         ("silk_sources.mk", "SILK_SOURCES_FLOAT"),
-        ("opus_sources.mk", "OPUS_SOURCES"),
         ("opus_sources.mk", "OPUS_SOURCES_FLOAT"),
     ] {
         files.extend(mk_list(dir, mk, var));
+    }
+    for src in [
+        "src/opus.c",
+        "src/opus_decoder.c",
+        "src/opus_encoder.c",
+        "src/extensions.c",
+        "src/repacketizer.c",
+    ] {
+        files.push(dir.join(src));
     }
     let version = std::fs::read_to_string(dir.join("package_version"))
         .ok()
@@ -85,6 +156,8 @@ fn build_opus(dir: &Path) {
         .define("HAVE_LRINT", None)
         .define("HAVE_LRINTF", None)
         .define("PACKAGE_VERSION", format!("\"{version}\"").as_str())
+        .flag_if_supported("/Gy")
+        .flag_if_supported("/Gw")
         .opt_level(2)
         .warnings(false)
         .compile("opus");
@@ -113,9 +186,14 @@ fn embed_resources(out: &Path) {
     }
 }
 
-/// An `.ico` with one 32-bit BMP image per size, drawn by `icon_art`.
+/// An `.ico` with one image per size, drawn by `icon_art`: 32-bit BMP up to
+/// 64 px, PNG at 256 (as Windows' own icons do; a 256 px BMP is 260 KB of
+/// the exe, the PNG about a tenth of that).
 fn ico_file(sizes: &[usize]) -> Vec<u8> {
-    let images: Vec<Vec<u8>> = sizes.iter().map(|&s| bmp_image(s)).collect();
+    let images: Vec<Vec<u8>> = sizes
+        .iter()
+        .map(|&s| if s >= 256 { png_image(s) } else { bmp_image(s) })
+        .collect();
     let mut f = Vec::new();
     // ICONDIR: reserved, type 1 (icon), count.
     f.extend_from_slice(&0u16.to_le_bytes());
@@ -136,6 +214,19 @@ fn ico_file(sizes: &[usize]) -> Vec<u8> {
         f.extend_from_slice(&img);
     }
     f
+}
+
+fn png_image(size: usize) -> Vec<u8> {
+    let rgba = icon_art::icon_rgba(size);
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, size as u32, size as u32);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.set_compression(png::Compression::High);
+    let mut w = enc.write_header().expect("icon PNG header");
+    w.write_image_data(&rgba).expect("icon PNG");
+    w.finish().expect("icon PNG");
+    out
 }
 
 /// BITMAPINFOHEADER, bottom-up BGRA pixels, then an empty AND mask (the

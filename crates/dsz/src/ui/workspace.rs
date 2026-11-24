@@ -227,7 +227,7 @@ impl App {
         let applied = self.engine.profiles.get_or_first(&self.engine.profile_name_for(d));
         if *d.link.lock() != Link::Live { "Controller offline" }
         else if !applied.microphone.enabled { "Capture disabled in applied profile" }
-        else if applied.microphone.muted || (applied.microphone.mute_button && d.toggles.lock().mute_engaged) { "Microphone muted" }
+        else if applied.microphone.muted || (applied.microphone.mute_button && d.toggles.load().mute_engaged) { "Microphone muted" }
         else if d.microphone.recording() && {
             #[cfg(windows)]
             { d.virt.microphone_open() }

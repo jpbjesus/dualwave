@@ -100,7 +100,7 @@ impl Rest {
 
     /// Accelerometer axes gravity mostly runs along over the run.
     fn upright_axes(&self) -> [bool; 3] {
-        let mid: Vec<f32> = (0..3).map(|k| (self.accel_lo[k] + self.accel_hi[k]) * 0.5).collect();
+        let mid = [0, 1, 2].map(|k| (self.accel_lo[k] + self.accel_hi[k]) * 0.5);
         let len = (mid[0] * mid[0] + mid[1] * mid[1] + mid[2] * mid[2]).sqrt();
         [0, 1, 2].map(|k| mid[k].abs() > 0.7 * len)
     }
@@ -207,9 +207,7 @@ impl Gyro {
                 if now.duration_since(self.still_since.unwrap()) > Duration::from_millis(1500)
                     && self.still_n > 100
                 {
-                    let avg: Vec<f32> = (0..3)
-                        .map(|k| (self.still_sum[k] / self.still_n as f64) as f32)
-                        .collect();
+                    let avg = [0, 1, 2].map(|k| (self.still_sum[k] / self.still_n as f64) as f32);
                     for k in 0..3 {
                         self.bias[k] = if self.calibrated {
                             self.bias[k] * 0.6 + avg[k] * 0.4
@@ -774,10 +772,38 @@ struct MapRt {
     last_press: Option<Instant>,
     turbo: bool,
     turbo_next: Option<Instant>,
+    /// Random state for turbo variation; seeded on first use.
+    turbo_rng: u64,
     tap_up_at: Option<Instant>,
     /// Buttons a muted combo hid; each stays hidden until it is released.
     mute_latch: u32,
     playback: macros::Playback,
+}
+
+/// How long a turbo press stays down, or up, before the next change. Without
+/// variation, half the interval, as it always was. With it, each half moves
+/// by up to half the variation, so each interval moves by up to all of it.
+fn turbo_half(turbo_ms: u32, variation_ms: u32, rng: &mut u64) -> Duration {
+    let half = turbo_ms.clamp(20, 2000) / 2;
+    if variation_ms == 0 {
+        return Duration::from_millis(half as u64);
+    }
+    if *rng == 0 {
+        *rng = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+            | 1;
+    }
+    // splitmix64: plenty for timing jitter, and no new dependency.
+    *rng = rng.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *rng;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    let spread = (variation_ms.min(1000) / 2) as u64;
+    let offset = (z % (2 * spread + 1)) as i64 - spread as i64;
+    Duration::from_millis((half as i64 + offset).max(10) as u64)
 }
 
 fn holdable(a: &Action) -> bool {
@@ -791,7 +817,26 @@ fn holdable(a: &Action) -> bool {
     )
 }
 
+/// Keyboard and mouse output, which Windows keeps from programs that run as
+/// administrator unless DSZ does too.
+#[cfg(windows)]
+fn sends_input(a: &Action) -> bool {
+    matches!(
+        a,
+        Action::Key { .. }
+            | Action::Mouse { .. }
+            | Action::ScrollUp
+            | Action::ScrollDown
+            | Action::Text { .. }
+    )
+}
+
 fn action_down(engine: &Engine, device: &Device, a: &Action) {
+    // Windows drops the input without an error, so say why nothing happens.
+    #[cfg(windows)]
+    if sends_input(a) && !crate::platform::is_elevated() && crate::platform::foreground_elevated() {
+        engine.warn_toast(crate::i18n::tr("That window runs as administrator, so Windows blocks DSZ's keys. Turn on Run as administrator in Settings."));
+    }
     match a {
         Action::None => {}
         Action::Key {
@@ -840,11 +885,12 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
         Action::NextProfile => engine.cycle_profile(device, 1),
         Action::PreviousProfile => engine.cycle_profile(device, -1),
         Action::ToggleGyroMouse => {
-            let mut t = device.toggles.lock();
-            let on = !t.gyro_toggled_on;
-            t.gyro_toggled_on = on;
-            t.gyro = Some(on);
-            drop(t);
+            let mut on = false;
+            device.toggles.update(|t| {
+                on = !t.gyro_toggled_on;
+                t.gyro_toggled_on = on;
+                t.gyro = Some(on);
+            });
             engine.toast(if on {
                 crate::i18n::tr("Gyro on")
             } else {
@@ -853,7 +899,7 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
         }
         Action::ToggleTouchpadMouse => {
             let live = device.live.lock().touch_mouse_active;
-            device.toggles.lock().touchpad = Some(!live);
+            device.toggles.update(|t| t.touchpad = Some(!live));
             engine.toast(if live {
                 crate::i18n::tr("Touchpad mouse off")
             } else {
@@ -863,7 +909,7 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
         Action::Profile { name } => {
             if engine.profiles.exists(name) {
                 engine.set_device_profile(device, name);
-                engine.toast(crate::localized_format!("Profile: {name}", "Perfil: {name}", "Perfil: {name}"; "Perfil: {name}"));
+                engine.toast(crate::localized_format!("Profile: {name}", "Perfil: {name}", "Perfil: {name}", "配置文件：{name}"; "Perfil: {name}"));
                 device.identify_light();
             }
         }
@@ -872,13 +918,28 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
         // Started by the mapping, which knows the buttons to watch.
         Action::HoldProfile { .. } => {}
         Action::TurnOffController => turn_off_controller(engine, device),
+        Action::Text { text } => {
+            #[cfg(windows)]
+            sim::type_text(text);
+            #[cfg(not(windows))]
+            { let _ = text; engine.warn_toast(crate::i18n::tr("Typing text is only available on Windows")); }
+        }
         Action::Run { path } => {
             if !path.trim().is_empty() {
                 let p = path.trim().to_string();
                 std::thread::spawn(move || {
-                    let _ = std::process::Command::new("cmd")
-                        .args(["/C", "start", "", &p])
-                        .spawn();
+                    // Explorer starts it with normal rights when DSZ runs
+                    // as administrator.
+                    #[cfg(windows)]
+                    let _ = if crate::platform::is_elevated() {
+                        std::process::Command::new("explorer").arg(&p).spawn()
+                    } else {
+                        std::process::Command::new("cmd")
+                            .args(["/C", "start", "", &p])
+                            .spawn()
+                    };
+                    #[cfg(not(windows))]
+                    let _ = std::process::Command::new("cmd").args(["/C", "start", "", &p]).spawn();
                 });
             }
         }
@@ -1114,7 +1175,7 @@ impl Pipeline {
         // A button toggle is temporary. An explicit touchpad-mode edit or
         // a different profile takes precedence, while unrelated edits keep it.
         if self.built_for.as_ref().is_some_and(|b| b.name != profile.name || b.touchpad.mode != profile.touchpad.mode) {
-            device.toggles.lock().touchpad = None;
+            device.toggles.update(|t| t.touchpad = None);
             self.touch.release();
         }
         if self.built_for.as_ref().is_some_and(|b| b.name != profile.name) {
@@ -1150,7 +1211,7 @@ impl Pipeline {
             .clamp(0.001, 0.03);
         self.last_at = Some(now);
 
-        let toggles = *device.toggles.lock();
+        let toggles = device.toggles.load();
 
         // Gyro
         if device.calibrate_request.swap(false, Ordering::AcqRel) {
@@ -1241,9 +1302,7 @@ impl Pipeline {
             && (profile.lighting.mute_led == MuteLed::Toggle
                 || (device.microphone.enabled() && profile.microphone.mute_button))
         {
-            let mut t = device.toggles.lock();
-            t.mute_engaged = device.next_mute_state(t.mute_engaged);
-            drop(t);
+            device.toggles.update(|t| t.mute_engaged = device.next_mute_state(t.mute_engaged));
             // Gate capture immediately: the idle media clock can otherwise
             // sleep for 100 ms after the Mute LED has already changed.
             if device.microphone.enabled() {
@@ -1535,7 +1594,7 @@ impl Pipeline {
             if rt.turbo {
                 if let Some(next) = rt.turbo_next {
                     if now >= next {
-                        let half = Duration::from_millis((m.turbo_ms.clamp(20, 2000) / 2) as u64);
+                        let half = turbo_half(m.turbo_ms, m.turbo_variation_ms, &mut rt.turbo_rng);
                         if rt.out_down {
                             action_up(&m.action);
                             rt.out_down = false;
@@ -1799,17 +1858,17 @@ mod turn_off_tests {
         input.full = true;
         let now = Instant::now();
         step(&mut r, &input, &input, now);
-        r.device.toggles.lock().touchpad = Some(true);
+        r.device.toggles.update(|t| t.touchpad = Some(true));
         profile.lighting.brightness = 70;
         r.engine.profiles.update(profile.clone());
         step(&mut r, &input, &input, now + Duration::from_millis(10));
         assert!(r.device.live.lock().touch_mouse_active);
-        assert_eq!(r.device.toggles.lock().touchpad,Some(true));
+        assert_eq!(r.device.toggles.load().touchpad,Some(true));
         profile.touchpad.mode = TouchMode::Passthrough;
         r.engine.profiles.update(profile);
         step(&mut r, &input, &input, now + Duration::from_millis(20));
         assert!(!r.device.live.lock().touch_mouse_active,"Turning off the profile option must override an old button toggle");
-        assert_eq!(r.device.toggles.lock().touchpad,None);
+        assert_eq!(r.device.toggles.load().touchpad,None);
     }
 
     #[test]
@@ -1819,14 +1878,14 @@ mod turn_off_tests {
         input.full = true;
         let now = Instant::now();
         step(&mut r, &input, &input, now);
-        r.device.toggles.lock().touchpad = Some(true);
+        r.device.toggles.update(|t| t.touchpad = Some(true));
         step(&mut r, &input, &input, now + Duration::from_millis(10));
         assert!(r.device.live.lock().touch_mouse_active);
         let other = r.engine.profiles.add(Profile::named("Other touchpad"));
         r.engine.set_device_profile(&r.device,&other);
         step(&mut r, &input, &input, now + Duration::from_millis(20));
         assert!(!r.device.live.lock().touch_mouse_active);
-        assert_eq!(r.device.toggles.lock().touchpad,None);
+        assert_eq!(r.device.toggles.load().touchpad,None);
     }
 
     fn off(button: Button) -> Mapping {
@@ -2551,6 +2610,36 @@ mod hold_profile_tests {
 mod tests {
     use super::*;
     use ds_proto::input::TouchPoint;
+
+    #[test]
+    fn turbo_without_variation_keeps_its_exact_timing() {
+        // The formula from before variation existed, for every interval.
+        for ms in (0..=2100).chain([u32::MAX]) {
+            let mut rng = 0;
+            let old = Duration::from_millis((ms.clamp(20, 2000) / 2) as u64);
+            for _ in 0..3 {
+                assert_eq!(turbo_half(ms, 0, &mut rng), old, "{ms} ms");
+            }
+            assert_eq!(rng, 0, "no random state is touched");
+        }
+    }
+
+    #[test]
+    fn turbo_variation_stays_within_its_range() {
+        let mut rng = 0;
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..2000 {
+            let h = turbo_half(100, 40, &mut rng).as_millis() as u64;
+            assert!((30..=70).contains(&h), "{h}");
+            seen.insert(h);
+        }
+        // Both ends come up, and plenty in between.
+        assert!(seen.contains(&30) && seen.contains(&70) && seen.len() > 30, "{seen:?}");
+        // A half never drops below 10 ms, whatever the settings.
+        for _ in 0..500 {
+            assert!(turbo_half(20, u32::MAX, &mut rng) >= Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn directional_reach_only_shapes_passthrough_virtual_sticks() {

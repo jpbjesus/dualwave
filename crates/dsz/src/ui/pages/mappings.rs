@@ -29,6 +29,7 @@ enum AKind {
     Gyro,
     Touch,
     Run,
+    Text,
     Profile,
     HoldProfile,
     Gamepad,
@@ -53,6 +54,7 @@ fn akind(a: &Action) -> AKind {
         Action::ToggleGyroMouse => AKind::Gyro,
         Action::ToggleTouchpadMouse => AKind::Touch,
         Action::Run { .. } => AKind::Run,
+        Action::Text { .. } => AKind::Text,
         Action::Profile { .. } => AKind::Profile,
         Action::HoldProfile { .. } => AKind::HoldProfile,
         Action::Gamepad { .. } => AKind::Gamepad,
@@ -61,7 +63,7 @@ fn akind(a: &Action) -> AKind {
     }
 }
 
-const KINDS: [(AKind, &str); 20] = [
+const KINDS: [(AKind, &str); 21] = [
     (AKind::None, "Nothing"),
     (AKind::Gamepad, "PlayStation button"),
     (AKind::Xbox, "Xbox button"),
@@ -74,6 +76,7 @@ const KINDS: [(AKind, &str); 20] = [
     (AKind::Player, "Media player"),
     (AKind::GameVolumeUp, "Active game volume up"),
     (AKind::GameVolumeDown, "Active game volume down"),
+    (AKind::Text, "Type text"),
     (AKind::Next, "Next profile"),
     (AKind::Prev, "Previous profile"),
     (AKind::Gyro, "Toggle gyro"),
@@ -121,6 +124,7 @@ pub(crate) fn action_editor(
             .selected_text(crate::i18n::tr(if primary { "More actions" } else if original_label && k == AKind::None { "Original" } else { KINDS.iter().find(|x| x.0 == k).map_or("More actions", |x| x.1) }))
             .show_ui(ui, |ui| {
                 for (kind, label) in KINDS {
+                    if kind == AKind::Text && !cfg!(windows) { continue; }
                     if matches!(kind, AKind::Player | AKind::GameVolumeUp | AKind::GameVolumeDown) && !cfg!(target_os = "linux") { continue; }
                     if matches!(kind, AKind::Key | AKind::Mouse | AKind::Gamepad | AKind::Macro) { continue; }
                     ui.selectable_value(&mut k, kind, crate::i18n::tr(if original_label && kind == AKind::None { "Original" } else { label }));
@@ -144,6 +148,7 @@ pub(crate) fn action_editor(
             AKind::Prev => Action::PreviousProfile,
             AKind::Gyro => Action::ToggleGyroMouse,
             AKind::Touch => Action::ToggleTouchpadMouse,
+            AKind::Text => Action::Text { text: String::new() },
             AKind::Run => Action::Run { path: String::new() },
             AKind::TurnOff => Action::TurnOffController,
             AKind::Profile => Action::Profile {
@@ -300,6 +305,9 @@ pub(crate) fn action_editor(
                             .on_hover_text(crate::i18n::tr("Without HidHide, DualWave plugs in a helper Xbox controller for the press, which games can see, and unplugs it 30 seconds after the last press. Windows needs about a second to see it, so the first press arrives late. Install HidHide on the Virtual controller page to hide it."));
                     }
                 }
+                Action::Text { text } => {
+                    ui.add(egui::TextEdit::multiline(text).hint_text(crate::i18n::tr("Text to type")).desired_width(260.0));
+                }
                 Action::Run { path } => {
                     ui.add(egui::TextEdit::singleline(path).hint_text(if cfg!(target_os = "linux") { "/path/to/program" } else { "C:\\path\\to\\app.exe" }).desired_width(220.0));
                     if button(ui, crate::i18n::tr("Browse…")).clicked() {
@@ -393,7 +401,7 @@ fn macro_editor(ui: &mut egui::Ui, steps: &mut Vec<MacroStep>, mode: &mut HoldSt
                         }
                     }
                     ui.add_space(6.0);
-                    let summary = crate::localized_format!("Timing · {} ms + {} ms", "Tempos · {} ms + {} ms", "Tiempos · {} ms + {} ms"; "Temporização · {} ms + {} ms", step.hold_ms, step.wait_ms);
+                    let summary = crate::localized_format!("Timing · {} ms + {} ms", "Tempos · {} ms + {} ms", "Tiempos · {} ms + {} ms", "Timing · {} ms + {} ms"; "Temporização · {} ms + {} ms", step.hold_ms, step.wait_ms);
                     egui::CollapsingHeader::new(summary).id_salt("step-timing").show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(crate::i18n::tr("Hold for"));
@@ -459,7 +467,7 @@ fn advanced_editor(ui: &mut egui::Ui, m: &mut Mapping, i: usize, edge: bool) {
             }
             if m.mute { ui.label(crate::i18n::tr("Hide from game")); }
             let timing = match m.gesture { Gesture::LongPress => Some(m.long_ms), Gesture::DoubleTap => Some(m.double_ms), _ => None };
-            if let Some(ms) = timing { ui.label(crate::localized_format!("{ms} ms", "{ms} ms", "{ms} ms"; "{ms} ms")); }
+            if let Some(ms) = timing { ui.label(crate::localized_format!("{ms} ms", "{ms} ms", "{ms} ms", "{ms} ms"; "{ms} ms")); }
         });
     }
     ui.collapsing(crate::i18n::tr("Advanced"), |ui| {
@@ -529,7 +537,7 @@ impl App {
         ui.add_space(12.0);
         #[cfg(target_os = "linux")]
         if let Some(error) = crate::inputsim::error() {
-            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}", "La entrada de teclado y ratón no está disponible: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());
+            note(ui, &crate::localized_format!("Keyboard and mouse input is unavailable: {error}", "A entrada de teclado e mouse está indisponível: {error}", "La entrada de teclado y ratón no está disponible: {error}", "Keyboard and mouse input is unavailable: {error}"; "A entrada de teclado e rato está indisponível: {error}"), warn_color());
             ui.add_space(10.0);
         }
         let virtual_on = p.virtual_out.kind != VirtualKind::Off;
@@ -583,6 +591,7 @@ impl App {
                             else { playback_editor(ui, &mut m.mode, false); }
                             if m.mode == HoldStyle::Turbo {
                                 ui.add(egui::Slider::new(&mut m.turbo_ms, 30..=1000).clamping(egui::SliderClamping::Edits).suffix(" ms").text(crate::i18n::tr("interval")));
+                                ui.add(egui::Slider::new(&mut m.turbo_variation_ms, 0..=500).suffix(" ms").text(crate::i18n::tr("variation ±")));
                             }
                         }
                         ui.add_space(8.0);
