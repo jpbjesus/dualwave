@@ -7,4 +7,4 @@ Exec=dualwave
 Icon=dualwave
 Categories=Settings;HardwareSettings;
 Terminal=false
-StartupWMClass=DualWave
+StartupWMClass=dualwave

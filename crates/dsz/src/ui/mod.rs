@@ -143,7 +143,7 @@ pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
     let (size, min) = crate::platform::initial_window_size([1240.0, 800.0], [760.0, 520.0]);
     let viewport = egui::ViewportBuilder::default();
     #[cfg(not(windows))]
-    let viewport = viewport.with_icon(Arc::new(icon));
+    let viewport = viewport.with_app_id("dualwave").with_icon(Arc::new(icon));
     crate::tray::start(engine.clone(), || {
         if let Some(c) = CTX.get() {
             c.request_repaint();
