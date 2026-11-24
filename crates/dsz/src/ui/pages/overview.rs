@@ -166,14 +166,15 @@ impl App {
                         };
                         if battery_bars {
                             let status = status.trim_start_matches(" · ");
-                            ui.label(RichText::new(status).color(text_color()));
-                            let n = input.battery_bars();
-                            let col = match n {
-                                0 => bad_color(),
-                                1 => warn_color(),
-                                _ => good_color(),
-                            };
-                            bars_meter(ui, n, col, 90.0);
+                            if !status.is_empty() {
+                                ui.label(RichText::new(status).color(text_color()));
+                            }
+                            let width = ui.available_width().min(48.0);
+                            if width >= 18.0 {
+                                let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 6.0), egui::Sense::hover());
+                                battery_segments(ui.painter(), rect, input.battery_bars());
+                                response.on_hover_text(format!("{bat}%"));
+                            }
                         } else {
                             ui.label(RichText::new(format!("{bat}%{status}")).color(text_color()));
                             meter(ui, bat as f32 / 100.0, bcol, 90.0);

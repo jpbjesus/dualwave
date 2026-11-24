@@ -328,15 +328,19 @@ impl App {
                 };
                 let name = d.display_name(&self.engine);
                 let conn = if d.is_bluetooth() { "BT" } else { "USB" };
-                let bat = self.engine.settings.read().battery_label(&live);
-                let mut text = format!("{name}  ·  {conn}  ·  {bat}");
+                let bars = self.engine.settings.read().battery_bars;
+                let percent = format!("{}%", live.battery_shown());
+                let mut text = format!("{name}  ·  {conn}");
+                if !bars {
+                    text.push_str(&format!("  ·  {percent}"));
+                }
                 if let Some(k) = d.virt.active() {
                     text.push_str(&crate::localized_format!("  ·  as {}", "  ·  como {}", "  ·  como {}", "  ·  作为 {}"; "  ·  como {}", k.label()));
                 }
                 let font = egui::FontId::proportional(13.0);
                 let w = ui.fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), text_color()).size().x);
                 let (rect, resp) =
-                    ui.allocate_exact_size(egui::vec2(w + 38.0, 32.0), Sense::click());
+                    ui.allocate_exact_size(egui::vec2(w + 38.0 + if bars { 34.0 } else { 0.0 }, 32.0), Sense::click());
                 let p = ui.painter();
                 p.rect_filled(
                     rect,
@@ -357,11 +361,16 @@ impl App {
                     font,
                     text_color(),
                 );
+                if bars {
+                    let min = rect.right_center() + egui::vec2(-36.0, -3.0);
+                    let segments = egui::Rect::from_min_size(min, egui::vec2(26.0, 6.0));
+                    widgets::battery_segments(p, segments, live.battery_bars());
+                }
                 if resp.clicked() {
                     self.selected = Some(d.id);
                     self.edit_pin = None;
                 }
-                resp.on_hover_text(hover);
+                resp.on_hover_text(if bars { format!("{hover} · {percent}") } else { hover.to_owned() });
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -247,17 +247,6 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// A controller's battery as the window's controller list and the tray
-    /// show it: the percentage, or bars when `battery_bars` is on.
-    pub fn battery_label(&self, input: &ds_proto::InputState) -> String {
-        if self.battery_bars {
-            let n = input.battery_bars() as usize;
-            format!("{}{}", "■".repeat(n), "□".repeat(3 - n))
-        } else {
-            format!("{}%", input.battery_shown())
-        }
-    }
-
     pub fn path(dir: &Path) -> PathBuf {
         dir.join("settings.json")
     }
@@ -354,22 +343,6 @@ mod tests {
         assert!(saved.get("overlay_input").is_none());
         let parsed: Settings = serde_json::from_str(r#"{"overlay_input":false}"#).unwrap();
         assert_eq!(parsed, Settings::default());
-    }
-
-    #[test]
-    fn battery_label_is_the_percentage_unless_bars_are_on() {
-        let input = ds_proto::InputState {
-            full: true,
-            battery_percent: 80,
-            battery_status: ds_proto::BatteryStatus::Discharging,
-            ..Default::default()
-        };
-        assert_eq!(Settings::default().battery_label(&input), "85%");
-        let bars = Settings { battery_bars: true, ..Settings::default() };
-        assert_eq!(bars.battery_label(&input), "■■■");
-        let low = ds_proto::InputState { battery_percent: 20, ..input };
-        assert_eq!(bars.battery_label(&low), "■□□");
-        assert_eq!(bars.battery_label(&ds_proto::InputState::default()), "□□□");
     }
 
     #[test]

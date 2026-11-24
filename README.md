@@ -71,7 +71,7 @@ consult its release notes before downloading.
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
 | Virtual output | Xbox 360, DualSense and DualShock 4 targets through Linux USB/IP; virtual DualSense uses a distinct Linux identity so it can coexist with the physical controller |
 | Controller power | Turn off the connected Bluetooth controller directly from the home page |
-| Upstream 0.4.10–0.4.25 | Optional trigger conditions, per-trigger game-effect strength, classic rumble during audio, turbo timing variation and battery bars; touchpad suppression and rumble/audio timing fixes; Simplified Chinese alongside European Portuguese; Windows-only text typing, administrator mode, Game Bar input recovery and native ARM64 support. Linux audio, focus selection, themes and opt-in defaults retained. Hardware validation pending |
+| Upstream 0.4.10–0.4.25 | Optional trigger conditions, per-trigger game-effect strength, classic rumble during audio, turbo timing variation and battery bars that follow the selected color theme; touchpad suppression and rumble/audio timing fixes; Simplified Chinese alongside European Portuguese; Windows-only text typing, administrator mode, Game Bar input recovery and native ARM64 support. Linux audio, focus selection, themes and opt-in defaults retained. Hardware validation pending |
 | Upstream 0.4.6–0.4.9 | Optional gyro angle catch-up, held-profile button presses, remembered game-profile choices, independent USB game-speaker playback, battery-range midpoint display, game-helper filtering, attach-race handling and Windows HidHide repair; Linux backends and existing defaults retained. Hardware validation pending |
 | Upstream 0.4.5 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Favorite profiles first in the profile list and selector, and in a separate leading group in the Linux tray; optional foreground-game selection on KDE Plasma 6 and X11; executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
@@ -352,7 +352,7 @@ application startup. The CachyOS setup is bundled; experimental portable host se
 Example download for the current alpha release:
 
 ```sh
-release=v0.4.25-alpha.1
+release=v0.4.25-alpha.2
 release_url="https://github.com/jpbjesus/dualwave/releases/download/$release"
 curl -fL --output DualWave-x86_64.AppImage "$release_url/DualWave-x86_64.AppImage"
 curl -fL --output DualWave-x86_64.AppImage.sha256 "$release_url/DualWave-x86_64.AppImage.sha256"
@@ -368,10 +368,10 @@ preserved; unrelated launchers and unmanaged directories are not overwritten.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
-sh install-dualwave.sh --version v0.4.25-alpha.1 --dry-run
-sh install-dualwave.sh --version v0.4.25-alpha.1
+sh install-dualwave.sh --version v0.4.25-alpha.2 --dry-run
+sh install-dualwave.sh --version v0.4.25-alpha.2
 # Preview a native archive installation:
-sh install-dualwave.sh --version v0.4.25-alpha.1 --format native --dry-run
+sh install-dualwave.sh --version v0.4.25-alpha.2 --format native --dry-run
 # Remove only this installer's files; profiles and settings remain:
 sh install-dualwave.sh --uninstall
 ```
