@@ -1105,6 +1105,7 @@ pub struct Pipeline {
     map_actions: Vec<Action>,
     /// Mapping indexes, combos first, so a combo that completes wins.
     map_order: Vec<usize>,
+    map_layers: Vec<usize>,
     gyro_toggle: bool,
     /// The profile Enable / disable gyro was used in, while it is set.
     gyro_enabled_for: Option<String>,
@@ -1139,6 +1140,7 @@ impl Pipeline {
             maps: Vec::new(),
             map_actions: Vec::new(),
             map_order: Vec::new(),
+            map_layers: Vec::new(),
             gyro_toggle: false,
             gyro_enabled_for: None,
             last_at: None,
@@ -1262,6 +1264,9 @@ impl Pipeline {
             let combos = (0..profile.mappings.len()).filter(|&i| profile.mappings[i].is_combo());
             let solos = (0..profile.mappings.len()).filter(|&i| !profile.mappings[i].is_combo());
             self.map_order = combos.chain(solos).collect();
+            self.map_layers = profile.mappings.iter().enumerate()
+                .filter_map(|(i, m)| (m.enabled && m.layer.is_some_and(|b| b != m.button)).then_some(i))
+                .collect();
         }
 
         let dt = self
@@ -1504,13 +1509,43 @@ impl Pipeline {
         now: Instant,
     ) -> (u32, u32, u32) {
         let mut suppress = 0u32;
+        let layers = |buttons: ds_proto::Buttons| {
+            let mut selected = [None; Button::ALL.len()];
+            for &i in &self.map_layers {
+                let m = &profile.mappings[i];
+                if let Some(modifier) = m.layer.filter(|b| buttons.has(*b)) {
+                    selected[m.button as usize].get_or_insert(modifier);
+                }
+            }
+            selected
+        };
+        let selected = layers(s.buttons);
+        let previously_selected = layers(prev.buttons);
+        if !self.map_layers.is_empty() {
+            // Release old outputs before a mapping from the new layer can
+            // press the same key. Preserve combo hiding until physical release.
+            for (m, rt) in profile.mappings.iter().zip(&mut self.maps) {
+                if m.layer == selected[m.button as usize] { continue; }
+                if let Some((input, _)) = rt.playback.cancel() { action_up(&input.action()); }
+                if rt.out_down { action_up(&m.action); }
+                if m.enabled && m.mute && !m.is_combo() && m.layer == previously_selected[m.button as usize]
+                    && prev.buttons.has(m.button) && s.buttons.has(m.button)
+                {
+                    rt.mute_latch |= m.button.bit();
+                    if m.button.is_touchpad_zone() { rt.mute_latch |= Button::Touchpad.bit(); }
+                }
+                let mute_latch = rt.mute_latch & s.buttons.0;
+                suppress |= mute_latch;
+                *rt = MapRt { mute_latch, ..Default::default() };
+            }
+        }
         // Buttons inside a combo that is held right now: their solo long
         // presses and double taps don't fire.
         let mut in_combo = 0u32;
         for m in profile
             .mappings
             .iter()
-            .filter(|m| m.enabled && m.is_combo())
+            .filter(|m| m.enabled && m.is_combo() && m.layer == selected[m.button as usize])
         {
             if m.buttons().all(|b| s.buttons.has(b)) {
                 for b in m.buttons() {
@@ -1526,17 +1561,23 @@ impl Pipeline {
             let Some(rt) = self.maps.get_mut(i) else {
                 continue;
             };
-            if !m.enabled {
+            if !m.enabled || m.layer != selected[m.button as usize] {
                 continue;
             }
             let combo = m.is_combo();
             let down = m.buttons().all(|b| s.buttons.has(b));
             let was = m.buttons().all(|b| prev.buttons.has(b));
-            let pressed = down && !was;
+            let same_layer = m.layer == previously_selected[m.button as usize];
+            let pressed = down && !was && (same_layer || !prev.buttons.has(m.button));
             let released = !down && was;
 
             if m.mute {
-                if !combo {
+                if m.layer.is_some() && !combo {
+                    if down {
+                        rt.mute_latch |= m.button.bit();
+                        if m.button.is_touchpad_zone() { rt.mute_latch |= Button::Touchpad.bit(); }
+                    }
+                } else if !combo {
                     if m.button.is_touchpad_zone() {
                         // The game has one touchpad button. Hiding a zone
                         // hides that click while the finger is in the zone.
@@ -1555,7 +1596,7 @@ impl Pipeline {
                     }
                 }
             }
-            if combo {
+            if combo || m.layer.is_some() {
                 rt.mute_latch &= s.buttons.0;
                 suppress |= rt.mute_latch;
             }
@@ -2159,6 +2200,31 @@ mod turn_off_tests {
         assert_eq!(take_offs(), vec!["AA-BB-CC-DD-EE-01".to_string()]);
         step(&mut rig, &down, &down, t + Duration::from_millis(800));
         assert!(take_offs().is_empty());
+    }
+
+    #[test]
+    fn held_mapping_layer_replaces_only_its_buttons_and_requires_a_fresh_press() {
+        let mut rig = rig(Connection::Bluetooth, "", vec![
+            Mapping { button: Button::DpadDown, action: Action::Gamepad { button: Button::Cross }, ..Mapping::default() },
+            Mapping { button: Button::DpadDown, layer: Some(Button::L1), action: Action::Gamepad { button: Button::Circle }, ..Mapping::default() },
+            Mapping { button: Button::R1, action: Action::Gamepad { button: Button::Square }, ..Mapping::default() },
+        ]);
+        let idle = centered(&[]);
+        let base = centered(&[Button::DpadDown, Button::R1]);
+        let layer = centered(&[Button::L1, Button::DpadDown, Button::R1]);
+        let modifier = centered(&[Button::L1, Button::R1]);
+        let now = Instant::now();
+        step(&mut rig, &idle, &base, now);
+        assert!(rig.pipe.maps[0].out_down && rig.pipe.maps[2].out_down);
+        step(&mut rig, &base, &layer, now);
+        assert!(!rig.pipe.maps[0].out_down && !rig.pipe.maps[1].out_down);
+        assert!(rig.pipe.maps[2].out_down);
+        step(&mut rig, &layer, &modifier, now);
+        step(&mut rig, &modifier, &layer, now);
+        assert!(!rig.pipe.maps[0].out_down && rig.pipe.maps[1].out_down);
+        step(&mut rig, &layer, &base, now);
+        assert!(!rig.pipe.maps[0].out_down && !rig.pipe.maps[1].out_down);
+        assert!(rig.pipe.maps[2].out_down);
     }
 
     #[test]

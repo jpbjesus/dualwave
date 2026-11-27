@@ -1,4 +1,7 @@
 {
+  "Held layer": "按住时启用的层",
+  "Hold this button to use this mapping layer. It replaces the base mappings for this button.": "按住此按钮以启用此映射层。它会替换此按钮的基础映射。",
+  "Steam or the game may receive input from both controllers.": "Steam 或游戏可能同时接收两个手柄的输入。",
   "Language": "语言",
   "Interface language": "界面语言",
   "Applied immediately and saved automatically": "立即生效并自动保存",
@@ -1154,5 +1157,8 @@
   "Not over games in exclusive fullscreen; borderless and windowed work": "无法显示在独占全屏的游戏上；无边框和窗口模式可用",
   "To show it with a button, map one to Show battery overlay on the Button mapping page, and pick its corner and time there.": "要用按键显示它，请在“按键映射”页面将一个按键映射为“显示电池浮窗”，并在那里选择角落和显示时长。",
   "Show for": "显示时长",
-  "Battery overlay is available on Windows.": "电池浮窗可在 Windows 上使用。"
+  "Controller status": "手柄状态",
+  "Show controller status": "显示手柄状态",
+  "Show the battery and active profile on screen": "在屏幕上显示电量和当前配置",
+  "In Button mapping, assign Show controller status to a button or combination.": "在按钮映射中，将显示手柄状态分配给一个按钮或组合键。"
 }

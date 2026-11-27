@@ -1,6 +1,6 @@
-//! Battery overlay: a small always-on-top window with every controller's
-//! battery, shown for a few seconds by a mapping (Show battery overlay) and
-//! optionally when a controller runs low.
+//! Battery status, shown for a few seconds by a mapping and optionally when
+//! a controller runs low. Windows uses an overlay and Linux uses a desktop
+//! notification with the active profile.
 //!
 //! The window lives on its own thread with its own message loop, like the
 //! tray icon, so it shows while the main window is hidden. That thread
@@ -86,16 +86,39 @@ pub fn show(engine: &Arc<Engine>, corner: OverlayCorner, ms: u32) {
     SHOWN.lock().push((corner, ms));
     #[cfg(windows)]
     if !cfg!(test) { window::show(engine, corner, ms); }
+    #[cfg(all(target_os = "linux", not(test)))]
+    desktop::show(engine, ms);
     #[cfg(not(all(windows, not(test))))]
     let _ = (engine, corner, ms);
 }
 
 #[cfg(windows)]
 mod window;
+#[cfg(target_os = "linux")]
+mod desktop;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn desktop_status_uses_live_battery_and_active_profile() {
+        let dir = std::env::temp_dir().join(format!("dualwave-battery-status-{}", std::process::id()));
+        let engine = Engine::new(dir.clone());
+        let device = crate::device::Device::for_test(ds_proto::Connection::Bluetooth, "");
+        engine.devices.write().push(Arc::clone(&device));
+        device.live.lock().input = battery(60, BatteryStatus::Charging);
+        let name = engine.profiles.add(crate::profile::Profile::named("Couch <test> & audio"));
+        engine.set_device_profile(&device, &name);
+        let body = desktop::body(&engine);
+        assert!(body.contains("DualSense"));
+        assert!(body.contains("65%"));
+        assert!(body.contains("Bluetooth"));
+        assert!(body.contains("Couch &lt;test&gt; &amp; audio"));
+        drop(engine);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn battery(percent: u8, status: BatteryStatus) -> InputState {
         InputState {

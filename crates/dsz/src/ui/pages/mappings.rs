@@ -86,7 +86,7 @@ const KINDS: &[(AKind, &str)] = &[
     (AKind::Gyro, "Toggle gyro"),
     (AKind::GyroEnabled, "Enable / disable gyro"),
     (AKind::Touch, "Toggle touchpad mouse"),
-    (AKind::Battery, "Show battery overlay"),
+    (AKind::Battery, if cfg!(target_os = "linux") { "Show controller status" } else { "Show battery overlay" }),
     (AKind::Run, "Open a program / file"),
     (AKind::Profile, "Switch to profile"),
     (AKind::HoldProfile, "Use profile while held"),
@@ -130,7 +130,7 @@ pub(crate) fn action_editor(
             .selected_text(crate::i18n::tr(if primary { "More actions" } else if original_label && k == AKind::None { "Original" } else { KINDS.iter().find(|x| x.0 == k).map_or("More actions", |x| x.1) }))
             .show_ui(ui, |ui| {
                 for &(kind, label) in KINDS {
-                    if kind == AKind::Battery && !cfg!(windows) { continue; }
+                    if kind == AKind::Battery && !cfg!(any(windows, target_os = "linux")) { continue; }
                     if kind == AKind::Text && !cfg!(windows) { continue; }
                     if matches!(kind, AKind::Player | AKind::GameVolumeUp | AKind::GameVolumeDown) && !cfg!(target_os = "linux") { continue; }
                     if matches!(kind, AKind::Key | AKind::Mouse | AKind::Gamepad | AKind::Macro) { continue; }
@@ -204,20 +204,19 @@ pub(crate) fn action_editor(
                         .on_hover_text(crate::i18n::tr("Off keeps the gyro off, even while its activation button is held. On brings back the profile's gyro and its activation rule. Toggle gyro instead turns the gyro on all the time."));
                 }
                 Action::ShowBatteryOverlay { corner, ms } => {
-                    if !cfg!(windows) {
-                        muted(ui, crate::i18n::tr("Battery overlay is available on Windows."));
+                    if cfg!(windows) {
+                        fit(ui, 130.0);
+                        egui::ComboBox::from_id_salt(("map-overlay-corner", i))
+                            .width(130.0)
+                            .selected_text(crate::i18n::tr(corner.label()))
+                            .show_ui(ui, |ui| {
+                                for c in crate::settings::OverlayCorner::ALL {
+                                    ui.selectable_value(corner, c, crate::i18n::tr(c.label()));
+                                }
+                            })
+                            .response
+                            .on_hover_text(crate::i18n::tr("Not over games in exclusive fullscreen; borderless and windowed work"));
                     }
-                    fit(ui, 130.0);
-                    egui::ComboBox::from_id_salt(("map-overlay-corner", i))
-                        .width(130.0)
-                        .selected_text(crate::i18n::tr(corner.label()))
-                        .show_ui(ui, |ui| {
-                            for c in crate::settings::OverlayCorner::ALL {
-                                ui.selectable_value(corner, c, crate::i18n::tr(c.label()));
-                            }
-                        })
-                        .response
-                        .on_hover_text(crate::i18n::tr("Not over games in exclusive fullscreen; borderless and windowed work"));
                     fit(ui, 220.0);
                     ui.add(egui::Slider::new(ms, crate::battery_overlay::MIN_MS..=crate::battery_overlay::MAX_MS).step_by(100.0).suffix(" ms").text(crate::i18n::tr("show for")));
                 }
@@ -492,8 +491,12 @@ pub(crate) fn focus_mapping(ctx: &egui::Context, index: usize) {
 }
 
 fn advanced_editor(ui: &mut egui::Ui, m: &mut Mapping, i: usize, edge: bool) {
-    if !m.with.is_empty() || m.mute || m.gesture != Gesture::Press {
+    if m.layer.is_some() || !m.with.is_empty() || m.mute || m.gesture != Gesture::Press {
         ui.horizontal_wrapped(|ui| {
+            if let Some(modifier) = m.layer {
+                ui.label(crate::i18n::tr("Held layer"));
+                ui.label(crate::i18n::tr(modifier.short_name()));
+            }
             if !m.with.is_empty() {
                 ui.label(crate::i18n::tr("Together with"));
                 ui.label(m.with.iter().map(|b| crate::i18n::tr(b.short_name())).collect::<Vec<_>>().join(" + "));
@@ -504,6 +507,19 @@ fn advanced_editor(ui: &mut egui::Ui, m: &mut Mapping, i: usize, edge: bool) {
         });
     }
     ui.collapsing(crate::i18n::tr("Advanced"), |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(crate::i18n::tr("Held layer"))
+                .on_hover_text(crate::i18n::tr("Hold this button to use this mapping layer. It replaces the base mappings for this button."));
+            let label = m.layer.map_or("None", |b| b.short_name());
+            egui::ComboBox::from_id_salt(("map-layer", i)).width(170.0).selected_text(crate::i18n::tr(label)).show_ui(ui, |ui| {
+                ui.selectable_value(&mut m.layer, None, crate::i18n::tr("None"));
+                for b in button_choices(edge) {
+                    if b != m.button {
+                        ui.selectable_value(&mut m.layer, Some(b), crate::i18n::tr(b.short_name()));
+                    }
+                }
+            });
+        });
         ui.horizontal_wrapped(|ui| {
             ui.label(crate::i18n::tr("Together with"));
             let mut chosen = m.with.clone();
@@ -522,7 +538,7 @@ fn advanced_editor(ui: &mut egui::Ui, m: &mut Mapping, i: usize, edge: bool) {
             });
             if changed { chosen.sort(); m.with = chosen; }
         });
-        let suppression_help = crate::i18n::tr(if m.is_combo() { "The virtual controller hides these buttons only while the combination is held." } else { "The original button is hidden only on the virtual controller." });
+        let suppression_help = crate::i18n::tr(if m.is_combo() || m.layer.is_some() { "The virtual controller hides these buttons only while the combination is held." } else { "The original button is hidden only on the virtual controller." });
         ui.checkbox(&mut m.mute, crate::i18n::tr("Hide from game")).on_hover_text(suppression_help);
         if m.mute { muted(ui, suppression_help); }
         match m.gesture {

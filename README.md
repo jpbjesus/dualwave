@@ -65,7 +65,7 @@ consult its release notes before downloading.
 | Agent configuration | Opt-in local CLI and stdio MCP for Codex, Claude and other agents; edit profiles, actions and macros while the app is open, with revision checks to protect recent edits |
 | Headphone equalizer | Optional per-profile bass, mids and treble controls (±12 dB), with Flat, More bass and Clear voices presets; automatic headroom and smooth adjustments on DualSense Bluetooth headphone playback and opt-in USB game-speaker playback; disabled by default, leaving haptics, microphone and the internal speaker unchanged |
 | Active game volume (Linux) | Opt-in actions adjust only the focused detected game and its child processes by 5 percentage points, preserving channel balance and mute; KDE Plasma Wayland or X11; PulseAudio/PipeWire-Pulse playback streams; no system-volume fallback, no change when focus or audio cannot be identified |
-| Input mappings | Keyboard, mouse and controller actions; combinations, long press, double tap and suppression of original virtual buttons; a clickable controller, keycap previews, shortcut presets, key capture and visual macro steps with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
+| Input mappings | Keyboard, mouse and controller actions; held mapping layers, combinations, long press, double tap and suppression of original virtual buttons; a clickable controller, keycap previews, shortcut presets, key capture and visual macro steps with timed presses and pauses, single playback or repetition, and cancellation on profile changes |
 | Media players | Optional Linux actions for one selected running MPRIS player: play/pause, next/previous track, stop and player volume in 5% steps; no fallback to other players or automatic player launch |
 | Motion and touch | Gyro aiming, touchpad mouse control, stick modes, activation buttons and activation by touching a touchpad third; optional flick stick with calibrated pixels per full turn, horizontal rotation and a 100 ms initial turn; a temporary 360° sensitivity test with a five-second delay |
 | Stick calibration | Per-direction reach adjustment at 16 angles, guided calibration and a preview applied only to virtual stick output; disabled by default |
@@ -73,14 +73,15 @@ consult its release notes before downloading.
 | Controller power | Turn off the connected Bluetooth controller directly from the home page |
 | Upstream 0.4.26–0.4.28 | A mapping enables or disables the gyro while keeping the profile’s activation rule. With virtual output off, native games retain their own rumble and trigger effects. The USB game-haptics test requires a virtual DualSense. Hardware validation pending |
 | Battery overlay (Windows) | A button or combo shows the connected controllers’ battery, connection and charge status. Pick its corner and duration in Button mapping. Settings → Battery overlay previews it and offers optional low-battery warnings. The overlay keeps game focus and works on the desktop and in windowed or borderless games |
+| Controller status (Linux) | An opt-in button or combo shows battery, connection and active profile in Plasma's on-screen display or a silent notification on other desktops. Preview it and enable optional low-battery warnings in Preferences. Plasma controls placement and duration. |
 | Upstream 0.4.10–0.4.25 | Optional trigger conditions, per-trigger game-effect strength, classic rumble during audio, turbo timing variation and battery bars that follow the selected color theme; touchpad suppression and rumble/audio timing fixes; Simplified Chinese alongside European Portuguese; Windows-only text typing, administrator mode, Game Bar input recovery and native ARM64 support. Linux audio, focus selection, themes and opt-in defaults retained. Hardware validation pending |
 | Upstream 0.4.6–0.4.9 | Optional gyro angle catch-up, held-profile button presses, remembered game-profile choices, independent USB game-speaker playback, battery-range midpoint display, game-helper filtering, attach-race handling and Windows HidHide repair; Linux backends and existing defaults retained. Hardware validation pending |
 | Upstream 0.4.5 | Gyro output to the right stick, Quick Charge, game audio gain and speaker amplifier controls;  Hold a button to use another profile without reconnecting the virtual pad; experimental DualShock 4 Bluetooth audio (off by default); virtual microphone alongside Xbox 360 and DualShock 4 output. Hardware validation pending |
 | Profiles and games | Favorite profiles first in the profile list and selector, and in a separate leading group in the Linux tray; optional foreground-game selection on KDE Plasma 6 and X11; executable associations, process discovery, automatic switching, manual session priority, import/export and backups; DualWave excludes its own executable and AppImage from native-game detection |
 | Integrations | Local DSU motion server and UDP mod API; RacingDSX users must switch its App Check off to send to DSZ |
 | Interface | Controller workspace with the build version, gyro activation, touchpad and stick quick controls and direct full-editor links; short page/inspector transitions respecting reduced motion; direct tabs for each full editor; separate edited-profile, applied-profile and actual-output labels; direct controller-region selection, vector button symbols, English, European Portuguese, Brazilian Portuguese and Spanish; light/dark/system appearance, saved Classic/Arctic/Tidal/Iris/Ember color themes with previews, compact Bluetooth/USB status icon beside the controller power control and reduced motion |
-| Desktop integration | Controller tray icon with a proportional battery overlay, charging/full indicators and percentage on hover (lowest known charge when multiple controllers are connected); startup preferences and device naming; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
-| Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report; live touchpad/gyro mouse and physical input isolation states, with steps to check duplicate mouse input from Linux or Steam |
+| Desktop integration | Controller tray icon with a proportional battery overlay, charging/full indicators and percentage on hover (lowest known charge when multiple controllers are connected); startup preferences and device naming; on Wayland, closing exits the app and minimizing uses the desktop taskbar; alpha builds check published GitHub pre-releases and compare alpha version numbers correctly |
+| Diagnostics | Connection state, automatic media recovery, endpoint recreation and a sanitized diagnostic report; active virtual controller model and a Linux warning when physical input is not isolated; live touchpad/gyro mouse and physical input isolation states |
 
 Flick stick is selected per stick in **Motion & touch**. Set **Pixels per full turn**
 for the game's mouse sensitivity and disable mouse acceleration in the game.
@@ -159,6 +160,15 @@ reports arrive late, and missed steps are never sent as a catch-up burst.
 Playback is limited to the first 128 steps and 60 seconds per hold or pause.
 These features require explicit selection; existing profiles retain their modes.
 Hardware and game calibration validation is pending.
+
+In **Buttons → Advanced → Held layer**, choose a modifier for a mapping.
+Mappings assigned to the same modifier act as a layer while that button is
+held. For each button covered by the layer, it replaces the base mappings for
+that button. Other buttons keep their base mappings. If two held modifiers
+cover the same button, the first enabled mapping in the profile decides which
+layer wins. Use **Hide from game** to suppress the original virtual-pad input.
+Changing layers releases mapped actions and leaves a held button waiting for
+its next press. Existing mappings default to the base layer.
 
 ## Inside the app
 
@@ -536,45 +546,185 @@ controller's touchpad to a mouse.
 
 ### Configure with agents (CLI and MCP)
 
-Enable **Preferences → Integrations → Agent access → Allow local configuration**
-in the running DualWave app. Access is off by default. Disabling it disconnects
-clients and removes the local endpoint. Both adapters use the same authenticated
-loopback interface; neither starts the GUI, downloads an agent, or opens a controller.
+DualWave exposes one authenticated local configuration API through two adapters:
+a JSON CLI and a stdio MCP server. Both can read and edit profiles, mappings,
+actions, macros and a small set of app settings while the GUI is running. Access
+is off by default.
+
+Enable **Preferences → Integrations → Agent access → Allow local configuration**.
+Disabling it disconnects clients and removes the local endpoint. Neither adapter
+starts the GUI, downloads an agent, opens a controller or injects input by
+itself. Agent edits affect controllers already using the edited profile.
 
 The source executable is `dsz` (`dsz.exe` on Windows); installed Linux packages
-use `dualwave` instead. `dualwave-cli` is the separate audio bridge. CLI output is JSON with `ok` and
-`result` or `error`; errors return exit code 1. Operation and JSON names stay in English.
+use `dualwave` instead. `dualwave-cli` is the separate audio bridge, not this
+configuration CLI. Operation names, argument names and JSON keys are English
+and do not change with the interface language.
+
+#### Read-before-write workflow
+
+Follow this order; it avoids stale edits and lost mappings:
+
+1. `describe` once per session for the operation list, defaults, buttons, key
+   codes and writable settings.
+2. `list_profiles` and `list_devices` to discover names and connected devices.
+3. `get_profile` before editing. It returns the full profile and the current
+   **profile revision**.
+4. Send that revision as `expected_revision` to `patch_profile`, `set_mapping`
+   or `remove_mapping`.
+5. Read the profile again if you need to make another change. Successful writes
+   return the new revision, which the next write can use.
+
+The revision covers the whole profile store, not one profile. If the GUI or
+another agent saves anything while you hold an old revision, the write fails
+with `Revision conflict: read the current configuration and retry with its
+revision`. Re-read and retry; never retry blindly with an old revision.
+
+#### CLI
 
 ```sh
 dsz --agent help
-dsz --agent list_devices
-dsz --agent list_profiles
 dsz --agent describe
+dsz --agent list_profiles
 dsz --agent get_profile '{"profile":"Xbox"}'
+dsz --agent set_mapping --file arguments.json
 ```
 
-`describe` lists the supported buttons, virtual key codes, defaults and operation
-arguments. To add Alt+Tab, read the target profile first, then use its returned
-`revision` as `expected_revision` (replace `1` below with that value):
+Arguments are a single JSON object. With no argument the CLI sends `{}`. For
+shells where quoting is awkward, write a UTF-8 JSON file and use
+`--file <path>`; arguments are limited to 1 MiB. Output is one JSON line:
 
-```sh
-dsz --agent set_mapping '{"profile":"Xbox","expected_revision":1,"mapping":{"button":"Ps","mode":"Tap","action":{"kind":"macro","steps":[{"input":{"kind":"key","vk":9,"alt":true},"hold_ms":50,"wait_ms":50}]}}}'
+```json
+{"ok":true,"result":{"profiles":["Xbox","DualSense"],"revision":7}}
+{"ok":false,"error":"Profile not found"}
 ```
 
-This appends a mapping without replacing the others. Choose the button you want;
-`Ps` is only an example. Use `index` to replace an existing mapping, or
-`remove_mapping` with an index to remove one. For shells where JSON quoting is
-awkward, save the arguments to a UTF-8 file and use
-`dsz --agent set_mapping --file arguments.json`.
+Exit code is `0` when `ok` is true and `1` otherwise. The CLI reads the running
+app's `agent-endpoint.json`, containing a loopback port and a per-session token.
+If the app uses `DSZ_DATA_DIR`, give the CLI or MCP process the same value. The
+token is private; do not print it, commit it or send it to another machine.
 
-On Linux, mapping actions `{"kind":"game_volume_up"}` and
-`{"kind":"game_volume_down"}` change only the game in the foreground. They require
-a detected game (or an enabled game rule), identifiable playback process PIDs,
-and a running PulseAudio or PipeWire-Pulse server. Proton helpers are included
-only when they descend from the focused game's detected process. Unidentified
-or sandboxed audio processes are left alone. Raises stop at 100%; existing
-boosted volumes can still be lowered. Muted streams stay muted. These actions
-are separate from media keys, which continue to control system volume.
+#### Operations
+
+All operations are available through both CLI and MCP.
+
+| Operation | Type | Arguments |
+| --- | --- | --- |
+| `describe` | read | none |
+| `list_devices` | read | none |
+| `list_profiles` | read | none |
+| `get_profile` | read | `profile` |
+| `get_settings` | read | none |
+| `create_profile` | write | `name`, optional `source` |
+| `patch_profile` | write | `profile`, `expected_revision`, `patch` |
+| `set_mapping` | write | `profile`, `expected_revision`, `mapping`, optional `index` |
+| `remove_mapping` | write | `profile`, `expected_revision`, `index` |
+| `apply_profile` | write | `profile`, `device_id` |
+| `patch_settings` | write | `expected_revision`, `patch` |
+
+`describe` returns the tool schemas plus `default_profile` (a complete profile
+shape), `default_mapping`, `buttons` (JSON value and label), `keys` (common
+virtual-key codes and names), `game_volume_actions`, `player_commands`,
+`player_action_example` and `writable_settings`. Use those returned values as
+the source of truth.
+
+`list_devices` returns `id`, product `name` and active `profile` for each
+connected controller. `list_profiles` returns `profiles` and the shared
+`revision`. `get_profile` returns `profile` and `revision`. `get_settings`
+returns all `settings` and their separate `revision`.
+
+`create_profile` copies `source` when provided, otherwise starts from defaults.
+The name must be unique (case-insensitive), file-safe and at most 120 bytes;
+avoid `< > : " / \ | ? *` and control characters. It returns the created
+profile and the new revision.
+
+`patch_profile` merges objects recursively and replaces arrays. Send only the
+fields you want to change; unknown fields, including nested ones, are rejected.
+The profile name cannot be patched. Because arrays replace, do not send
+`mappings` unless you have the complete list: use `set_mapping` and
+`remove_mapping` for individual mappings instead.
+
+`set_mapping` appends when `index` is omitted. Otherwise the zero-based `index`
+must be at most the current mapping count: below the count it replaces that
+mapping, and equal to the count it appends. `remove_mapping` removes the mapping
+at `index`. Both return the new
+revision; `set_mapping` also returns the affected `index`. Successful writes
+return the revision so the next call can use it.
+
+`apply_profile` selects an existing profile for one connected `device_id`
+immediately, using the same path as manual selection in the UI. It does not
+take a revision and does not edit the profile.
+
+`patch_settings` accepts only the writable top-level keys listed below and
+requires the settings revision from `get_settings`. It merges the patch into the
+current settings; arrays inside the patch replace.
+
+#### Mappings and actions
+
+A mapping is a JSON object with these fields. `describe.default_mapping` shows
+the current defaults.
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `enabled` | Whether the mapping is active | `true` |
+| `button` | Button that triggers it | `"Cross"` |
+| `with` | Extra buttons that must be held (a combo) | `[]` |
+| `mute` | Hide the mapped buttons from the virtual controller | `false` |
+| `gesture` | `"Press"`, `"LongPress"` or `"DoubleTap"` | `"Press"` |
+| `mode` | `"Hold"`, `"Tap"`, `"Turbo"` or `"Toggle"` | `"Hold"` |
+| `action` | Action object; see below | `{"kind":"none"}` |
+| `turbo_ms` | Turbo repeat interval | `80` |
+| `long_ms` | Long-press threshold | `500` |
+| `double_ms` | Double-tap window | `400` |
+
+Buttons are the DualSense names: `Cross`, `Circle`, `Square`, `Triangle`, `L1`,
+`R1`, `L2`, `R2`, `Create`, `Options`, `L3`, `R3`, `Ps`, `Touchpad`, `Mute`,
+`DpadUp`, `DpadDown`, `DpadLeft`, `DpadRight`, `FnLeft`, `FnRight`,
+`PaddleLeft`, `PaddleRight`, `TouchpadLeft`, `TouchpadCenter`, `TouchpadRight`.
+`FnLeft`, `FnRight`, `PaddleLeft` and `PaddleRight` are DualSense Edge buttons.
+The three `Touchpad*` buttons are derived from the touch position.
+
+An action is tagged by `kind`. These are accepted by agent access:
+
+| `kind` | JSON example | Notes |
+| --- | --- | --- |
+| `none` | `{"kind":"none"}` | No output |
+| `key` | `{"kind":"key","vk":65,"ctrl":true}` | `vk` 1–254; modifiers `ctrl`, `shift`, `alt`, `win` are optional booleans |
+| `mouse` | `{"kind":"mouse","button":"Left"}` | `Left`, `Right`, `Middle`, `Back`, `Forward` |
+| `macro` | `{"kind":"macro","steps":[{"input":{"kind":"key","vk":9,"alt":true},"hold_ms":50,"wait_ms":50}]}` | At most 128 steps; `hold_ms` and `wait_ms` up to 60000 |
+| `scroll_up` | `{"kind":"scroll_up"}` | Mouse wheel |
+| `scroll_down` | `{"kind":"scroll_down"}` | Mouse wheel |
+| `media` | `{"kind":"media","key":"PlayPause"}` | `PlayPause`, `Next`, `Previous`, `Stop`, `VolumeUp`, `VolumeDown`, `Mute` |
+| `player` | `{"kind":"player","player":"org.mpris.MediaPlayer2.vlc","command":"PlayPause"}` | Linux MPRIS; `player` must start with `org.mpris.MediaPlayer2.` |
+| `game_volume_up` | `{"kind":"game_volume_up"}` | Linux; adjusts the foreground detected game only |
+| `game_volume_down` | `{"kind":"game_volume_down"}` | Linux; adjusts the foreground detected game only |
+| `next_profile` | `{"kind":"next_profile"}` | Switches to the next profile |
+| `previous_profile` | `{"kind":"previous_profile"}` | Switches to the previous profile |
+| `toggle_gyro_mouse` | `{"kind":"toggle_gyro_mouse"}` | Toggles gyro mouse |
+| `toggle_touchpad_mouse` | `{"kind":"toggle_touchpad_mouse"}` | Toggles touchpad mouse |
+| `profile` | `{"kind":"profile","name":"DualSense"}` | Switches this controller to a named profile |
+| `hold_profile` | `{"kind":"hold_profile","name":"Shooter","then":"Desktop","press":true}` | Uses a profile while the buttons are held; `then` is optional |
+| `gamepad` | `{"kind":"gamepad","button":"Cross"}` | Presses a button on the active virtual controller |
+| `xbox` | `{"kind":"xbox","button":"Guide"}` | Presses an Xbox button on the virtual Xbox pad or helper |
+| `turn_off_controller` | `{"kind":"turn_off_controller"}` | Bluetooth power-off; USB stays on |
+
+`run` (executable) actions cannot be created through agent access. Macro inputs
+use the same `key`, `mouse` and `gamepad` shapes as actions. Player commands are
+`PlayPause`, `Next`, `Previous`, `Stop`, `VolumeUp` and `VolumeDown`. Xbox
+buttons are `Guide`, `A`, `B`, `X`, `Y`, `LB`, `RB`, `LT`, `RT`, `View`, `Menu`,
+`LS`, `RS`, `Up`, `Down`, `Left` and `Right`.
+
+Any virtual-key code from 1 to 254 is accepted; `describe.keys` lists the common
+picker codes. Key names in `describe` are for display only, not input values.
+
+On Linux, `game_volume_up` and `game_volume_down` change only the game in the
+foreground. They require a detected game (or an enabled game rule), identifiable
+playback process PIDs, and a running PulseAudio or PipeWire-Pulse server. Proton
+helpers are included only when they descend from the focused game's detected
+process. Unidentified or sandboxed audio processes are left alone. Raises stop
+at 100%; existing boosted volumes can still be lowered. Muted streams stay
+muted. These actions are separate from media keys, which continue to control
+system volume.
 
 Headphone EQ is saved in `haptics.headset_eq`, with `enabled` (default `false`)
 and `bass_db`, `mid_db`, `treble_db` (default `0`, playback range −12 to +12 dB).
@@ -586,16 +736,28 @@ microphone bypass it. Positive boosts reduce the overall level automatically to
 leave headroom. Switching EQ off fades briefly back to the unprocessed stream;
 while inactive, the original PCM and encoded packets are unchanged.
 
-`create_profile` optionally copies a `source`. `patch_profile` merges objects and
-replaces arrays; unknown fields are rejected. Profile edits affect controllers
-already using that profile. `apply_profile` takes a `profile` and a connected
-`device_id` from `list_devices`; it uses the same manual selection as the UI.
-`get_settings` and `patch_settings` support the appearance, language, tips,
-interface size, idle timer, default profile and automatic profile selection.
-`patch_settings` also requires the settings revision. Agent access, input CRC
-checks and executable actions cannot be enabled or created by an agent.
+#### Writable settings
 
-For MCP clients, configure a stdio server with the absolute executable path:
+`patch_settings` accepts only these keys. `get_settings` returns the full
+settings object, but other keys are not writable through agent access.
+
+| Key | Values |
+| --- | --- |
+| `language` | `"en"`, `"pt-BR"`, `"pt-PT"`, `"es"` |
+| `appearance` | `"System"`, `"Light"`, `"Dark"` |
+| `reduced_motion` | Boolean |
+| `show_tips` | Boolean |
+| `ui_scale` | Number, 0.8–1.6 |
+| `idle_off_minutes` | Integer, 0–60 |
+| `default_profile` | Name of an existing profile |
+| `auto_profiles` | Boolean |
+
+Agent access, input CRC checks, startup behavior and executable actions cannot
+be enabled or changed by an agent.
+
+#### MCP
+
+Configure a stdio server with the absolute executable path:
 
 ```json
 {
@@ -610,11 +772,95 @@ For MCP clients, configure a stdio server with the absolute executable path:
 
 Use the equivalent `command` and `args` fields in your agent's MCP configuration.
 All CLI operations are also MCP tools. The transport follows the
-[MCP stdio specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
-DualWave must remain open with agent access enabled. If the app uses
-`DSZ_DATA_DIR`, give the CLI or MCP process the same environment variable.
-The discovery file `agent-endpoint.json` contains a per-session access token;
-on Linux it is created with owner-only permissions. Keep it private.
+[MCP stdio specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports):
+one JSON-RPC 2.0 object per line, with stdout reserved for protocol messages.
+
+The client must send `initialize` (with `protocolVersion`, `clientInfo` and
+`capabilities`), then the `notifications/initialized` notification, before
+calling tools. Supported protocol versions are `2024-11-05`, `2025-03-26`,
+`2025-06-18` and `2025-11-25`; an unknown requested version falls back to
+`2025-11-25`. `ping`, `tools/list` and `tools/call` are supported. Requests
+before initialization, or before the initialized notification, return JSON-RPC
+error `-32002`.
+
+A successful `tools/call` wraps the operation result as JSON text:
+
+```json
+{"content":[{"type":"text","text":"{\"profiles\":[\"Xbox\"],\"revision\":7}"}],"isError":false}
+```
+
+An operation failure sets `isError` to `true` and puts the error message in the
+same text field; it is not a JSON-RPC error. Unknown tools and malformed
+arguments use JSON-RPC error `-32602`.
+
+#### Safety and common errors
+
+- Read a profile before editing, preserve unrelated mappings, and use the new
+  revision returned by each successful write.
+- Never enable agent access or weaken CRC checks through automation; these are
+  user-only settings.
+- Keep the endpoint token and `agent-endpoint.json` private.
+- A missing endpoint means the app is not running or access is disabled.
+- The app must remain open. A hidden window or tray state is fine; closing the
+  app disconnects clients.
+
+| Error | Meaning |
+| --- | --- |
+| `Open DualWave and enable Agent access in Preferences → Integrations` | No endpoint file for this data directory |
+| `DualWave agent access unavailable: ...` | App closed or endpoint unreachable |
+| `Agent access disabled` | The user turned access off |
+| `Revision conflict: read the current configuration and retry with its revision` | Stale `expected_revision` |
+| `Profile not found` / `Device not connected` | Re-read `list_profiles` / `list_devices` |
+| `Unknown field: ...` / `Unknown argument: ...` | Nested or top-level key is not accepted |
+| `Executable actions cannot be created through agent access` | `run` actions are user-only |
+| `Key code must be between 1 and 254` | Invalid virtual-key code |
+| `Mapping index out of range` | Re-read the profile; indexes changed |
+| `Configuration is busy; no changes applied` | Retry after the next UI frame |
+| `Arguments exceed 1 MiB` | Use `--file` or shorten the request |
+
+#### Recipes
+
+The `expected_revision` values below are examples. Always use the revision
+returned by your last read or write.
+
+Add a keyboard mapping without replacing existing ones:
+
+```sh
+dsz --agent set_mapping '{"profile":"Xbox","expected_revision":7,"mapping":{"button":"Ps","mode":"Tap","action":{"kind":"macro","steps":[{"input":{"kind":"key","vk":9,"alt":true},"hold_ms":50,"wait_ms":50}]}}}'
+```
+
+Add Ctrl+A on Cross:
+
+```sh
+dsz --agent set_mapping '{"profile":"Xbox","expected_revision":8,"mapping":{"button":"Cross","action":{"kind":"key","vk":65,"ctrl":true}}}'
+```
+
+Add a combo that changes only the foreground game volume on Linux:
+
+```sh
+dsz --agent set_mapping '{"profile":"Xbox","expected_revision":9,"mapping":{"button":"DpadUp","with":["Create"],"mode":"Turbo","mute":true,"action":{"kind":"game_volume_up"}}}'
+```
+
+Create a profile from an existing one and enable the More bass EQ preset:
+
+```sh
+dsz --agent create_profile '{"name":"Shooter","source":"Xbox"}'
+dsz --agent get_profile '{"profile":"Shooter"}'
+dsz --agent patch_profile '{"profile":"Shooter","expected_revision":10,"patch":{"haptics":{"headset_eq":{"enabled":true,"bass_db":6.0,"mid_db":-1.0,"treble_db":0.0}}}}'
+```
+
+Apply it to a controller returned by `list_devices`:
+
+```sh
+dsz --agent apply_profile '{"profile":"Shooter","device_id":0}'
+```
+
+Change the interface language:
+
+```sh
+dsz --agent get_settings
+dsz --agent patch_settings '{"expected_revision":4,"patch":{"language":"pt-PT"}}'
+```
 
 ### Diagnostics and system support
 
@@ -623,13 +869,15 @@ on Linux it is created with owner-only permissions. Keep it private.
 
 ```sh
 cargo run -p dualwave -- list
-cargo run -p dualwave -- probe
+cargo run -p dualwave -- probe --seconds 20
 cargo run -p dualwave -- tone --seconds 10 --volume 60
 cargo run -p dualwave -- mic-probe --source headset --seconds 10
 cargo run -p dualwave -- run --source auto --volume 60
 ```
 
 `list` reads sysfs; `probe` reads status and a CRC-checked firmware feature report.
+With `--seconds`, it also prints headphone and headset microphone plug changes
+from CRC-checked input reports without starting audio.
 `pipewire-probe --seconds 10` exposes endpoints without opening or writing to a
 controller. `tone`, `mic-probe` and `run` explicitly start their corresponding
 sessions. Source choices are `auto`, `builtin` and `headset`; `--seconds N` bounds
@@ -795,6 +1043,8 @@ DSZ's protocol code was written from public documentation and code with open lic
 | Source | License | Used for |
 |---|---|---|
 | [W3C Audio EQ Cookbook](https://www.w3.org/TR/audio-eq-cookbook/) | W3C permissive document license | RBJ low/high shelf and peaking biquad formulas for optional stereo headphone equalization |
+| [Desktop Notifications Specification](https://specifications.freedesktop.org/notification/latest/) | Public specification | Linux controller status notifications over session D-Bus |
+| [KDE Plasma OSD service](https://github.com/KDE/plasma-workspace/blob/master/shell/osd.cpp) | Public D-Bus interface | Linux controller status on Plasma, including fullscreen games |
 | [PulseAudio introspection and volume API](https://freedesktop.org/software/pulseaudio/doxygen/introspect.html) and [process properties](https://freedesktop.org/software/pulseaudio/doxygen/proplist_8h.html) | Public API documentation; libpulse is LGPL-2.1-or-later | Per-game playback volume through native PulseAudio/PipeWire-Pulse, matched by process PID |
 | [MPRIS 2.2 specification](https://specifications.freedesktop.org/mpris/latest/) | Public interface specification | Explicit running-player selection, playback capabilities and per-player volume over session D-Bus |
 | [KWin scripting API](https://develop.kde.org/docs/plasma/kwin/api/) and [EWMH window properties](https://specifications.freedesktop.org/wm/latest/ar01s05.html) | Public API documentation | Optional foreground-window PID observations through KWin session D-Bus or X11 |

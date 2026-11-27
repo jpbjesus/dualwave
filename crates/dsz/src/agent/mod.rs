@@ -47,11 +47,12 @@ fn merge(target: &mut Value, patch: &Value) {
 }
 
 fn validate_mapping(m: &Mapping) -> Result<(), String> {
+    if m.layer == Some(m.button) { return Err("The layer modifier must differ from the mapped button".into()); }
     let key_ok = |vk: u16| (1..=254).contains(&vk);
     match &m.action {
         Action::Player { player, .. } if !crate::profile::valid_player_target(player) => return Err("Select a valid MPRIS player destination".into()),
         Action::Text { .. } if !cfg!(windows) => return Err("Typing text is only available on Windows".into()),
-        Action::ShowBatteryOverlay { .. } if !cfg!(windows) => return Err("Battery overlay is available on Windows".into()),
+        Action::ShowBatteryOverlay { .. } if !cfg!(any(windows, target_os = "linux")) => return Err("Controller status is available on Windows and Linux".into()),
         Action::Text { text } if text.len() > 16384 => return Err("Text must be at most 16384 bytes".into()),
         Action::Run { .. } => return Err("Executable actions cannot be created through agent access".into()),
         Action::Key { vk, .. } if !key_ok(*vk) => return Err("Key code must be between 1 and 254".into()),

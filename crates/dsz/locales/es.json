@@ -1,4 +1,7 @@
 {
+  "Held layer": "Capa al mantener pulsado",
+  "Hold this button to use this mapping layer. It replaces the base mappings for this button.": "Mantén pulsado este botón para usar la capa. Sustituye las asignaciones base de este botón.",
+  "Steam or the game may receive input from both controllers.": "Steam o el juego pueden recibir entradas de ambos mandos.",
   "Language": "Idioma",
   "Interface language": "Idioma de la interfaz",
   "Applied immediately and saved automatically": "Se aplica al instante y se guarda automáticamente",
@@ -1154,5 +1157,8 @@
   "Not over games in exclusive fullscreen; borderless and windowed work": "No aparece sobre juegos en pantalla completa exclusiva; sin bordes y en ventana funcionan",
   "To show it with a button, map one to Show battery overlay on the Button mapping page, and pick its corner and time there.": "Para mostrarla con un botón, asigna uno a Mostrar superposición de batería en la página Asignación de botones y elige allí la esquina y el tiempo.",
   "Show for": "Mostrar durante",
-  "Battery overlay is available on Windows.": "La superposición de batería está disponible en Windows."
+  "Controller status": "Estado del mando",
+  "Show controller status": "Mostrar estado del mando",
+  "Show the battery and active profile on screen": "Muestra la batería y el perfil activo en pantalla",
+  "In Button mapping, assign Show controller status to a button or combination.": "En Asignación de botones, asigna Mostrar estado del mando a un botón o combinación."
 }

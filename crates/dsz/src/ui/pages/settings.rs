@@ -138,18 +138,20 @@ impl App {
                         }
                     }
                     }
-                    changed |= toggle_row(
-                        ui,
-                        crate::i18n::tr("Close to tray"),
-                        crate::i18n::tr(if cfg!(target_os = "linux") { "The X button keeps it running when a tray is available" } else { "The X button keeps it running in the background" }),
-                        &mut s.close_to_tray,
-                    );
-                    changed |= toggle_row(
-                        ui,
-                        crate::i18n::tr("Minimize to tray"),
-                        crate::i18n::tr(if cfg!(target_os = "linux") { "Hide to the tray when available; otherwise minimize normally" } else { "The minimize button hides the window to the tray instead of the taskbar" }),
-                        &mut s.minimize_to_tray,
-                    );
+                    ui.add_enabled_ui(crate::ui::supports_window_hiding(), |ui| {
+                        changed |= toggle_row(
+                            ui,
+                            crate::i18n::tr("Close to tray"),
+                            crate::i18n::tr(if cfg!(target_os = "linux") { "The X button keeps it running when a tray is available" } else { "The X button keeps it running in the background" }),
+                            &mut s.close_to_tray,
+                        );
+                        changed |= toggle_row(
+                            ui,
+                            crate::i18n::tr("Minimize to tray"),
+                            crate::i18n::tr(if cfg!(target_os = "linux") { "Hide to the tray when available; otherwise minimize normally" } else { "The minimize button hides the window to the tray instead of the taskbar" }),
+                            &mut s.minimize_to_tray,
+                        );
+                    });
                     let hint = crate::localized_format!("Every controller starts on \"{}\"; picking another profile still sticks until the app restarts", "Todos os controles iniciam em \"{}\"; outro perfil escolhido permanece até reiniciar o aplicativo", "Todos los mandos inician con \"{}\"; si eliges otro perfil, se mantiene hasta reiniciar la aplicación", "每个手柄启动时都使用“{}”；选择其他配置文件后会一直保留，直到应用重启"; "Todos os comandos arrancam com \"{}\"; a escolha de outro perfil mantém-se até reiniciar a aplicação", s.default_profile);
                     changed |= toggle_row(
                         ui,
@@ -306,7 +308,7 @@ impl App {
                     }
                 });
 
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "linux"))]
                 self.battery_overlay_card(ui);
 
             }
@@ -470,17 +472,17 @@ impl App {
 
     /// Battery overlay: the low-battery warning. A mapping (Show battery
     /// overlay) shows it on a button, with its own corner and time.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn battery_overlay_card(&mut self, ui: &mut egui::Ui) {
         let engine = self.engine.clone();
         card(
             ui,
-            crate::i18n::tr("Battery overlay"),
-            crate::i18n::tr("Every controller's battery, on top of games and the desktop"),
+            crate::i18n::tr(if cfg!(windows) { "Battery overlay" } else { "Controller status" }),
+            crate::i18n::tr(if cfg!(windows) { "Every controller's battery, on top of games and the desktop" } else { "Show the battery and active profile on screen" }),
             |ui| {
                 let mut cfg = engine.settings.read().battery_overlay.clone();
                 let before = cfg.clone();
-                muted(ui, crate::i18n::tr("To show it with a button, map one to Show battery overlay on the Button mapping page, and pick its corner and time there."));
+                muted(ui, crate::i18n::tr(if cfg!(windows) { "To show it with a button, map one to Show battery overlay on the Button mapping page, and pick its corner and time there." } else { "In Button mapping, assign Show controller status to a button or combination." }));
                 toggle_row(
                     ui,
                     crate::i18n::tr("Show when a battery runs low"),

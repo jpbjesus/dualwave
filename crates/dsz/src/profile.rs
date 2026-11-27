@@ -975,6 +975,8 @@ pub enum HoldStyle {
 pub struct Mapping {
     pub enabled: bool,
     pub button: Button,
+    /// While this modifier is held, use this layer's mappings for the button.
+    pub layer: Option<Button>,
     /// Buttons that must be held together with `button` (a combo).
     pub with: Vec<Button>,
     /// Hide the button(s) from the virtual controller, so the game never
@@ -1008,6 +1010,7 @@ impl Default for Mapping {
         Mapping {
             enabled: true,
             button: Button::Cross,
+            layer: None,
             with: Vec::new(),
             mute: false,
             gesture: Gesture::Press,

@@ -40,11 +40,17 @@ impl PointerObservation {
 
 struct Observation {
     link: State, driver: State, playback: State, microphone: State, virtual_output: State,
+    active_virtual: Option<VirtualKind>,
+    #[cfg(target_os = "linux")]
+    duplicate_input_risk: bool,
     attempts: u32, input_hz: u32, retry_pending: bool, pointer: PointerObservation,
 }
 impl Observation {
     fn collect(dev: Option<&Device>) -> Self {
         let mut out = Self { link: State::Waiting, driver: State::NotChecked, playback: State::NotChecked,
+            active_virtual: None,
+            #[cfg(target_os = "linux")]
+            duplicate_input_risk: false,
             microphone: State::NotChecked, virtual_output: State::NotChecked, attempts: 0, input_hz: 0, retry_pending: false, pointer: PointerObservation::collect(dev) };
         let Some(d) = dev else { return out; };
         out.link = match &*d.link.lock() { Link::Live => State::Ready, Link::Opening => State::Waiting, _ => State::Unavailable };
@@ -64,6 +70,12 @@ impl Observation {
             out.microphone = State::Unavailable;
         }
         let st = d.virt.status.lock();
+        out.active_virtual = st.active.filter(|kind| *kind != VirtualKind::Off);
+        #[cfg(target_os = "linux")]
+        {
+            out.duplicate_input_risk = out.active_virtual.is_some()
+                && matches!(out.pointer.physical, State::Disabled | State::Unavailable);
+        }
         out.virtual_output = if st.error.is_some() { State::Unavailable }
             else if st.active.is_some() { State::Ready }
             else if st.want.is_some_and(|k| k != VirtualKind::Off) { State::Waiting }
@@ -74,10 +86,18 @@ impl Observation {
     /// Fixed vocabulary deliberately excludes identities, paths, profile names,
     /// daemon error strings and all captured audio/input samples.
     fn report(&self) -> String {
-        format!("DualWave {}\nPlatform: {}\nController: {}\nInput rate: {} Hz\nIsolated media: {}\nPlayback endpoint: {}\nMicrophone endpoint: {}\nVirtual controller: {}\nAudio connection attempts: {}\nAudio retry queued: {}\nDualWave touchpad mouse: {}\nDualWave gyro mouse: {}\nPhysical input isolation: {}\nExternal pointer source: Not checked\n",
+        let mut report = format!("DualWave {}\nPlatform: {}\nController: {}\nInput rate: {} Hz\nIsolated media: {}\nPlayback endpoint: {}\nMicrophone endpoint: {}\nVirtual controller: {}\nAudio connection attempts: {}\nAudio retry queued: {}\nDualWave touchpad mouse: {}\nDualWave gyro mouse: {}\nPhysical input isolation: {}\nExternal pointer source: Not checked\n",
             env!("CARGO_PKG_VERSION"), std::env::consts::OS, self.link.label(), self.input_hz,
             self.driver.label(), self.playback.label(), self.microphone.label(), self.virtual_output.label(), self.attempts, self.retry_pending,
-            self.pointer.touchpad.label(), self.pointer.gyro.label(), self.pointer.physical.label())
+            self.pointer.touchpad.label(), self.pointer.gyro.label(), self.pointer.physical.label());
+        if let Some(kind) = self.active_virtual {
+            report.push_str(&format!("Active virtual controller: {}\n", kind.label()));
+        }
+        #[cfg(target_os = "linux")]
+        if self.duplicate_input_risk {
+            report.push_str("Possible duplicate controller input: physical input is not isolated\n");
+        }
+        report
     }
 }
 
@@ -114,8 +134,14 @@ impl App {
         diagnostic_row(ui, "Headphone endpoint", "Ready means available; Active means an application is sending playback.", facts.playback);
         diagnostic_row(ui, "Microphone endpoint", "Endpoint availability does not grant capture permission or remove mute.", facts.microphone);
         diagnostic_row(ui, "Virtual controller", "The actual output state; choosing a target alone does not make it available.", facts.virtual_output);
+        if let Some(kind) = facts.active_virtual {
+            ui.label(tr(kind.label()));
+        }
         #[cfg(target_os = "linux")]
         {
+            if facts.duplicate_input_risk {
+                ui.label(RichText::new(tr("Steam or the game may receive input from both controllers.")).color(warn_color()));
+            }
             ui.add_space(12.0);
             widgets::card(ui, tr("Mouse input sources"), tr("Check which controller features can move the pointer."), |ui| {
                 diagnostic_row(ui, "DualWave touchpad mouse", "Current touchpad mode, including temporary button toggles. Active means touchpad motion can move the pointer.", facts.pointer.touchpad);
@@ -160,6 +186,23 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_duplicate_input_risk_only_for_live_virtual_output_without_isolation() {
+        let d = Device::for_test(ds_proto::Connection::Bluetooth, "");
+        d.virt.status.lock().want = Some(VirtualKind::Xbox360);
+        assert!(!Observation::collect(Some(&d)).duplicate_input_risk);
+        d.virt.status.lock().active = Some(VirtualKind::Xbox360);
+        let facts = Observation::collect(Some(&d));
+        assert!(facts.duplicate_input_risk);
+        assert!(facts.report().contains("Active virtual controller: Xbox 360"));
+        d.virt.status.lock().hidden = true;
+        assert!(!Observation::collect(Some(&d)).duplicate_input_risk);
+        d.virt.status.lock().hidden = false;
+        *d.link.lock() = Link::Quiet;
+        assert!(!Observation::collect(Some(&d)).duplicate_input_risk);
+    }
+
     #[test]
     fn pointer_diagnostics_use_live_state_and_do_not_guess_external_sources() {
         let offline = PointerObservation::collect(None);

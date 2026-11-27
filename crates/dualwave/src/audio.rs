@@ -299,10 +299,14 @@ fn deliver(bridge: &mut Option<Bridge>, pcm: &[i16], peak: &mut f32) {
 }
 
 fn wait_state(hid: &mut Hid) -> io::Result<ds_proto::InputState> {
+    wait_state_from(|buf| hid.read(buf))
+}
+
+fn wait_state_from(mut read: impl FnMut(&mut [u8]) -> io::Result<Option<usize>>) -> io::Result<ds_proto::InputState> {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut buf = [0; 1024];
     while Instant::now() < deadline {
-        if let Some(n) = hid.read(&mut buf)? {
+        if let Some(n) = read(&mut buf)? {
             if let Some(state) = hid::state(&buf[..n]) { return Ok(state); }
         }
         std::thread::sleep(Duration::from_millis(2));
@@ -310,9 +314,16 @@ fn wait_state(hid: &mut Hid) -> io::Result<ds_proto::InputState> {
     Err(io::Error::new(io::ErrorKind::TimedOut, "No valid full Bluetooth state report"))
 }
 
-pub fn probe(path: &Path) -> io::Result<()> {
+pub fn probe(path: &Path, seconds: Option<u64>) -> io::Result<()> {
     let mut hid = Hid::open(path, false)?;
-    let state = wait_state(&mut hid)?;
+    let mut media = MediaReader::for_controller(&hid)?;
+    let read = |hid: &mut Hid, media: &mut Option<MediaReader>, buf: &mut [u8]| {
+        match hid.read(buf)? {
+            Some(n) => Ok(Some(n)),
+            None => match media { Some(media) => media.read(buf), None => Ok(None) },
+        }
+    };
+    let state = wait_state_from(|buf| read(&mut hid, &mut media, buf))?;
     println!("DualSense · Bluetooth · valid input CRC\nBattery: {}%\nHeadphones: {}\nHeadset microphone: {}",
         state.battery_percent, state.headphones, state.mic_plugged);
     match hid.feature(0x20, 64) {
@@ -322,9 +333,27 @@ pub fn probe(path: &Path) -> io::Result<()> {
         }
         Err(e) => eprintln!("Firmware unavailable: {e}"),
     }
-    match MediaReader::for_controller(&hid)? {
+    match &media {
         Some(media) => println!("Input mode: isolated microphone transport ({})", media.path.display()),
         None => println!("Input mode: legacy (Steam must be closed; gameplay input is isolated during audio)"),
+    }
+    if let Some(seconds) = seconds {
+        install_signals();
+        let deadline = Instant::now() + Duration::from_secs(seconds);
+        let mut plugs = (state.headphones, state.mic_plugged);
+        let mut buf = [0; 1024];
+        while !stopped() && Instant::now() < deadline {
+            if let Some(n) = read(&mut hid, &mut media, &mut buf)? {
+                if let Some(state) = hid::state(&buf[..n]) {
+                    let current = (state.headphones, state.mic_plugged);
+                    if current != plugs {
+                        plugs = current;
+                        println!("Headphones: {} · Headset microphone: {}", plugs.0, plugs.1);
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
     Ok(())
 }

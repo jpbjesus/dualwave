@@ -149,7 +149,7 @@ pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
             c.request_repaint();
         }
     });
-    let start_hidden = start_hidden && tray_available();
+    let start_hidden = start_hidden && can_hide_to_tray();
     #[cfg(target_os = "linux")]
     crate::tray::set_start_hidden(start_hidden);
     let opts = eframe::NativeOptions {
@@ -588,7 +588,7 @@ impl eframe::App for App {
 
         if ctx.input(|i| i.viewport().close_requested())
             && self.engine.settings.read().close_to_tray
-            && tray_available()
+            && can_hide_to_tray()
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             crate::tray::hide_main_window();
@@ -599,7 +599,7 @@ impl eframe::App for App {
         // restores it.
         if ctx.input(|i| i.viewport().minimized) == Some(true)
             && self.engine.settings.read().minimize_to_tray
-            && tray_available()
+            && can_hide_to_tray()
         {
             #[cfg(windows)]
             let h = crate::tray::main_window();
@@ -863,11 +863,23 @@ impl App {
     }
 }
 
-fn tray_available() -> bool {
+fn supports_window_hiding() -> bool {
     #[cfg(windows)]
     { true }
     #[cfg(target_os = "linux")]
-    { crate::tray::available() }
+    {
+        // Winit prefers Wayland when either variable is set. Its Wayland
+        // backend ignores set_visible, so cancelling Close would trap the window.
+        !["WAYLAND_DISPLAY", "WAYLAND_SOCKET"].into_iter()
+            .any(|key| std::env::var(key).is_ok_and(|value| !value.is_empty()))
+    }
+}
+
+fn can_hide_to_tray() -> bool {
+    #[cfg(windows)]
+    { supports_window_hiding() }
+    #[cfg(target_os = "linux")]
+    { supports_window_hiding() && crate::tray::available() }
 }
 
 #[cfg(test)]
