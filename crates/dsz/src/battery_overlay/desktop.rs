@@ -1,29 +1,53 @@
 use ds_proto::input::BatteryStatus;
 use crate::{engine::Engine, i18n::tr};
 
+#[cfg(not(test))]
+#[path = "glass.rs"]
+mod glass;
+
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-pub(super) fn body(engine: &Engine) -> String {
-    let mut lines = Vec::new();
+struct Row {
+    name: String,
+    profile: String,
+    bluetooth: bool,
+    status: BatteryStatus,
+    charge: Option<u8>,
+}
+
+fn rows(engine: &Engine) -> Vec<Row> {
+    let mut rows = Vec::new();
     for device in engine.device_list() {
         let input = device.snapshot().input;
-        let charge = if input.full && input.battery_status != BatteryStatus::Error {
-            format!("{}%", input.battery_shown())
-        } else {
-            "—".into()
-        };
-        let status = match input.battery_status {
-            BatteryStatus::Charging if input.full => format!(" · {}", tr("Charging")),
-            BatteryStatus::Full if input.full => format!(" · {}", tr("Full")),
-            _ => String::new(),
-        };
-        let link = if device.is_bluetooth() { "Bluetooth" } else { "USB" };
+        let charge = (input.full && input.battery_status != BatteryStatus::Error).then(|| input.battery_shown());
         let name = device.display_name(engine);
         let profile = engine.profile_name_for(&device);
-        lines.push(escape(&format!("{name} · {charge} · {link}{status}\n{profile}")));
+        rows.push(Row { name, profile, bluetooth: device.is_bluetooth(), status: input.battery_status, charge });
     }
+    rows
+}
+
+impl Row {
+    fn level(&self) -> String {
+        self.charge.map_or_else(|| "—".into(), |value| format!("{value}%"))
+    }
+}
+
+#[cfg(test)]
+pub(super) fn body(engine: &Engine) -> String { body_rows(&rows(engine)) }
+
+fn body_rows(rows: &[Row]) -> String {
+    let lines: Vec<_> = rows.iter().map(|row| {
+        let link = if row.bluetooth { "Bluetooth" } else { "USB" };
+        let status = match (row.charge, row.status) {
+            (Some(_), BatteryStatus::Charging) => format!(" · {}", tr("Charging")),
+            (Some(_), BatteryStatus::Full) => format!(" · {}", tr("Full")),
+            _ => String::new(),
+        };
+        escape(&format!("{} · {} · {link}{status}\n{}", row.name, row.level(), row.profile))
+    }).collect();
     if lines.is_empty() { tr("No controller connected").into() } else { lines.join("\n\n") }
 }
 
@@ -39,13 +63,30 @@ pub(super) fn show(engine: &std::sync::Arc<Engine>, ms: u32) {
             let mut connection = None;
             let mut replaces = 0;
             let mut last = None::<std::time::Instant>;
-            while let Ok(request) = rx.recv() {
+            let mut next = rx.recv();
+            while let Ok(request) = next {
                 let (engine, ms) = rx.try_iter().last().unwrap_or(request);
-                let Some(engine) = engine.upgrade() else { continue; };
+                let Some(engine) = engine.upgrade() else { next = rx.recv(); continue; };
+                let rows = rows(&engine);
+                drop(engine);
+                match glass::show(&rows) {
+                    Ok(surface) => {
+                        // A fresh request replaces the surface immediately.
+                        next = match rx.recv_timeout(std::time::Duration::from_millis(u64::from(ms))) {
+                            Ok(request) => Ok(request),
+                            Err(_) => { drop(surface); rx.recv() },
+                        };
+                        continue;
+                    }
+                    Err(error) => log::debug!("controller status glass unavailable: {error}"),
+                }
                 let now = std::time::Instant::now();
-                if last.is_some_and(|time| now.duration_since(time) < std::time::Duration::from_millis(750)) { continue; }
+                if last.is_some_and(|time| now.duration_since(time) < std::time::Duration::from_millis(750)) {
+                    next = rx.recv();
+                    continue;
+                }
                 last = Some(now);
-                match show_status(&mut connection, replaces, &body(&engine), ms) {
+                match show_status(&mut connection, replaces, &body_rows(&rows), ms) {
                     Ok(id) => replaces = id,
                     Err(error) => {
                         log::debug!("controller status notification unavailable: {error}");
@@ -53,6 +94,7 @@ pub(super) fn show(engine: &std::sync::Arc<Engine>, ms: u32) {
                         replaces = 0;
                     }
                 }
+                next = rx.recv();
             }
         }) {
             Ok(_) => Some(tx),
