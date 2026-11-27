@@ -386,9 +386,9 @@ pub fn power_button(ui: &mut Ui, label: &str) -> Response {
     p.add(egui::Shape::line((0..=28).map(|i| {
         let angle = -std::f32::consts::FRAC_PI_2 + 0.55 + (std::f32::consts::TAU - 1.1) * i as f32 / 28.0;
         c + egui::vec2(angle.cos(), angle.sin()) * 6.5
-    }).collect(), Stroke::new(1.5, color)));
-    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(1.5, color));
-    if response.has_focus() { p.rect_stroke(rect, CornerRadius::same(R_CTRL), Stroke::new(1.5, accent_color()), StrokeKind::Outside); }
+    }).collect(), Stroke::new(1.5_f32, color)));
+    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(1.5_f32, color));
+    if response.has_focus() { p.rect_stroke(rect, CornerRadius::same(R_CTRL), Stroke::new(1.5_f32, accent_color()), StrokeKind::Outside); }
     response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
 }
 
@@ -418,15 +418,15 @@ pub fn microphone_control(ui: &mut Ui, enabled: &mut bool, muted: &mut bool, lev
     if main.hovered() { p.rect_filled(main_rect, CornerRadius::same(R_CTRL), with_alpha(color, 20)); }
     if power.hovered() { p.rect_filled(power_rect, CornerRadius::same(R_CTRL), with_alpha(color, 30)); }
     p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0 + active, with_alpha(color, if *enabled { 180 } else { 65 })));
-    p.line_segment([power_rect.left_top() + egui::vec2(0.0, 7.0), power_rect.left_bottom() - egui::vec2(0.0, 7.0)], Stroke::new(1.0, border_color()));
+    p.line_segment([power_rect.left_top() + egui::vec2(0.0, 7.0), power_rect.left_bottom() - egui::vec2(0.0, 7.0)], Stroke::new(1.0_f32, border_color()));
     let c = egui::pos2(rect.left() + 18.0, rect.center().y - 1.0);
-    p.rect_stroke(egui::Rect::from_center_size(c - egui::vec2(0.0, 3.0), egui::vec2(8.0, 13.0)), CornerRadius::same(4), Stroke::new(1.5, color), StrokeKind::Inside);
-    p.add(egui::Shape::line(vec![c + egui::vec2(-7.0, -1.0), c + egui::vec2(-7.0, 3.0), c + egui::vec2(-4.0, 6.0), c + egui::vec2(4.0, 6.0), c + egui::vec2(7.0, 3.0), c + egui::vec2(7.0, -1.0)], Stroke::new(1.5, color)));
-    p.line_segment([c + egui::vec2(0.0, 6.0), c + egui::vec2(0.0, 10.0)], Stroke::new(1.5, color));
+    p.rect_stroke(egui::Rect::from_center_size(c - egui::vec2(0.0, 3.0), egui::vec2(8.0, 13.0)), CornerRadius::same(4), Stroke::new(1.5_f32, color), StrokeKind::Inside);
+    p.add(egui::Shape::line(vec![c + egui::vec2(-7.0, -1.0), c + egui::vec2(-7.0, 3.0), c + egui::vec2(-4.0, 6.0), c + egui::vec2(4.0, 6.0), c + egui::vec2(7.0, 3.0), c + egui::vec2(7.0, -1.0)], Stroke::new(1.5_f32, color)));
+    p.line_segment([c + egui::vec2(0.0, 6.0), c + egui::vec2(0.0, 10.0)], Stroke::new(1.5_f32, color));
     if *muted {
         let slash = [c - egui::vec2(10.0, 10.0), c + egui::vec2(10.0, 10.0)];
-        p.line_segment(slash, Stroke::new(4.0, fill));
-        p.line_segment(slash, Stroke::new(1.5, color));
+        p.line_segment(slash, Stroke::new(4.0_f32, fill));
+        p.line_segment(slash, Stroke::new(1.5_f32, color));
     }
     let text_rect = egui::Rect::from_min_max(egui::pos2(rect.left() + 38.0, rect.top()), egui::pos2(main_rect.right() - 28.0, rect.bottom()));
     p.with_clip_rect(ui.clip_rect().intersect(text_rect)).text(text_rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(13.0), color);
@@ -440,11 +440,11 @@ pub fn microphone_control(ui: &mut Ui, enabled: &mut bool, muted: &mut bool, lev
         }
     }
     let c = power_rect.center();
-    p.circle_stroke(c, 6.5, Stroke::new(1.5, color));
-    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(4.0, fill));
-    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(1.5, color));
+    p.circle_stroke(c, 6.5, Stroke::new(1.5_f32, color));
+    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(4.0_f32, fill));
+    p.line_segment([c - egui::vec2(0.0, 9.0), c - egui::vec2(0.0, 2.0)], Stroke::new(1.5_f32, color));
     for response in [&main, &power] {
-        if response.has_focus() { p.rect_stroke(response.rect, CornerRadius::same(R_CTRL), Stroke::new(1.5, accent_color()), StrokeKind::Outside); }
+        if response.has_focus() { p.rect_stroke(response.rect, CornerRadius::same(R_CTRL), Stroke::new(1.5_f32, accent_color()), StrokeKind::Outside); }
     }
     (main.on_hover_text(action), power.on_hover_text(power_action))
 }

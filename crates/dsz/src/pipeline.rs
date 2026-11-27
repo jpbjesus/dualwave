@@ -831,7 +831,7 @@ fn sends_input(a: &Action) -> bool {
     )
 }
 
-fn action_down(engine: &Engine, device: &Device, a: &Action) {
+fn action_down(engine: &Arc<Engine>, device: &Device, a: &Action) {
     // Windows drops the input without an error, so say why nothing happens.
     #[cfg(windows)]
     if sends_input(a) && !crate::platform::is_elevated() && crate::platform::foreground_elevated() {
@@ -890,11 +890,24 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
                 on = !t.gyro_toggled_on;
                 t.gyro_toggled_on = on;
                 t.gyro = Some(on);
+                // The last gyro mapping pressed decides; this is only ever
+                // set by Enable / disable gyro.
+                t.gyro_enabled = None;
             });
             engine.toast(if on {
                 crate::i18n::tr("Gyro on")
             } else {
                 crate::i18n::tr("Gyro off")
+            });
+        }
+        Action::ToggleGyroEnabled => {
+            let mode = engine.profiles.get_or_first(&engine.profile_name_for(device)).gyro.mode;
+            let mut on = false;
+            device.toggles.update(|t| on = toggle_gyro_enabled(t, mode));
+            engine.toast(if on {
+                crate::i18n::tr("Gyro enabled")
+            } else {
+                crate::i18n::tr("Gyro disabled")
             });
         }
         Action::ToggleTouchpadMouse => {
@@ -918,6 +931,7 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
         // Started by the mapping, which knows the buttons to watch.
         Action::HoldProfile { .. } => {}
         Action::TurnOffController => turn_off_controller(engine, device),
+        Action::ShowBatteryOverlay { corner, ms } => crate::battery_overlay::show(engine, *corner, *ms),
         Action::Text { text } => {
             #[cfg(windows)]
             sim::type_text(text);
@@ -944,6 +958,43 @@ fn action_down(engine: &Engine, device: &Device, a: &Action) {
             }
         }
     }
+}
+
+/// Enable / disable gyro: flips between off and the profile's own mode and
+/// activation rule, starting from what the gyro does now, and takes over
+/// from Toggle gyro. Returns whether the gyro is now enabled.
+fn toggle_gyro_enabled(t: &mut crate::device::Toggles, profile_mode: GyroMode) -> bool {
+    let enabled = t
+        .gyro_enabled
+        .unwrap_or_else(|| t.gyro.unwrap_or(profile_mode != GyroMode::Off));
+    t.gyro_enabled = Some(!enabled);
+    t.gyro = None;
+    t.gyro_toggled_on = false;
+    !enabled
+}
+
+/// The gyro mode after the Toggle gyro and Enable / disable gyro mappings.
+fn gyro_mode(t: &crate::device::Toggles, profile_mode: GyroMode) -> GyroMode {
+    match t.gyro_enabled {
+        Some(false) => GyroMode::Off,
+        // A profile with the gyro off gets the mouse, like Toggle gyro.
+        Some(true) if profile_mode == GyroMode::Off => GyroMode::Mouse,
+        Some(true) => profile_mode,
+        None => t
+            .gyro
+            .map(|on| match (on, profile_mode) {
+                (false, _) => GyroMode::Off,
+                (true, GyroMode::Off) => GyroMode::Mouse,
+                (true, m) => m,
+            })
+            .unwrap_or(profile_mode),
+    }
+}
+
+/// Toggle gyro's "on" means always, whatever the activation rule; Enable /
+/// disable gyro leaves the rule in charge.
+fn gyro_forced_on(t: &crate::device::Toggles) -> bool {
+    t.gyro == Some(true) && t.gyro_enabled.is_none()
 }
 
 fn action_up(a: &Action) {
@@ -1055,6 +1106,8 @@ pub struct Pipeline {
     /// Mapping indexes, combos first, so a combo that completes wins.
     map_order: Vec<usize>,
     gyro_toggle: bool,
+    /// The profile Enable / disable gyro was used in, while it is set.
+    gyro_enabled_for: Option<String>,
     last_at: Option<Instant>,
     gyro_was_active: bool,
     /// Buttons last pressed on the helper Xbox pad.
@@ -1070,6 +1123,9 @@ pub struct Pipeline {
     /// Buttons a held profile hid from the game; each stays hidden until it
     /// is let go, also after the hold ends, like a muted combo.
     held_hide: u32,
+    /// Battery overlay settings, refetched when the settings change.
+    overlay: Option<(u64, crate::settings::BatteryOverlay)>,
+    low_battery: crate::battery_overlay::LowWatch,
 }
 
 impl Pipeline {
@@ -1084,6 +1140,7 @@ impl Pipeline {
             map_actions: Vec::new(),
             map_order: Vec::new(),
             gyro_toggle: false,
+            gyro_enabled_for: None,
             last_at: None,
             gyro_was_active: false,
             helper_sent: 0,
@@ -1091,6 +1148,8 @@ impl Pipeline {
             overlay_hide: 0,
             touch_zone: None,
             held_hide: 0,
+            overlay: None,
+            low_battery: Default::default(),
         }
     }
 
@@ -1185,6 +1244,7 @@ impl Pipeline {
             }
             for stick in &mut self.sticks { stick.release(); }
         }
+        let same_profile = matches!(&self.built_for, Some(b) if Arc::ptr_eq(b, &profile));
         let changed = match &self.built_for {
             Some(b) if Arc::ptr_eq(b, &profile) => false,
             // Another profile, or an edit: rebuild only if the mappings
@@ -1211,7 +1271,27 @@ impl Pipeline {
             .clamp(0.001, 0.03);
         self.last_at = Some(now);
 
-        let toggles = device.toggles.load();
+        let mut toggles = device.toggles.load();
+
+        // Enable / disable gyro lasts until the controller changes profile
+        // (a held profile doesn't count), so another game starts with its
+        // own gyro rule. Looked up only while that mapping is in use.
+        if toggles.gyro_enabled.is_some() {
+            if self.gyro_enabled_for.is_none() || !same_profile {
+                let name = engine.unheld_profile_name_for(device);
+                match &self.gyro_enabled_for {
+                    Some(was) if *was != name => {
+                        device.toggles.update(|t| t.gyro_enabled = None);
+                        toggles.gyro_enabled = None;
+                        self.gyro_enabled_for = None;
+                    }
+                    Some(_) => {}
+                    None => self.gyro_enabled_for = Some(name),
+                }
+            }
+        } else {
+            self.gyro_enabled_for = None;
+        }
 
         // Gyro
         if device.calibrate_request.swap(false, Ordering::AcqRel) {
@@ -1224,14 +1304,7 @@ impl Pipeline {
         if s.full && s.motion_valid {
             let gdt = self.gyro.dt(&s, now);
             dps = self.gyro.update_bias(&s, now);
-            let mode = toggles
-                .gyro
-                .map(|on| match (on, profile.gyro.mode) {
-                    (false, _) => GyroMode::Off,
-                    (true, GyroMode::Off) => GyroMode::Mouse,
-                    (true, m) => m,
-                })
-                .unwrap_or(profile.gyro.mode);
+            let mode = gyro_mode(&toggles, profile.gyro.mode);
             if mode != GyroMode::Off {
                 gyro_active = match profile.gyro.activation {
                     GyroActivation::Always => true,
@@ -1246,7 +1319,7 @@ impl Pipeline {
                     }
                 };
                 // An explicit toggle-on from a mapping means "always".
-                if toggles.gyro == Some(true) {
+                if gyro_forced_on(&toggles) {
                     gyro_active = true;
                 }
                 if self.gyro.manual_until.is_some() {
@@ -1383,6 +1456,8 @@ impl Pipeline {
         self.helper_sent = helper;
         self.to_gamebar = to_gamebar;
 
+        self.battery_overlay(engine, &s);
+
         engine.dsu.publish(device, &s, dps);
 
         // Publish for the UI and the haptics thread.
@@ -1400,12 +1475,28 @@ impl Pipeline {
         live.touch_mouse_active = touch_active;
     }
 
+    /// Show the battery overlay when this controller runs low (a mapping
+    /// shows it on a button). Only reads the report; with the warning off
+    /// it costs one atomic load.
+    fn battery_overlay(&mut self, engine: &Arc<Engine>, s: &InputState) {
+        let rev = engine.settings_revision();
+        if self.overlay.as_ref().is_none_or(|(r, _)| *r != rev) {
+            self.overlay = Some((rev, engine.settings.read().battery_overlay.clone()));
+        }
+        let Some((_, cfg)) = &self.overlay else {
+            return;
+        };
+        if cfg.on_low && self.low_battery.update(s, cfg.low_percent) {
+            crate::battery_overlay::show(engine, Default::default(), cfg.show_ms);
+        }
+    }
+
     /// Run the mappings. Returns the buttons to hide from the virtual
     /// controller, the virtual buttons mappings are pressing, and the Xbox
     /// buttons they press with no virtual Xbox pad of this controller's own.
     fn mappings(
         &mut self,
-        engine: &Engine,
+        engine: &Arc<Engine>,
         device: &Device,
         profile: &Profile,
         s: &InputState,
@@ -2607,6 +2698,153 @@ mod hold_profile_tests {
 }
 
 #[cfg(test)]
+mod battery_overlay_tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use ds_proto::input::{BatteryStatus, Button};
+    use ds_proto::{Connection, InputState, OutputState};
+
+    use super::turn_off_tests::gate;
+    use super::Pipeline;
+    use crate::battery_overlay::{take_shown, DEFAULT_MS};
+    use crate::composer::Composer;
+    use crate::device::Device;
+    use crate::engine::Engine;
+    use crate::profile::{
+        Action, GyroMode, Mapping, Profile, StickMode, TouchMode, VirtualKind,
+    };
+    use crate::settings::OverlayCorner;
+
+    struct Rig {
+        dir: PathBuf,
+        engine: Arc<Engine>,
+        device: Arc<Device>,
+        pipe: Pipeline,
+    }
+
+    impl Drop for Rig {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn rig(mappings: Vec<Mapping>, on_low: bool) -> Rig {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("dsz-overlay-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine = Engine::new(dir.clone());
+        let device = Device::for_test(Connection::Bluetooth, "");
+        let mut profile = Profile::named("Overlay");
+        profile.mappings = mappings;
+        profile.gyro.mode = GyroMode::Off;
+        profile.touchpad.mode = TouchMode::Passthrough;
+        profile.sticks.left.mode = StickMode::Passthrough;
+        profile.sticks.right.mode = StickMode::Passthrough;
+        profile.virtual_out.kind = VirtualKind::Off;
+        profile.haptics.buttons.enabled = false;
+        let name = engine.profiles.add(profile);
+        engine.set_device_profile(&device, &name);
+        engine.settings.write().battery_overlay.on_low = on_low;
+        engine.settings_changed();
+        Rig {
+            dir,
+            engine,
+            device,
+            pipe: Pipeline::new(),
+        }
+    }
+
+    /// A full report from a controller on battery at `percent`.
+    fn report(percent: u8, buttons: &[Button]) -> InputState {
+        let mut s = InputState {
+            lx: 128,
+            ly: 128,
+            rx: 128,
+            ry: 128,
+            full: true,
+            battery_percent: percent,
+            battery_status: BatteryStatus::Discharging,
+            ..InputState::default()
+        };
+        for b in buttons {
+            s.buttons.set(*b, true);
+        }
+        s
+    }
+
+    /// The control report the writer would send next, from what the
+    /// pipeline left on the device.
+    fn sent(rig: &Rig, at: Instant) -> Vec<u8> {
+        let input = rig.device.live.lock().input;
+        let overrides = rig.device.overrides.lock().clone();
+        let toggles = rig.device.toggles.load();
+        let fb = rig.device.feedback.lock();
+        let o: OutputState = Composer::new().compose(
+            &Profile::default(),
+            &input,
+            &overrides,
+            &fb,
+            &toggles,
+            false,
+            0.0,
+            at,
+        );
+        let mut b = [0u8; 128];
+        o.build(Connection::Bluetooth, &mut b).to_vec()
+    }
+
+    #[test]
+    fn showing_the_overlay_leaves_the_reports_byte_for_byte() {
+        // The overlay only reads reports. With a mapping that shows it and
+        // the low-battery warning on, the controller gets exactly what it
+        // gets without them, while both fire.
+        let _g = gate();
+        let _ = take_shown();
+        let show = Mapping {
+            button: Button::Ps,
+            action: Action::ShowBatteryOverlay {
+                corner: OverlayCorner::BottomLeft,
+                ms: 2000,
+            },
+            ..Mapping::default()
+        };
+        let mut on = rig(vec![show], true);
+        let mut off = rig(vec![], false);
+        let steps = [
+            report(60, &[]),
+            report(60, &[Button::Ps]),
+            report(60, &[]),
+            report(10, &[]),
+            report(10, &[Button::Ps]),
+            report(10, &[]),
+        ];
+        let t0 = Instant::now();
+        let mut prev = report(60, &[]);
+        for (i, s) in steps.iter().enumerate() {
+            let at = t0 + Duration::from_millis(10 * i as u64);
+            on.pipe.process(&on.engine, &on.device, s, &prev, None, at);
+            off.pipe.process(&off.engine, &off.device, s, &prev, None, at);
+            assert_eq!(sent(&on, at), sent(&off, at), "step {i}");
+            prev = *s;
+        }
+        // Both ways of showing it fired, and only on the rig that has them.
+        let shown = take_shown();
+        assert_eq!(
+            shown,
+            vec![
+                (OverlayCorner::BottomLeft, 2000),
+                (OverlayCorner::TopRight, DEFAULT_MS),
+                (OverlayCorner::BottomLeft, 2000),
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use ds_proto::input::TouchPoint;
@@ -3141,5 +3379,312 @@ mod gyro_calibration_tests {
         feed(&mut g, &mut t, &mut noise, 6.0, [0.0; 3], &mut angle);
         assert_eq!(g.rest_fixes, 0);
         assert!([0, 1, 2].iter().all(|&k| (g.bias[k] - after[k]).abs() < 0.05 * COUNTS_PER_DPS));
+    }
+}
+
+#[cfg(test)]
+mod gyro_enabled_tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use ds_proto::input::Button;
+    use ds_proto::{Connection, InputState};
+
+    use super::{gyro_forced_on, gyro_mode, toggle_gyro_enabled, Pipeline};
+    use crate::device::{Device, Toggles};
+    use crate::engine::Engine;
+    use crate::profile::{
+        Action, GyroActivation, GyroMode, Mapping, Profile, StickMode, TouchMode, VirtualKind,
+    };
+
+    const MODES: [GyroMode; 3] = [GyroMode::Off, GyroMode::Mouse, GyroMode::RightStick];
+
+    fn every_toggles() -> Vec<Toggles> {
+        let mut all = Vec::new();
+        for gyro in [None, Some(false), Some(true)] {
+            for gyro_toggled_on in [false, true] {
+                for gyro_enabled in [None, Some(false), Some(true)] {
+                    all.push(Toggles {
+                        gyro,
+                        gyro_toggled_on,
+                        gyro_enabled,
+                        ..Toggles::default()
+                    });
+                }
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn without_enable_disable_the_gyro_mode_is_what_it_was() {
+        // The mode and the "always" rule from before Enable / disable gyro.
+        let old_mode = |t: &Toggles, m: GyroMode| {
+            t.gyro
+                .map(|on| match (on, m) {
+                    (false, _) => GyroMode::Off,
+                    (true, GyroMode::Off) => GyroMode::Mouse,
+                    (true, m) => m,
+                })
+                .unwrap_or(m)
+        };
+        for t in every_toggles().into_iter().filter(|t| t.gyro_enabled.is_none()) {
+            for m in MODES {
+                assert_eq!(gyro_mode(&t, m), old_mode(&t, m), "{t:?} {m:?}");
+            }
+            assert_eq!(gyro_forced_on(&t), t.gyro == Some(true), "{t:?}");
+        }
+    }
+
+    #[test]
+    fn disabled_is_off_and_enabled_is_the_profile_rule() {
+        for t in every_toggles() {
+            for m in MODES {
+                match t.gyro_enabled {
+                    Some(false) => assert_eq!(gyro_mode(&t, m), GyroMode::Off),
+                    Some(true) if m == GyroMode::Off => assert_eq!(gyro_mode(&t, m), GyroMode::Mouse),
+                    Some(true) => assert_eq!(gyro_mode(&t, m), m),
+                    None => {}
+                }
+            }
+            if t.gyro_enabled.is_some() {
+                assert!(!gyro_forced_on(&t), "{t:?}: never always on");
+            }
+        }
+    }
+
+    #[test]
+    fn enable_disable_flips_from_what_the_gyro_does_now() {
+        for m in MODES {
+            let mut t = Toggles::default();
+            let first = toggle_gyro_enabled(&mut t, m);
+            // A profile with the gyro on starts by disabling it; one with it
+            // off starts by enabling it.
+            assert_eq!(first, m == GyroMode::Off, "{m:?}");
+            assert_eq!(t.gyro_enabled, Some(first));
+            assert_eq!(toggle_gyro_enabled(&mut t, m), !first);
+            assert_eq!(toggle_gyro_enabled(&mut t, m), first);
+        }
+        // After Toggle gyro, it flips from that and takes over.
+        for (on, m) in [(true, GyroMode::Off), (false, GyroMode::Mouse)] {
+            let mut t = Toggles {
+                gyro: Some(on),
+                gyro_toggled_on: on,
+                ..Toggles::default()
+            };
+            assert_eq!(toggle_gyro_enabled(&mut t, m), !on);
+            assert_eq!((t.gyro, t.gyro_toggled_on), (None, false));
+        }
+    }
+
+    struct Rig {
+        dir: PathBuf,
+        engine: Arc<Engine>,
+        device: Arc<Device>,
+        pipe: Pipeline,
+        prev: InputState,
+        at: Instant,
+    }
+
+    impl Drop for Rig {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn profile(name: &str, mode: GyroMode, activation: GyroActivation, mappings: Vec<Mapping>) -> Profile {
+        let mut p = Profile::named(name);
+        p.mappings = mappings;
+        p.gyro.mode = mode;
+        p.gyro.activation = activation;
+        p.touchpad.mode = TouchMode::Passthrough;
+        p.sticks.left.mode = StickMode::Passthrough;
+        p.sticks.right.mode = StickMode::Passthrough;
+        p.virtual_out.kind = VirtualKind::Off;
+        p.haptics.buttons.enabled = false;
+        p
+    }
+
+    fn map(button: Button, action: Action) -> Mapping {
+        Mapping {
+            button,
+            action,
+            ..Mapping::default()
+        }
+    }
+
+    /// Create enables / disables the gyro, Triangle is Toggle gyro.
+    fn rig(mode: GyroMode, activation: GyroActivation) -> Rig {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("dsz-gyro-enabled-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine = Engine::new(dir.clone());
+        let device = Device::for_test(Connection::Bluetooth, "");
+        let maps = vec![
+            map(Button::Create, Action::ToggleGyroEnabled),
+            map(Button::Triangle, Action::ToggleGyroMouse),
+        ];
+        let name = engine.profiles.add(profile("Gyro", mode, activation, maps));
+        engine.set_device_profile(&device, &name);
+        Rig {
+            dir,
+            engine,
+            device,
+            pipe: Pipeline::new(),
+            prev: report(&[]),
+            at: Instant::now(),
+        }
+    }
+
+    /// A full report from a controller lying still (no gyro motion, so the
+    /// gyro mouse never moves the real cursor).
+    fn report(buttons: &[Button]) -> InputState {
+        let mut s = InputState {
+            lx: 128,
+            ly: 128,
+            rx: 128,
+            ry: 128,
+            full: true,
+            motion_valid: true,
+            ..InputState::default()
+        };
+        for b in buttons {
+            s.buttons.set(*b, true);
+        }
+        s
+    }
+
+    impl Rig {
+        /// Send one report with `buttons` held; returns whether the gyro is active.
+        fn step(&mut self, buttons: &[Button]) -> bool {
+            let s = report(buttons);
+            self.at += Duration::from_millis(20);
+            let prev = self.prev;
+            self.pipe.process(&self.engine, &self.device, &s, &prev, None, self.at);
+            self.prev = s;
+            self.device.live.lock().gyro_active
+        }
+
+        /// Press and let go of `button` while `held` stays down.
+        fn press(&mut self, button: Button, held: &[Button]) {
+            let mut down = held.to_vec();
+            down.push(button);
+            self.step(&down);
+            self.step(held);
+        }
+
+        fn toasts(&self) -> Vec<String> {
+            self.engine.toasts.lock().iter().map(|t| t.text.clone()).collect()
+        }
+    }
+
+    #[test]
+    fn hold_activation_is_kept_while_enabled_and_ignored_while_disabled() {
+        let mut r = rig(GyroMode::Mouse, GyroActivation::WhileHeld(Button::L2));
+        assert!(!r.step(&[]));
+        assert!(r.step(&[Button::L2]));
+        r.press(Button::Create, &[]);
+        assert_eq!(r.device.toggles.load().gyro_enabled, Some(false));
+        assert!(!r.step(&[Button::L2]), "disabled even while L2 is held");
+        assert!(!r.step(&[]));
+        r.press(Button::Create, &[]);
+        assert!(!r.step(&[]), "enabled means the rule, not always on");
+        assert!(r.step(&[Button::L2]));
+        assert!(!r.step(&[]));
+        assert_eq!(r.toasts(), ["Gyro disabled", "Gyro enabled"]);
+    }
+
+    #[test]
+    fn toggle_activation_keeps_its_state_under_a_disable() {
+        let mut r = rig(GyroMode::Mouse, GyroActivation::Toggle(Button::R3));
+        assert!(!r.step(&[]));
+        r.press(Button::R3, &[]);
+        assert!(r.step(&[]));
+        r.press(Button::Create, &[]);
+        assert!(!r.step(&[]));
+        // R3 presses while disabled change nothing the player can see.
+        r.press(Button::R3, &[]);
+        r.press(Button::R3, &[]);
+        assert!(!r.step(&[]));
+        r.press(Button::Create, &[]);
+        assert!(r.step(&[]), "back to the rule's own on state");
+        r.press(Button::R3, &[]);
+        assert!(!r.step(&[]));
+    }
+
+    #[test]
+    fn always_activation_turns_off_and_back_on() {
+        let mut r = rig(GyroMode::Mouse, GyroActivation::Always);
+        assert!(r.step(&[]));
+        r.press(Button::Create, &[]);
+        assert!(!r.step(&[]));
+        r.press(Button::Create, &[]);
+        assert!(r.step(&[]));
+    }
+
+    #[test]
+    fn enabling_a_profile_with_the_gyro_off_gives_the_mouse_under_its_rule() {
+        let mut r = rig(GyroMode::Off, GyroActivation::WhileHeld(Button::L2));
+        assert!(!r.step(&[Button::L2]));
+        r.press(Button::Create, &[]);
+        assert_eq!(r.toasts(), ["Gyro enabled"]);
+        assert!(!r.step(&[]));
+        assert!(r.step(&[Button::L2]));
+        assert!(!r.device.live.lock().gyro_stick);
+    }
+
+    #[test]
+    fn toggle_gyro_still_means_always_on_and_off() {
+        // Pins the existing mapping: on is always on, whatever the rule.
+        let mut r = rig(GyroMode::Mouse, GyroActivation::WhileHeld(Button::L2));
+        r.press(Button::Triangle, &[]);
+        assert!(r.step(&[]), "on without L2");
+        r.press(Button::Triangle, &[]);
+        assert!(!r.step(&[Button::L2]), "off even with L2");
+        assert_eq!(r.toasts(), ["Gyro on", "Gyro off"]);
+        assert_eq!(r.device.toggles.load().gyro_enabled, None);
+    }
+
+    #[test]
+    fn the_last_gyro_mapping_pressed_decides() {
+        let mut r = rig(GyroMode::Mouse, GyroActivation::WhileHeld(Button::L2));
+        r.press(Button::Triangle, &[]);
+        assert!(r.step(&[]));
+        r.press(Button::Create, &[]);
+        assert!(!r.step(&[]), "Toggle gyro's on counted as enabled");
+        r.press(Button::Create, &[]);
+        assert!(!r.step(&[]), "enabled is the rule, not Toggle gyro's always");
+        assert!(r.step(&[Button::L2]));
+        r.press(Button::Create, &[]);
+        r.press(Button::Triangle, &[]);
+        assert!(r.step(&[]), "Toggle gyro takes over from a disable");
+        assert_eq!(r.device.toggles.load().gyro_enabled, None);
+    }
+
+    #[test]
+    fn a_profile_change_brings_back_the_rule_but_an_edit_does_not() {
+        let mut r = rig(GyroMode::Mouse, GyroActivation::WhileHeld(Button::L2));
+        let other = r.engine.profiles.add(profile(
+            "Other",
+            GyroMode::Mouse,
+            GyroActivation::WhileHeld(Button::L2),
+            Vec::new(),
+        ));
+        r.press(Button::Create, &[]);
+        assert!(!r.step(&[Button::L2]));
+        // Editing the profile isn't a change of profile.
+        let mut p = (*r.engine.profiles.get_or_first("Gyro")).clone();
+        p.gyro.sensitivity += 1.0;
+        r.engine.profiles.update(p);
+        r.engine.bump_config();
+        assert!(!r.step(&[Button::L2]));
+        assert_eq!(r.device.toggles.load().gyro_enabled, Some(false));
+        r.engine.set_device_profile(&r.device, &other);
+        assert!(r.step(&[Button::L2]));
+        assert_eq!(r.device.toggles.load().gyro_enabled, None);
+        assert!(r.engine.toasts.lock().iter().all(|t| !t.warn));
     }
 }

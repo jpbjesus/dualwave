@@ -4,7 +4,7 @@ use super::{App, Page, theme::*, workspace::{choice, choices, Part}};
 
 fn mark(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(40.0, 30.0), egui::Sense::hover());
-    for (offset, alpha, width) in [(0.0, 255, 2.8), (-5.0, 90, 1.8)] {
+    for (offset, alpha, width) in [(0.0, 255, 2.8), (-5.0, 90, 1.8_f32)] {
         let points = (0..100).map(|i| {
             let x = i as f32 / 99.0;
             r.min + egui::vec2(x * 40.0, 14.0 + offset - (x * std::f32::consts::TAU * 2.0).cos() * 9.0)

@@ -93,7 +93,7 @@ fn preset_curve(ui: &egui::Ui, rect: egui::Rect, index: usize, color: egui::Colo
         _ => vec![(4.,23.), (60.,23.)],
     };
     let points = coordinates.into_iter().map(|(x, y)| rect.min + egui::vec2(x / 64.0 * rect.width(), y / 28.0 * rect.height())).collect();
-    ui.painter().add(egui::Shape::line(points, Stroke::new(1.6, color)));
+    ui.painter().add(egui::Shape::line(points, Stroke::new(1.6_f32, color)));
 }
 
 fn individual_mapping(p: &Profile, button: Button, gesture: Gesture) -> Option<usize> {
@@ -142,7 +142,7 @@ pub(super) fn choices<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, opt
                 ui.painter().line_segment([response.rect.left_bottom(), response.rect.right_bottom()], Stroke::new(2.0 * t, accent_color()));
             }
             if response.has_focus() {
-                ui.painter().rect_stroke(response.rect.expand(2.0), egui::CornerRadius::same(3), Stroke::new(1.5, accent_color()), egui::StrokeKind::Outside);
+                ui.painter().rect_stroke(response.rect.expand(2.0), egui::CornerRadius::same(3), Stroke::new(1.5_f32, accent_color()), egui::StrokeKind::Outside);
             }
             if response.clicked() { *value = *candidate; clicked = true; }
         }
@@ -198,7 +198,7 @@ impl App {
             ui.set_clip_rect(stage);
             self.controller_stage(ui, p, dev);
         });
-        ui.painter().line_segment([inspector.left_top() - egui::vec2(gap * 0.5, 0.0), inspector.left_bottom() - egui::vec2(gap * 0.5, 0.0)], Stroke::new(1.0, border_color()));
+        ui.painter().line_segment([inspector.left_top() - egui::vec2(gap * 0.5, 0.0), inspector.left_bottom() - egui::vec2(gap * 0.5, 0.0)], Stroke::new(1.0_f32, border_color()));
         ui.scope_builder(egui::UiBuilder::new().max_rect(inspector), |ui| {
             egui::ScrollArea::vertical().id_salt("controller-inspector").max_height(inspector.height()).auto_shrink([false, false]).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -217,7 +217,7 @@ impl App {
                 });
             });
         });
-        ui.painter().line_segment([footer.left_top() - egui::vec2(0.0, 7.0), footer.right_top() - egui::vec2(0.0, 7.0)], Stroke::new(1.0, border_color()));
+        ui.painter().line_segment([footer.left_top() - egui::vec2(0.0, 7.0), footer.right_top() - egui::vec2(0.0, 7.0)], Stroke::new(1.0_f32, border_color()));
         ui.scope_builder(egui::UiBuilder::new().max_rect(footer), |ui| self.quick_controls(ui, p, dev));
         ui.advance_cursor_after_rect(area);
     }
@@ -418,7 +418,7 @@ impl App {
                         let curve = egui::Rect::from_center_size(response.rect.center() - egui::vec2(0.0, 10.0), egui::vec2(64.0, 28.0));
                         preset_curve(ui, curve, i, color);
                         ui.painter().text(response.rect.center_bottom() - egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, tr(label), egui::FontId::proportional(12.0), color);
-                        if selected || response.has_focus() { ui.painter().line_segment([response.rect.left_bottom(), response.rect.right_bottom()], Stroke::new(2.0, accent_color())); }
+                        if selected || response.has_focus() { ui.painter().line_segment([response.rect.left_bottom(), response.rect.right_bottom()], Stroke::new(2.0_f32, accent_color())); }
                         if response.clicked() { apply_trigger(p, self.trigger_side, preset_effect(i)); }
                         if i % 3 == 2 { ui.end_row(); }
                     }

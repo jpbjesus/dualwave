@@ -3,7 +3,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 
 pub(super) fn navigation(ui: &egui::Ui, rect: Rect, label: &str, color: Color32) {
     let p = ui.painter();
-    let stroke = Stroke::new(1.5, color);
+    let stroke = Stroke::new(1.5_f32, color);
     let at = |x, y| rect.min + egui::vec2(x, y) * (rect.width() / 18.0);
     let line = |points: &[(f32, f32)]| {
         p.add(egui::Shape::line(points.iter().map(|&(x, y)| at(x, y)).collect::<Vec<Pos2>>(), stroke));
@@ -50,7 +50,7 @@ pub(super) fn control(p: &egui::Painter, rect: Rect, label: &str, color: Color32
             return;
         }
         "Mute" => {
-            let stroke = Stroke::new(1.5, color);
+            let stroke = Stroke::new(1.5_f32, color);
             p.rect_stroke(Rect::from_min_max(at(0.38, 0.10), at(0.62, 0.58)), rect.width() * 0.12, stroke, egui::StrokeKind::Middle);
             line(&[(0.24, 0.43), (0.24, 0.57), (0.30, 0.69), (0.42, 0.75), (0.58, 0.75), (0.70, 0.69), (0.76, 0.57), (0.76, 0.43)], 0.06);
             line(&[(0.50, 0.75), (0.50, 0.91)], 0.06);
@@ -59,7 +59,7 @@ pub(super) fn control(p: &egui::Painter, rect: Rect, label: &str, color: Color32
             return;
         }
         "Lighting" => {
-            let stroke = Stroke::new(1.5, color);
+            let stroke = Stroke::new(1.5_f32, color);
             p.circle_stroke(at(0.5, 0.5), rect.width() * 0.18, stroke);
             for i in 0..8 {
                 let angle = std::f32::consts::TAU * i as f32 / 8.0;
@@ -69,7 +69,7 @@ pub(super) fn control(p: &egui::Painter, rect: Rect, label: &str, color: Color32
             return;
         }
         "Buttons" => {
-            let stroke = Stroke::new(1.3, color);
+            let stroke = Stroke::new(1.3_f32, color);
             line(&[(0.50, 0.08), (0.37, 0.30), (0.63, 0.30), (0.50, 0.08)], 0.05);
             p.circle_stroke(at(0.80, 0.50), rect.width() * 0.11, stroke);
             p.rect_stroke(Rect::from_min_max(at(0.09, 0.39), at(0.31, 0.61)), 0.0, stroke, egui::StrokeKind::Middle);

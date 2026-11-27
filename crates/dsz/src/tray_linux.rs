@@ -84,7 +84,6 @@ pub fn show_main_window() {
 
 pub fn hide_main_window() { visibility().lock().hide(); }
 
-pub use crate::icon_art::icon_rgba;
 
 fn argb_icon(size: usize, battery: Option<crate::tray_battery::Battery>) -> Vec<u8> {
     crate::tray_battery::icon_rgba(size, battery).chunks_exact(4).flat_map(|pixel| [pixel[3], pixel[0], pixel[1], pixel[2]]).collect()

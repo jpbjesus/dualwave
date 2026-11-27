@@ -477,7 +477,7 @@ impl TriggerEffect {
             // travel), stiffness 0-255 as the strength.
             12 if (9..=12).contains(&g(0, 0)) => TriggerEffect::Vibration {
                 position: (g(3, 0) as u16 * 10 / 256) as u8,
-                amplitude: ((g(2, 0) as u16 * 8 + 254) / 255).max(1) as u8,
+                amplitude: (g(2, 0) as u16 * 8).div_ceil(255).max(1) as u8,
                 frequency: g(1, 0),
             },
             12 => {

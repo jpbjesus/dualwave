@@ -27,7 +27,7 @@ pub(super) fn shortcuts(ui: &mut egui::Ui) -> Option<MacroInput> {
 }
 
 fn keycap(ui: &mut egui::Ui, label: &str) {
-    egui::Frame::new().fill(field_color()).stroke(Stroke::new(1.0, border_color()))
+    egui::Frame::new().fill(field_color()).stroke(Stroke::new(1.0_f32, border_color()))
         .corner_radius(CornerRadius::same(5)).inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| { ui.label(RichText::new(label).strong().size(17.0)); });
 }

@@ -139,7 +139,7 @@ pub struct App {
 
 pub fn run(engine: Arc<Engine>, start_hidden: bool) -> Result<(), String> {
     #[cfg(not(windows))]
-    let icon = egui::IconData { rgba: crate::tray::icon_rgba(64), width: 64, height: 64 };
+    let icon = egui::IconData { rgba: crate::icon_art::icon_rgba(64), width: 64, height: 64 };
     let (size, min) = crate::platform::initial_window_size([1240.0, 800.0], [760.0, 520.0]);
     let viewport = egui::ViewportBuilder::default();
     #[cfg(not(windows))]

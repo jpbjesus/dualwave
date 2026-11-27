@@ -27,6 +27,7 @@ enum AKind {
     Next,
     Prev,
     Gyro,
+    GyroEnabled,
     Touch,
     Run,
     Text,
@@ -35,6 +36,7 @@ enum AKind {
     Gamepad,
     Xbox,
     TurnOff,
+    Battery,
 }
 
 fn akind(a: &Action) -> AKind {
@@ -52,6 +54,7 @@ fn akind(a: &Action) -> AKind {
         Action::NextProfile => AKind::Next,
         Action::PreviousProfile => AKind::Prev,
         Action::ToggleGyroMouse => AKind::Gyro,
+        Action::ToggleGyroEnabled => AKind::GyroEnabled,
         Action::ToggleTouchpadMouse => AKind::Touch,
         Action::Run { .. } => AKind::Run,
         Action::Text { .. } => AKind::Text,
@@ -60,10 +63,11 @@ fn akind(a: &Action) -> AKind {
         Action::Gamepad { .. } => AKind::Gamepad,
         Action::Xbox { .. } => AKind::Xbox,
         Action::TurnOffController => AKind::TurnOff,
+        Action::ShowBatteryOverlay { .. } => AKind::Battery,
     }
 }
 
-const KINDS: [(AKind, &str); 21] = [
+const KINDS: &[(AKind, &str)] = &[
     (AKind::None, "Nothing"),
     (AKind::Gamepad, "PlayStation button"),
     (AKind::Xbox, "Xbox button"),
@@ -80,7 +84,9 @@ const KINDS: [(AKind, &str); 21] = [
     (AKind::Next, "Next profile"),
     (AKind::Prev, "Previous profile"),
     (AKind::Gyro, "Toggle gyro"),
+    (AKind::GyroEnabled, "Enable / disable gyro"),
     (AKind::Touch, "Toggle touchpad mouse"),
+    (AKind::Battery, "Show battery overlay"),
     (AKind::Run, "Open a program / file"),
     (AKind::Profile, "Switch to profile"),
     (AKind::HoldProfile, "Use profile while held"),
@@ -123,7 +129,8 @@ pub(crate) fn action_editor(
         egui::ComboBox::from_id_salt(("map-kind", i)).width(170.0)
             .selected_text(crate::i18n::tr(if primary { "More actions" } else if original_label && k == AKind::None { "Original" } else { KINDS.iter().find(|x| x.0 == k).map_or("More actions", |x| x.1) }))
             .show_ui(ui, |ui| {
-                for (kind, label) in KINDS {
+                for &(kind, label) in KINDS {
+                    if kind == AKind::Battery && !cfg!(windows) { continue; }
                     if kind == AKind::Text && !cfg!(windows) { continue; }
                     if matches!(kind, AKind::Player | AKind::GameVolumeUp | AKind::GameVolumeDown) && !cfg!(target_os = "linux") { continue; }
                     if matches!(kind, AKind::Key | AKind::Mouse | AKind::Gamepad | AKind::Macro) { continue; }
@@ -147,6 +154,10 @@ pub(crate) fn action_editor(
             AKind::Next => Action::NextProfile,
             AKind::Prev => Action::PreviousProfile,
             AKind::Gyro => Action::ToggleGyroMouse,
+            AKind::GyroEnabled => Action::ToggleGyroEnabled,
+            AKind::Battery => Action::ShowBatteryOverlay {
+                corner: Default::default(), ms: crate::battery_overlay::DEFAULT_MS,
+            },
             AKind::Touch => Action::ToggleTouchpadMouse,
             AKind::Text => Action::Text { text: String::new() },
             AKind::Run => Action::Run { path: String::new() },
@@ -188,6 +199,28 @@ pub(crate) fn action_editor(
         }
         ui.horizontal_wrapped(|ui| {
             match &mut m.action {
+                Action::ToggleGyroEnabled => {
+                    ui.label(RichText::new(crate::i18n::tr("keeps the activation rule")).size(12.0).color(muted_color()))
+                        .on_hover_text(crate::i18n::tr("Off keeps the gyro off, even while its activation button is held. On brings back the profile's gyro and its activation rule. Toggle gyro instead turns the gyro on all the time."));
+                }
+                Action::ShowBatteryOverlay { corner, ms } => {
+                    if !cfg!(windows) {
+                        muted(ui, crate::i18n::tr("Battery overlay is available on Windows."));
+                    }
+                    fit(ui, 130.0);
+                    egui::ComboBox::from_id_salt(("map-overlay-corner", i))
+                        .width(130.0)
+                        .selected_text(crate::i18n::tr(corner.label()))
+                        .show_ui(ui, |ui| {
+                            for c in crate::settings::OverlayCorner::ALL {
+                                ui.selectable_value(corner, c, crate::i18n::tr(c.label()));
+                            }
+                        })
+                        .response
+                        .on_hover_text(crate::i18n::tr("Not over games in exclusive fullscreen; borderless and windowed work"));
+                    fit(ui, 220.0);
+                    ui.add(egui::Slider::new(ms, crate::battery_overlay::MIN_MS..=crate::battery_overlay::MAX_MS).step_by(100.0).suffix(" ms").text(crate::i18n::tr("show for")));
+                }
                 Action::Key { vk, ctrl, shift, alt, win } => {
                     ui.vertical(|ui| {
                         if visual::keyboard(ui, vk, ctrl, shift, alt, win, recording) { capture = Some(!recording); }
@@ -350,7 +383,7 @@ fn macro_editor(ui: &mut egui::Ui, steps: &mut Vec<MacroStep>, mode: &mut HoldSt
         if steps.is_empty() { muted(ui, crate::i18n::tr("No steps yet. Add a key, mouse click or controller button.")); }
         for (index, step) in steps.iter_mut().take(128).enumerate() {
             ui.push_id(index, |ui| {
-                egui::Frame::new().fill(field_color()).stroke(Stroke::new(1.0, border_color()))
+                egui::Frame::new().fill(field_color()).stroke(Stroke::new(1.0_f32, border_color()))
                     .corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
                     ui.set_min_width((ui.available_width() - 1.0).max(0.0));
                     ui.horizontal_wrapped(|ui| {

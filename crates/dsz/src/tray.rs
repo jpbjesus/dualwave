@@ -64,7 +64,6 @@ pub fn hide_main_window() {
     }
 }
 
-pub use crate::icon_art::icon_rgba;
 
 /// The tray icon at the size Windows wants: the multi-size icon embedded
 /// in the exe (resource 1, see `build.rs`), else drawn here.

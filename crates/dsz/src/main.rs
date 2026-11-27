@@ -8,6 +8,7 @@ mod agent;
 mod applog;
 mod audio_led;
 mod backup;
+mod battery_overlay;
 mod composer;
 mod device;
 mod dsdetect;

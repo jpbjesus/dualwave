@@ -51,6 +51,7 @@ fn validate_mapping(m: &Mapping) -> Result<(), String> {
     match &m.action {
         Action::Player { player, .. } if !crate::profile::valid_player_target(player) => return Err("Select a valid MPRIS player destination".into()),
         Action::Text { .. } if !cfg!(windows) => return Err("Typing text is only available on Windows".into()),
+        Action::ShowBatteryOverlay { .. } if !cfg!(windows) => return Err("Battery overlay is available on Windows".into()),
         Action::Text { text } if text.len() > 16384 => return Err("Text must be at most 16384 bytes".into()),
         Action::Run { .. } => return Err("Executable actions cannot be created through agent access".into()),
         Action::Key { vk, .. } if !key_ok(*vk) => return Err("Key code must be between 1 and 254".into()),

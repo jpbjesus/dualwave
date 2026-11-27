@@ -360,7 +360,7 @@ fn looks() -> &'static HashMap<String, Look> {
 pub(super) fn trigger_icon(p: &egui::Painter, rect: Rect, label: &str, color: Color32) {
     if !matches!(label, "L2" | "R2") { return; }
     let r = Rect::from_center_size(rect.center(), vec2(rect.width(), rect.height() * 0.78)).shrink(1.0);
-    p.rect_stroke(r, 4.0, Stroke::new(1.4, color), StrokeKind::Inside);
+    p.rect_stroke(r, 4.0, Stroke::new(1.4_f32, color), StrokeKind::Inside);
     p.text(r.center(), egui::Align2::CENTER_CENTER, label, heading(11.0), color);
 }
 
@@ -378,7 +378,7 @@ pub(super) fn playstation_icon(p: &egui::Painter, rect: Rect, color: Color32) {
     let s = rect.width().min(rect.height()) / 24.0;
     let sp = Space { origin: rect.center(), ox: 12.0, oy: 12.0, s, center: rect.center(), roll: 0.0, squash: vec2(1.0, 1.0) };
     for part in parts {
-        p.add(Shape::closed_line(part.pts.iter().map(|&(x, y)| sp.p(x, y)).collect(), Stroke::new(0.8, color)));
+        p.add(Shape::closed_line(part.pts.iter().map(|&(x, y)| sp.p(x, y)).collect(), Stroke::new(0.8_f32, color)));
     }
 }
 
@@ -681,7 +681,7 @@ fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset:
             let hit = ui.interact(bounds.expand2(vec2(3.0, 7.0)), resp.id.with(button), egui::Sense::click());
             hit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr(button.short_name())));
             if selected == Some(button) || hit.hovered() || hit.has_focus() {
-                p.add(Shape::closed_line(poly.pts.iter().map(|&(x, y)| sp.p(x, y)).collect(), Stroke::new(2.0, accent_color())));
+                p.add(Shape::closed_line(poly.pts.iter().map(|&(x, y)| sp.p(x, y)).collect(), Stroke::new(2.0_f32, accent_color())));
             }
             if hit.on_hover_text(crate::i18n::tr(if button == Button::Touchpad { "Lighting" } else { button.short_name() })).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() { clicked = Some(button); }
         }
@@ -695,7 +695,7 @@ fn draw_preview(ui: &mut Ui, size: egui::Vec2, v: &View, pose: [f32; 3], offset:
         let hit = ui.interact(Rect::from_center_size(center, vec2(radius * 2.0, radius * 2.0)), resp.id.with(button), egui::Sense::click());
         hit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr(button.short_name())));
         if selected == Some(*button) || hit.hovered() || hit.has_focus() {
-            p.circle_stroke(center, radius + 2.0, Stroke::new(1.5, accent_color()));
+            p.circle_stroke(center, radius + 2.0, Stroke::new(1.5_f32, accent_color()));
         }
         if hit.clicked() { clicked = Some(*button); }
     }
