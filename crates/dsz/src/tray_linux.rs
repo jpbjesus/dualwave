@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn icon_uses_status_notifier_network_argb_byte_order() {
-        let rgba = icon_rgba(32);
+        let rgba = crate::icon_art::icon_rgba(32);
         let argb = argb_icon(32, None);
         assert_eq!(argb.len(), 32 * 32 * 4);
         for (rgba, argb) in rgba.chunks_exact(4).zip(argb.chunks_exact(4)) {
