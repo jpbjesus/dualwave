@@ -31,6 +31,40 @@ def managed(path):
     except (OSError, ValueError, KeyError):
         return False
 
+def appimage_header(data):
+    return data[:4] == b'\x7fELF' and data[8:11] == b'AI\x02'
+
+def previous_appimage(home, prefix, root):
+    if prefix != home / '.local' or os.path.lexists(root):
+        return None
+    launcher = prefix / 'bin/dualwave'
+    image = home / 'AppImages/dualwave.appimage'
+    try:
+        if (not launcher.is_symlink() or image.is_symlink()
+                or launcher.resolve(strict=True) != image or not image.is_file()):
+            return None
+        with image.open('rb') as existing:
+            return image if appimage_header(existing.read(11)) else None
+    except (OSError, RuntimeError):
+        return None
+
+def update_appimage(image, tag, data):
+    if not appimage_header(data):
+        raise ValueError('The release asset is not a Type 2 AppImage')
+    if image.stat().st_size == len(data) and os.access(image, os.X_OK) and image.read_bytes() == data:
+        print('Already installed', tag, 'at', image)
+        return
+    # The stage and backup share a filesystem with the running AppImage.
+    with tempfile.TemporaryDirectory(prefix='.dualwave-stage-', dir=image.parent) as temporary:
+        staged = Path(temporary) / image.name
+        staged.write_bytes(data)
+        staged.chmod(0o755)
+        backup = image.with_name(f'{image.name}.before-{tag}-{os.urandom(4).hex()}.bak')
+        os.link(image, backup)
+        os.replace(staged, image)
+    print('Updated', tag, 'at', image)
+    print('Previous AppImage saved at', backup)
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Install DualWave in a user-owned prefix; never installs drivers.')
     parser.add_argument('--version')
@@ -55,32 +89,43 @@ def main(argv=None):
     links = {prefix / 'bin/dualwave': root / 'current/bin/dualwave',
              prefix / 'bin/dualwave-cli': root / 'current/bin/dualwave-cli',
              prefix / 'share/applications/dualwave-user.desktop': root / 'current/dualwave.desktop'}
-    for path, target in links.items():
-        if os.path.lexists(path) and (not path.is_symlink() or os.readlink(path) != str(target)):
-            raise ValueError('Refusing to replace unrelated file: ' + str(path))
-    if os.path.lexists(root) and not managed(root):
-        raise ValueError('Refusing unmanaged installation: ' + str(root))
-    if args.uninstall:
-        if args.dry_run:
-            print('Would remove managed installation at', root)
+    previous = previous_appimage(home, prefix, root)
+    if previous is not None:
+        if args.uninstall:
+            print('No managed installation at this prefix. Existing AppImage:', previous)
             return
-        if managed(root):
-            for path in links:
-                if path.is_symlink():
-                    path.unlink()
-            shutil.rmtree(root)
-        print('Removed managed DualWave installation; settings preserved')
-        return
+        if args.format != 'appimage':
+            raise ValueError(f'Existing AppImage at {previous}. Use --format appimage to update it or --prefix for a separate native installation.')
+    else:
+        for path, target in links.items():
+            if os.path.lexists(path) and (not path.is_symlink() or os.readlink(path) != str(target)):
+                raise ValueError(f'Refusing to replace unrelated file: {path}. Use --prefix to choose a separate installation directory.')
+        if os.path.lexists(root) and not managed(root):
+            raise ValueError('Refusing unmanaged installation: ' + str(root))
+        if args.uninstall:
+            if args.dry_run:
+                print('Would remove managed installation at', root)
+                return
+            if managed(root):
+                for path in links:
+                    if path.is_symlink():
+                        path.unlink()
+                shutil.rmtree(root)
+            print('Removed managed DualWave installation; settings preserved')
+            return
     asset = 'DualWave-x86_64.AppImage' if args.format == 'appimage' else 'DualWave-linux-x86_64.tar.gz'
     url = 'https://github.com/jpbjesus/dualwave/releases/download/' + args.version + '/' + asset
     if args.dry_run:
-        print('Would verify and install', url, 'in', root)
+        print('Would verify and install', url, 'at', previous or root)
         return
     data = fetch(url)
     checksums = fetch(url + '.sha256').decode('ascii').splitlines()
     expected = [line.split()[0] for line in checksums if len(line.split()) == 2 and line.split()[1].lstrip('*') == asset]
     if len(expected) != 1 or not re.fullmatch('[0-9a-fA-F]{64}', expected[0]) or hashlib.sha256(data).hexdigest() != expected[0].lower():
         raise ValueError('SHA-256 verification failed; existing installation preserved')
+    if previous is not None:
+        update_appimage(previous, args.version, data)
+        return
     root.parent.mkdir(parents=True, exist_ok=True)
     if not root.exists():
         root.mkdir()

@@ -72,6 +72,39 @@ class UserInstallTests(unittest.TestCase):
         self.assertEqual(os.readlink(root / 'current'), previous)
         self.assertEqual((self.prefix / 'bin/dualwave').read_bytes(), b'first')
 
+    def test_upgrades_previous_appimage_location_with_backup(self):
+        home = Path(self.temp.name)
+        prefix = home / '.local'
+        images = home / 'AppImages'
+        images.mkdir()
+        image = images / 'dualwave.appimage'
+        old = b'\x7fELF\x02\x01\x01\x00AI\x02old'
+        new = b'\x7fELF\x02\x01\x01\x00AI\x02new'
+        image.write_bytes(old)
+        image.chmod(0o755)
+        launcher = prefix / 'bin/dualwave'
+        launcher.parent.mkdir(parents=True)
+        launcher.symlink_to(image)
+        desktop = prefix / 'share/applications/dualwave.desktop'
+        desktop.parent.mkdir(parents=True)
+        desktop.write_text('Exec=' + str(image))
+        args = ['--version', 'v0.2.1']
+        with patch.object(self.module.Path, 'home', return_value=home):
+            with patch.object(self.module, 'fetch', side_effect=AssertionError('download')):
+                self.module.main(args + ['--dry-run'])
+            self.assertEqual(image.read_bytes(), old)
+            with self.fixture(new, mismatch=True), self.assertRaisesRegex(ValueError, 'SHA-256'):
+                self.module.main(args)
+            self.assertEqual(image.read_bytes(), old)
+            with self.fixture(new):
+                self.module.main(args)
+                self.module.main(args)
+        self.assertEqual(image.read_bytes(), new)
+        self.assertTrue(os.access(image, os.X_OK))
+        self.assertEqual([p.read_bytes() for p in images.glob('dualwave.appimage.before-*.bak')], [old])
+        self.assertEqual(launcher.readlink(), image)
+        self.assertEqual(desktop.read_text(), 'Exec=' + str(image))
+
     def test_native_install_and_uninstall_preserve_unrelated(self):
         with self.fixture(native_archive()):
             self.module.main(self.args + ['--format', 'native'])

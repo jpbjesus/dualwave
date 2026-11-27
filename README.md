@@ -366,7 +366,9 @@ chmod +x DualWave-x86_64.AppImage
 The source installer requires Python 3.12 or newer, downloads through HTTPS,
 checks the release's SHA-256 manifest and activates the installation atomically.
 It never installs drivers or changes system permissions. Existing settings are
-preserved; unrelated launchers and unmanaged directories are not overwritten.
+preserved; unrelated launchers and unmanaged directories are not overwritten. If the existing
+launcher points to `~/AppImages/dualwave.appimage`, the installer updates that
+AppImage in place and saves a backup beside it.
 
 ```sh
 curl -fL --output install-dualwave.sh https://raw.githubusercontent.com/jpbjesus/dualwave/linux-port/packaging/install.sh
