@@ -181,9 +181,15 @@ impl App {
                 }
             });
         });
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr("Editing profile")).size(typography::CAPTION).color(muted_color()));
-            ui.label(RichText::new(&p.name).size(typography::CAPTION).color(text_color()));
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(RichText::new(concat!("v", env!("CARGO_PKG_VERSION"))).monospace()
+                    .size(typography::CAPTION).color(muted_color()));
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.label(RichText::new(tr("Editing profile")).size(typography::CAPTION).color(muted_color()));
+                    ui.add(egui::Label::new(RichText::new(&p.name).size(typography::CAPTION).color(text_color())).truncate());
+                });
+            });
         });
         ui.add_space(spacing::CONTROL);
         let area = ui.available_rect_before_wrap();
